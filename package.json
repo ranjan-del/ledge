@@ -1,0 +1,20 @@
+{
+  "name": "ledge-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ledge: a floating desktop assistant for Claude Code. Current tasks, backlog and pending git work, from plain Markdown files.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "desktop:dev": "npm run tauri dev --workspace apps/desktop",
+    "desktop:build": "npm run tauri build --workspace apps/desktop"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}
