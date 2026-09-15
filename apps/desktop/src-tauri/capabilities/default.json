@@ -33,6 +33,24 @@
         },
         {
           "path": "$HOME/.ledge/.scan-cache.json"
+        },
+        {
+          "path": "$HOME"
+        },
+        {
+          "path": "$HOME/*"
+        },
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "$HOME/.git"
+        },
+        {
+          "path": "$HOME/*/.git"
+        },
+        {
+          "path": "$HOME/**/.git"
         }
       ]
     },
@@ -86,7 +104,22 @@
           "path": "$HOME/.ledge/.scan-cache.json"
         },
         {
+          "path": "$HOME"
+        },
+        {
+          "path": "$HOME/*"
+        },
+        {
           "path": "$HOME/**"
+        },
+        {
+          "path": "$HOME/.git"
+        },
+        {
+          "path": "$HOME/*/.git"
+        },
+        {
+          "path": "$HOME/**/.git"
         }
       ]
     },
@@ -101,10 +134,19 @@
           "path": "$HOME/.ledge"
         },
         {
+          "path": "$HOME/.ledge/*"
+        },
+        {
           "path": "$HOME/.ledge/**"
         },
         {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        },
+        {
           "path": "$HOME"
+        },
+        {
+          "path": "$HOME/*"
         },
         {
           "path": "$HOME/**"
@@ -115,10 +157,25 @@
       "identifier": "fs:allow-stat",
       "allow": [
         {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/*"
+        },
+        {
           "path": "$HOME/.ledge/**"
         },
         {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        },
+        {
           "path": "$HOME/**/.git/index"
+        },
+        {
+          "path": "$HOME/*/.git/index"
+        },
+        {
+          "path": "$HOME/.git/index"
         }
       ]
     },

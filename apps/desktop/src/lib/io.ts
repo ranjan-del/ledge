@@ -2,6 +2,7 @@
  * Thin typed wrappers over the Tauri fs and shell plugins. Everything the store touches on
  * disk or in a subprocess goes through here so tests can mock two modules and nothing else.
  */
+import { invoke } from '@tauri-apps/api/core';
 import {
   exists,
   mkdir,
@@ -31,12 +32,29 @@ export function writeText(path: string, contents: string): Promise<void> {
   return writeTextFile(path, contents);
 }
 
+/**
+ * Reports the first few filesystem refusals and then goes quiet. Directory walking probes
+ * thousands of paths and has to keep going when one is refused, but swallowing every refusal
+ * silently turns a permission mistake into an empty screen with no explanation.
+ */
+let denials = 0;
+function noteDenied(op: string, path: string, e: unknown): void {
+  if (denials >= 3) return;
+  denials += 1;
+  const detail = e instanceof Error ? e.message : String(e);
+  void invoke('log_message', {
+    level: 'warn',
+    message: `${op} refused for ${path}: ${detail}`,
+  }).catch(() => {});
+}
+
 /** Lists a directory's immediate children. Returns an empty list when unreadable. */
 export async function listDir(path: string): Promise<DirEntryLite[]> {
   try {
     const entries = await readDir(path);
     return entries.map((e) => ({ name: e.name, isDirectory: e.isDirectory, isFile: e.isFile }));
-  } catch {
+  } catch (e) {
+    noteDenied('read folder', path, e);
     return [];
   }
 }
@@ -45,7 +63,8 @@ export async function listDir(path: string): Promise<DirEntryLite[]> {
 export async function pathExists(path: string): Promise<boolean> {
   try {
     return await exists(path);
-  } catch {
+  } catch (e) {
+    noteDenied('exists check', path, e);
     return false;
   }
 }
