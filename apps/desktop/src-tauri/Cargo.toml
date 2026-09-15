@@ -1,0 +1,30 @@
+[package]
+name = "ledge-desktop"
+version = "0.1.0"
+description = "Ledge desktop: a floating button and a glass panel for Claude Code tasks."
+authors = ["Ranjan G"]
+license = "MIT"
+repository = "https://github.com/ranjan-del/ledge"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix avoids a name clash between the lib and bin targets on Windows.
+name = "ledge_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `macos-private-api` is required for transparent windows on macOS. The Tauri CLI turns it
+# on automatically when `app.macOSPrivateApi` is true, but `cargo check` in CI does not, so
+# it is declared here explicitly.
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-os = "2"
+window-vibrancy = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

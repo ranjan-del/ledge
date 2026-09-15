@@ -1,0 +1,97 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Ledge windows: read, write and watch the store under $HOME/.ledge, list folders under $HOME to find repositories, run git status, and launch a terminal.",
+  "windows": ["button", "panel"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
+    "core:window:allow-current-monitor",
+    "core:window:allow-scale-factor",
+    "core:window:allow-is-visible",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-position",
+    "os:default",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$HOME/.ledge" },
+        { "path": "$HOME/.ledge/**" }
+      ]
+    },
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-rename",
+    "fs:allow-watch",
+    "fs:allow-unwatch",
+    {
+      "identifier": "fs:allow-read-dir",
+      "allow": [
+        { "path": "$HOME/.ledge" },
+        { "path": "$HOME/.ledge/**" },
+        { "path": "$HOME" },
+        { "path": "$HOME/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-stat",
+      "allow": [
+        { "path": "$HOME/.ledge/**" },
+        { "path": "$HOME/**/.git/index" }
+      ]
+    },
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "git",
+          "cmd": "git",
+          "args": [
+            "-C",
+            { "validator": "[^\\r\\n]+" },
+            "status",
+            "--porcelain=v2",
+            "--branch"
+          ]
+        },
+        {
+          "name": "osascript",
+          "cmd": "osascript",
+          "args": [
+            "-e",
+            { "validator": "[\\s\\S]+" },
+            "-e",
+            { "validator": "[\\s\\S]+" }
+          ]
+        },
+        {
+          "name": "wt",
+          "cmd": "wt",
+          "args": [
+            "-d",
+            { "validator": "[^\\r\\n]+" },
+            "cmd",
+            "/k",
+            { "validator": "[\\s\\S]+" }
+          ]
+        },
+        {
+          "name": "x-terminal-emulator",
+          "cmd": "x-terminal-emulator",
+          "args": [
+            "-e",
+            "sh",
+            "-c",
+            { "validator": "[\\s\\S]+" }
+          ]
+        }
+      ]
+    }
+  ]
+}

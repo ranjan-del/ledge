@@ -1,0 +1,159 @@
+/*
+  Ledge design tokens.
+  Light palette on :root, dark under prefers-color-scheme and an explicit data-theme,
+  per-OS overrides on html[data-os]. Every colour used by a component comes from here.
+*/
+:root {
+  color-scheme: light dark;
+
+  --font: -apple-system, "Segoe UI", system-ui, Ubuntu, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-xs: 10px;
+  --fs-sm: 11px;
+  --fs-base: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --lh: 1.45;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* Radius is overridden per OS below (macos 14, windows 8, linux 10). */
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-pill: 999px;
+
+  /* Glass sheet. The Rust side applies native material; this tint sits on top. */
+  --glass: rgba(246, 246, 250, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.65);
+  --glass-blur: 22px;
+
+  --surface: rgba(255, 255, 255, 0.62);
+  --surface-hover: rgba(255, 255, 255, 0.85);
+  --surface-border: rgba(0, 0, 0, 0.06);
+  --control: rgba(120, 120, 128, 0.14);
+  --control-active: rgba(255, 255, 255, 0.95);
+
+  --text: #1c1c1e;
+  --text-muted: rgba(60, 60, 67, 0.62);
+  --text-faint: rgba(60, 60, 67, 0.38);
+
+  --accent: #2f6fe4;
+  --accent-text: #ffffff;
+  --focus: #2f6fe4;
+  --danger: #c93b3b;
+
+  --chip-amber-bg: rgba(255, 176, 0, 0.2);
+  --chip-amber-fg: #7a5200;
+  --chip-red-bg: rgba(220, 60, 60, 0.16);
+  --chip-red-fg: #8f1f1f;
+  --chip-teal-bg: rgba(0, 150, 150, 0.16);
+  --chip-teal-fg: #005c5c;
+  --chip-green-bg: rgba(40, 170, 90, 0.18);
+  --chip-green-fg: #16612f;
+  --chip-grey-bg: rgba(120, 120, 128, 0.14);
+  --chip-grey-fg: rgba(60, 60, 67, 0.75);
+
+  --progress-track: rgba(0, 0, 0, 0.08);
+  --progress-fill: var(--accent);
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.18);
+
+  --button-bg: rgba(28, 28, 30, 0.9);
+  --button-fg: #ffffff;
+  --badge-bg: #ff5f57;
+  --badge-fg: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --glass: rgba(30, 30, 34, 0.7);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --surface: rgba(255, 255, 255, 0.07);
+    --surface-hover: rgba(255, 255, 255, 0.12);
+    --surface-border: rgba(255, 255, 255, 0.06);
+    --control: rgba(120, 120, 128, 0.24);
+    --control-active: rgba(99, 99, 102, 0.9);
+    --text: #f2f2f7;
+    --text-muted: rgba(235, 235, 245, 0.6);
+    --text-faint: rgba(235, 235, 245, 0.35);
+    --accent: #6f9cff;
+    --accent-text: #0b1a3a;
+    --focus: #8fb2ff;
+    --danger: #ff6b6b;
+    --chip-amber-bg: rgba(255, 176, 0, 0.22);
+    --chip-amber-fg: #ffd17a;
+    --chip-red-bg: rgba(255, 90, 90, 0.2);
+    --chip-red-fg: #ffa3a3;
+    --chip-teal-bg: rgba(0, 190, 190, 0.2);
+    --chip-teal-fg: #8fe8e8;
+    --chip-green-bg: rgba(60, 200, 110, 0.2);
+    --chip-green-fg: #9fe6b6;
+    --chip-grey-bg: rgba(120, 120, 128, 0.24);
+    --chip-grey-fg: rgba(235, 235, 245, 0.7);
+    --progress-track: rgba(255, 255, 255, 0.1);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --button-bg: rgba(242, 242, 247, 0.92);
+    --button-fg: #1c1c1e;
+  }
+}
+
+:root[data-theme="dark"] {
+  --glass: rgba(30, 30, 34, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-hover: rgba(255, 255, 255, 0.12);
+  --surface-border: rgba(255, 255, 255, 0.06);
+  --control: rgba(120, 120, 128, 0.24);
+  --control-active: rgba(99, 99, 102, 0.9);
+  --text: #f2f2f7;
+  --text-muted: rgba(235, 235, 245, 0.6);
+  --text-faint: rgba(235, 235, 245, 0.35);
+  --accent: #6f9cff;
+  --accent-text: #0b1a3a;
+  --focus: #8fb2ff;
+  --danger: #ff6b6b;
+  --chip-amber-bg: rgba(255, 176, 0, 0.22);
+  --chip-amber-fg: #ffd17a;
+  --chip-red-bg: rgba(255, 90, 90, 0.2);
+  --chip-red-fg: #ffa3a3;
+  --chip-teal-bg: rgba(0, 190, 190, 0.2);
+  --chip-teal-fg: #8fe8e8;
+  --chip-green-bg: rgba(60, 200, 110, 0.2);
+  --chip-green-fg: #9fe6b6;
+  --chip-grey-bg: rgba(120, 120, 128, 0.24);
+  --chip-grey-fg: rgba(235, 235, 245, 0.7);
+  --progress-track: rgba(255, 255, 255, 0.1);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --button-bg: rgba(242, 242, 247, 0.92);
+  --button-fg: #1c1c1e;
+}
+
+/* Per-OS material and radius. Native vibrancy on macOS and Mica on Windows do most of
+   the work, so the tint gets lighter there. Linux has no compositor guarantee, so the
+   tint is denser and still readable when blur is unavailable. */
+html[data-os="macos"] {
+  --radius: 14px;
+  --glass: rgba(246, 246, 250, 0.45);
+}
+html[data-os="windows"] {
+  --radius: 8px;
+  --radius-sm: 4px;
+  --glass: rgba(246, 246, 250, 0.55);
+}
+html[data-os="linux"] {
+  --radius: 10px;
+  --glass: rgba(246, 246, 250, 0.86);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-os="macos"]:not([data-theme="light"]) { --glass: rgba(30, 30, 34, 0.45); }
+  html[data-os="windows"]:not([data-theme="light"]) { --glass: rgba(30, 30, 34, 0.55); }
+  html[data-os="linux"]:not([data-theme="light"]) { --glass: rgba(30, 30, 34, 0.88); }
+}
+html[data-os="macos"][data-theme="dark"] { --glass: rgba(30, 30, 34, 0.45); }
+html[data-os="windows"][data-theme="dark"] { --glass: rgba(30, 30, 34, 0.55); }
+html[data-os="linux"][data-theme="dark"] { --glass: rgba(30, 30, 34, 0.88); }

@@ -1,0 +1,405 @@
+/**
+ * The desk: one reactive module holding tasks, pending git work, config and UI state.
+ * Files are the source of truth. This store reads them through the fs plugin, parses with
+ * @ledge/core/pure (handing it `desk.home`, since a WebView has no home folder of its own), and
+ * re-parses only the file the watcher reports as changed. Writes are
+ * optimistic: the local copy updates first, the watcher confirms it a moment later.
+ */
+import {
+  TaskParseError,
+  defaultConfig,
+  isPending,
+  parseTask,
+  serializeTask,
+  type Config,
+  type RepoStatus,
+  type Task,
+} from '@ledge/core/pure';
+import { homeDir } from '@tauri-apps/api/path';
+import { ensureDir, listDir, moveFile, pathExists, readText, watchPaths, writeText } from './io.ts';
+import { basename, isTaskFile, join, ledgeHomeFor } from './paths.ts';
+import { discoverRepos, scanRepoList } from './scan.ts';
+import { nowIso } from './time.ts';
+
+export const WATCH_DEBOUNCE_MS = 150;
+export type Tab = 'current' | 'backlog' | 'pending';
+
+export interface BrokenTask {
+  file: string;
+  error: string;
+  line?: number;
+}
+
+export interface ScanCache {
+  scannedAt: string;
+  repos: RepoStatus[];
+}
+
+export interface Desk {
+  home: string;
+  ledgeHome: string;
+  tasksDir: string;
+  archiveDir: string;
+  configPath: string;
+  cachePath: string;
+  config: Config;
+  tasks: Task[];
+  broken: BrokenTask[];
+  pending: RepoStatus[];
+  archivedCount: number;
+  selectedFile: string | null;
+  tab: Tab;
+  scanning: boolean;
+  lastScan: string | null;
+  panelVisible: boolean;
+  ready: boolean;
+  error: string | null;
+}
+
+export const desk: Desk = $state({
+  home: '',
+  ledgeHome: '',
+  tasksDir: '',
+  archiveDir: '',
+  configPath: '',
+  cachePath: '',
+  config: defaultConfig(),
+  tasks: [],
+  broken: [],
+  pending: [],
+  archivedCount: 0,
+  selectedFile: null,
+  tab: 'current',
+  scanning: false,
+  lastScan: null,
+  panelVisible: false,
+  ready: false,
+  error: null,
+});
+
+/* ------------------------------------------------------------------ selectors */
+
+function byOrderThenUpdated(a: Task, b: Task): number {
+  if (a.order !== b.order) return a.order - b.order;
+  return b.updated.localeCompare(a.updated);
+}
+
+/** Current tasks sorted by `order`, 1 at the top. */
+export function currentTasks(): Task[] {
+  return desk.tasks.filter((t) => t.status === 'current').sort(byOrderThenUpdated);
+}
+
+/** Backlog tasks, most recently updated first. */
+export function backlogTasks(): Task[] {
+  return desk.tasks
+    .filter((t) => t.status === 'backlog')
+    .sort((a, b) => b.updated.localeCompare(a.updated));
+}
+
+/** The task currently open in the detail view, if any. */
+export function selectedTask(): Task | undefined {
+  return desk.selectedFile ? desk.tasks.find((t) => t.file === desk.selectedFile) : undefined;
+}
+
+/** Git status for a task's repo from the last scan, if the repo was scanned. */
+export function statusForRepo(repo: string | undefined): RepoStatus | undefined {
+  return repo ? desk.pending.find((p) => p.repo === repo) : undefined;
+}
+
+/** Title of the task that references a repo, for the Pending tab. */
+export function taskTitleForRepo(repo: string): string | undefined {
+  return desk.tasks.find((t) => t.repo === repo)?.title;
+}
+
+/* ------------------------------------------------------------------ ui state */
+
+export function setTab(tab: Tab): void {
+  desk.tab = tab;
+  desk.selectedFile = null;
+}
+
+export function select(file: string | null): void {
+  desk.selectedFile = file;
+}
+
+export function setPanelVisible(visible: boolean): void {
+  desk.panelVisible = visible;
+}
+
+/** Applies `config.ui.theme` to the document: `system` removes the override. */
+export function applyTheme(theme: Config['ui']['theme']): void {
+  if (typeof document === 'undefined') return;
+  if (theme === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+}
+
+/* ------------------------------------------------------------------ config */
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Deep-merges a partial config file over defaults so missing keys never break the UI. */
+export function mergeConfig(partial: unknown, base: Config = defaultConfig()): Config {
+  if (!isObject(partial)) return base;
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(partial)) {
+    const current = out[k];
+    out[k] = isObject(v) && isObject(current) ? { ...current, ...v } : v;
+  }
+  return out as unknown as Config;
+}
+
+async function loadConfigFile(): Promise<void> {
+  let next = defaultConfig();
+  if (await pathExists(desk.configPath)) {
+    try {
+      next = mergeConfig(JSON.parse(await readText(desk.configPath)));
+    } catch (e) {
+      desk.error = `config.json: ${(e as Error).message}`;
+    }
+  }
+  const intervalChanged = next.scan.intervalMinutes !== desk.config.scan.intervalMinutes;
+  desk.config = next;
+  applyTheme(next.ui.theme);
+  if (intervalChanged && scanTimer !== null) startScanTimer();
+}
+
+/** Writes config.json (pretty JSON) and applies it immediately. */
+export async function saveConfigFile(config: Config): Promise<void> {
+  await writeText(desk.configPath, JSON.stringify(config, null, 2) + '\n');
+  desk.config = config;
+  applyTheme(config.ui.theme);
+  startScanTimer();
+}
+
+/* ------------------------------------------------------------------ tasks */
+
+function upsertTask(task: Task): void {
+  desk.broken = desk.broken.filter((b) => b.file !== task.file);
+  const i = desk.tasks.findIndex((t) => t.file === task.file);
+  if (i === -1) desk.tasks = [...desk.tasks, task];
+  else desk.tasks[i] = task;
+}
+
+function removeTask(file: string): void {
+  desk.tasks = desk.tasks.filter((t) => t.file !== file);
+  desk.broken = desk.broken.filter((b) => b.file !== file);
+  if (desk.selectedFile === file) desk.selectedFile = null;
+}
+
+function markBroken(file: string, e: unknown): void {
+  desk.tasks = desk.tasks.filter((t) => t.file !== file);
+  const entry: BrokenTask =
+    e instanceof TaskParseError
+      ? { file, error: e.message, line: e.line }
+      : { file, error: (e as Error).message ?? String(e) };
+  const i = desk.broken.findIndex((b) => b.file === file);
+  if (i === -1) desk.broken = [...desk.broken, entry];
+  else desk.broken[i] = entry;
+}
+
+/** Reads and parses one task file, replacing its previous copy in the desk. */
+export async function reloadTask(file: string): Promise<void> {
+  if (!(await pathExists(file))) {
+    removeTask(file);
+    return;
+  }
+  try {
+    upsertTask(parseTask(await readText(file), file, { home: desk.home }));
+  } catch (e) {
+    markBroken(file, e);
+  }
+}
+
+/** Reads every task in tasks/ and counts archive/. Used at boot and on directory events. */
+export async function reloadTasks(): Promise<void> {
+  const entries = await listDir(desk.tasksDir);
+  const files = entries.filter((e) => e.isFile && isTaskFile(e.name)).map((e) => join(desk.tasksDir, e.name));
+  const tasks: Task[] = [];
+  const broken: BrokenTask[] = [];
+  for (const file of files) {
+    try {
+      tasks.push(parseTask(await readText(file), file, { home: desk.home }));
+    } catch (e) {
+      broken.push(
+        e instanceof TaskParseError
+          ? { file, error: e.message, line: e.line }
+          : { file, error: (e as Error).message ?? String(e) },
+      );
+    }
+  }
+  desk.tasks = tasks;
+  desk.broken = broken;
+  const archived = await listDir(desk.archiveDir);
+  desk.archivedCount = archived.filter((e) => e.isFile && isTaskFile(e.name)).length;
+}
+
+/** Serializes and writes a task, bumping `updated`. The local copy updates immediately. */
+export async function saveTask(task: Task): Promise<Task> {
+  const next: Task = { ...task, updated: nowIso() };
+  await writeText(next.file, serializeTask(next, { home: desk.home }));
+  upsertTask(next);
+  return next;
+}
+
+/** Flips one checklist item and writes the file. */
+export async function toggleChecklist(task: Task, index: number, done: boolean): Promise<void> {
+  const checklist = task.checklist.map((item, i) => (i === index ? { ...item, done } : item));
+  await saveTask({ ...task, checklist });
+}
+
+/** Moves a task to Current at position 1 and shifts the other current tasks down. */
+export async function startTask(task: Task): Promise<void> {
+  const others = currentTasks().filter((t) => t.file !== task.file);
+  for (const [i, other] of others.entries()) {
+    if (other.order !== i + 2) await saveTask({ ...other, order: i + 2 });
+  }
+  const { parked: _parked, ...rest } = task;
+  await saveTask({ ...rest, status: 'current', order: 1 });
+}
+
+/** Parks a task in the backlog with a reason. */
+export async function parkTask(task: Task, reason: string): Promise<void> {
+  await saveTask({ ...task, status: 'backlog', parked: reason });
+}
+
+/** Marks a task done and moves its file to archive/. */
+export async function markDone(task: Task): Promise<void> {
+  const saved = await saveTask({ ...task, status: 'done' });
+  await ensureDir(desk.archiveDir);
+  await moveFile(saved.file, join(desk.archiveDir, basename(saved.file)));
+  removeTask(saved.file);
+  desk.archivedCount += 1;
+}
+
+/* ------------------------------------------------------------------ watching */
+
+let changeTimer: ReturnType<typeof setTimeout> | null = null;
+const changed = new Set<string>();
+let stopWatching: (() => void) | null = null;
+
+/**
+ * Coalesces watcher events for 150 ms, then re-parses only the files that changed.
+ * Editors often write a temp file and rename it; without this every save would parse twice.
+ */
+export function scheduleChange(paths: string[]): void {
+  for (const p of paths) changed.add(p);
+  if (changeTimer !== null) clearTimeout(changeTimer);
+  changeTimer = setTimeout(() => {
+    changeTimer = null;
+    const batch = [...changed];
+    changed.clear();
+    void applyChanges(batch);
+  }, WATCH_DEBOUNCE_MS);
+}
+
+/** Routes a batch of changed paths: config.json reloads config, task files reload one by one. */
+export async function applyChanges(paths: string[]): Promise<void> {
+  let reloadConfig = false;
+  let reloadAll = false;
+  const files = new Set<string>();
+  for (const p of paths) {
+    if (basename(p) === 'config.json') reloadConfig = true;
+    else if (p === desk.tasksDir) reloadAll = true;
+    else if (p.startsWith(desk.tasksDir + '/') && isTaskFile(p)) files.add(p);
+  }
+  if (reloadConfig) await loadConfigFile();
+  if (reloadAll) await reloadTasks();
+  else for (const file of files) await reloadTask(file);
+}
+
+async function startWatching(): Promise<void> {
+  if (stopWatching) stopWatching();
+  try {
+    stopWatching = await watchPaths(
+      [desk.tasksDir, desk.ledgeHome],
+      scheduleChange,
+      WATCH_DEBOUNCE_MS,
+    );
+  } catch (e) {
+    desk.error = `watch: ${(e as Error).message}`;
+  }
+}
+
+/* ------------------------------------------------------------------ git scan */
+
+let scanTimer: ReturnType<typeof setInterval> | null = null;
+
+async function loadScanCache(): Promise<void> {
+  if (!(await pathExists(desk.cachePath))) return;
+  try {
+    const cache = JSON.parse(await readText(desk.cachePath)) as ScanCache;
+    if (Array.isArray(cache.repos)) {
+      desk.pending = cache.repos.filter(isPending);
+      desk.lastScan = cache.scannedAt ?? null;
+    }
+  } catch {
+    /* a bad cache is simply ignored; the next scan rewrites it */
+  }
+}
+
+/** Runs the git scan now: discover repos, run git with 4 in flight, keep the pending ones. */
+export async function scanNow(): Promise<void> {
+  if (desk.scanning) return;
+  desk.scanning = true;
+  try {
+    const referenced = desk.tasks.map((t) => t.repo).filter((r): r is string => !!r);
+    const discovered = await discoverRepos(desk.config, desk.home);
+    const repos = [...new Set([...discovered, ...referenced])];
+    const results = await scanRepoList(repos, desk.config, { referenced });
+    desk.pending = results
+      .filter(isPending)
+      .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+    desk.lastScan = new Date().toISOString();
+    const cache: ScanCache = { scannedAt: desk.lastScan, repos: results };
+    await writeText(desk.cachePath, JSON.stringify(cache) + '\n');
+  } catch (e) {
+    desk.error = `scan: ${(e as Error).message}`;
+  } finally {
+    desk.scanning = false;
+  }
+}
+
+/** (Re)starts the periodic scan. This is the only timer that runs while the panel is hidden. */
+export function startScanTimer(): void {
+  if (scanTimer !== null) clearInterval(scanTimer);
+  const minutes = Math.max(1, desk.config.scan.intervalMinutes);
+  scanTimer = setInterval(() => void scanNow(), minutes * 60_000);
+}
+
+/* ------------------------------------------------------------------ lifecycle */
+
+/**
+ * Boots the desk: resolves the home folder, loads config, tasks and the scan cache, starts
+ * watching, then runs the first scan. Safe to call once per window.
+ */
+export async function boot(homeOverride?: string): Promise<void> {
+  const home = (homeOverride ?? (await homeDir())).replace(/[\\/]+$/, '');
+  desk.home = home;
+  desk.ledgeHome = ledgeHomeFor(home);
+  desk.tasksDir = join(desk.ledgeHome, 'tasks');
+  desk.archiveDir = join(desk.ledgeHome, 'archive');
+  desk.configPath = join(desk.ledgeHome, 'config.json');
+  desk.cachePath = join(desk.ledgeHome, '.scan-cache.json');
+
+  await ensureDir(desk.tasksDir);
+  await loadConfigFile();
+  await reloadTasks();
+  await loadScanCache();
+  await startWatching();
+  desk.ready = true;
+  startScanTimer();
+  void scanNow();
+}
+
+/** Stops timers and the watcher. Used by tests and on window teardown. */
+export function shutdown(): void {
+  if (scanTimer !== null) clearInterval(scanTimer);
+  scanTimer = null;
+  if (changeTimer !== null) clearTimeout(changeTimer);
+  changeTimer = null;
+  changed.clear();
+  if (stopWatching) stopWatching();
+  stopWatching = null;
+}
