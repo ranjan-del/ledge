@@ -28,3 +28,12 @@ tauri-plugin-os = "2"
 window-vibrancy = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# macOS window level and collection behaviour (keeping the floating button above every
+# other application) has no Tauri API, so it is done through AppKit directly. These crates
+# are already in the tree via tauri; the versions here match what Cargo.lock resolves
+# (objc2 0.6.4, objc2-app-kit 0.3.2, objc2-foundation 0.3.2) so no second copy is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
