@@ -313,6 +313,157 @@ fn place_button_initial(app: &AppHandle) {
     let _ = button.set_position(PhysicalPosition::new(x, y));
 }
 
+/// Keeps the button on screen. Activating another application orders the button out even with
+/// a status window level and `hidesOnDeactivate` turned off, and no window event fires for an
+/// application that was never active, so there is nothing to react to. A short poll that only
+/// acts when the window has actually gone is the one approach that holds: it costs a couple of
+/// cheap calls a second and it is what stands between the person and a panel they cannot open.
+#[cfg(target_os = "macos")]
+fn keep_button_on_screen(app: &AppHandle) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::{NSStatusWindowLevel, NSWindow};
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let h = handle.clone();
+            let inner = handle.clone();
+            let _ = h.run_on_main_thread(move || {
+                let Some(button) = inner.get_webview_window(BUTTON) else { return };
+                let ordered_out = !button.is_visible().unwrap_or(false);
+                let wrong_level = match button.ns_window() {
+                    Ok(ptr) => match unsafe { Retained::retain(ptr.cast::<NSWindow>()) } {
+                        Some(w) => w.level() < NSStatusWindowLevel,
+                        None => false,
+                    },
+                    Err(_) => false,
+                };
+                if ordered_out || wrong_level {
+                    restore_button(&inner);
+                }
+            });
+        }
+    });
+}
+
+/// Puts a Ledge item in the menu bar. This exists because the floating button, however well
+/// pinned, can still be lost: behind a full screen application, on an unplugged display, or
+/// dragged somewhere awkward. The menu bar is the one place macOS guarantees stays reachable,
+/// so it is the way back in when the button cannot be found.
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+    let open = MenuItem::with_id(app, "open", "Open Ledge", true, None::<&str>)?;
+    let find = MenuItem::with_id(app, "find", "Put the button back", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Ledge", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &find, &quit])?;
+
+    TrayIconBuilder::with_id("ledge")
+        // A template image: black shapes on transparency, which macOS recolours for a light
+        // or dark menu bar. The application icon is a full colour plate and renders as a
+        // solid block up here, so the menu bar gets its own asset.
+        .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png"))?)
+        .icon_as_template(true)
+        .tooltip("Ledge")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => {
+                let _ = show_panel(app.clone());
+            }
+            "find" => {
+                restore_button(app);
+                place_button_initial(app);
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            // A plain left click opens the panel, which is what someone clicking the menu bar
+            // item almost always wants. The menu stays on the right click.
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let _ = show_panel(tray.app_handle().clone());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+/// Shows a window without activating the application. `show()` makes the window key, which
+/// pulls focus away from whatever the person was doing, and that is unacceptable for a button
+/// that has to reappear constantly. `orderFrontRegardless` puts it back on screen and leaves
+/// the keyboard where it was.
+#[cfg(target_os = "macos")]
+fn show_without_stealing_focus(win: &WebviewWindow) {
+    use objc2::rc::Retained;
+    use objc2_app_kit::NSWindow;
+
+    let Ok(ptr) = win.ns_window() else {
+        let _ = win.show();
+        return;
+    };
+    match unsafe { Retained::retain(ptr.cast::<NSWindow>()) } {
+        Some(w) => w.orderFrontRegardless(),
+        None => {
+            let _ = win.show();
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_without_stealing_focus(win: &WebviewWindow) {
+    let _ = win.show();
+}
+
+/// Brings the button back: shows it, re-pins it above other applications and, when it has
+/// drifted off the visible area, parks it against the edge again. Setting a window level once
+/// at startup turned out not to hold, because activating another application can order the
+/// window out, so this runs again every time focus moves.
+fn restore_button(app: &AppHandle) {
+    let Ok(button) = window(app, BUTTON) else { return };
+    show_without_stealing_focus(&button);
+    pin_above_all_apps(&button);
+    if !on_screen(&button) {
+        place_button_initial(app);
+    }
+}
+
+/// True when the button's frame still overlaps the work area of its monitor. A window can be
+/// left off screen by unplugging a display or by a drag that ended past the edge, and an off
+/// screen button is indistinguishable to the person from a missing one.
+fn on_screen(button: &WebviewWindow) -> bool {
+    let Ok(Some(monitor)) = button.current_monitor() else { return false };
+    let Ok(pos) = button.outer_position() else { return false };
+    let Ok(size) = button.outer_size() else { return false };
+    let area = monitor.work_area();
+    let (ax, ay) = (area.position.x, area.position.y);
+    let (aw, ah) = (area.size.width as i32, area.size.height as i32);
+    pos.x + (size.width as i32) > ax
+        && pos.x < ax + aw
+        && pos.y + (size.height as i32) > ay
+        && pos.y < ay + ah
+}
+
+/// Shows the panel beside the button whatever state it was in, used by the menu bar item.
+/// Unlike `toggle_panel` this never hides, because someone reaching for the menu bar is
+/// asking to see the panel, not to flip it.
+#[tauri::command]
+fn show_panel(app: AppHandle) -> Result<(), String> {
+    let panel = window(&app, PANEL)?;
+    restore_button(&app);
+    place_panel(&app)?;
+    panel.show().map_err(err)?;
+    panel.set_focus().map_err(err)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -341,19 +492,44 @@ pub fn run() {
                 let _ = panel.hide();
             }
             place_button_initial(app.handle());
+            build_tray(app.handle())?;
+            #[cfg(target_os = "macos")]
+            keep_button_on_screen(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![toggle_panel, snap_button, open_terminal, log_message])
+        .invoke_handler(tauri::generate_handler![
+            toggle_panel,
+            show_panel,
+            snap_button,
+            open_terminal,
+            log_message
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Ledge");
 
-    app.run(|_app, event| {
+    app.run(|handle, event| match &event {
         // Hiding the panel must never end the process: the button has to stay on screen.
-        if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
             if code.is_none() {
                 api.prevent_exit();
             }
         }
+        // Activating another application can order the button out even with a status window
+        // level set at startup, and a button nobody can see leaves no way to open the panel.
+        // Re-asserting it whenever focus moves is what actually keeps it there.
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Focused(focused),
+            ..
+        } => {
+            if label == PANEL && !*focused {
+                restore_button(handle);
+            }
+            if label == BUTTON {
+                restore_button(handle);
+            }
+        }
+        _ => {}
     });
 }
 
