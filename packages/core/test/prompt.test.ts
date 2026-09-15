@@ -14,6 +14,8 @@ function task(over: Partial<Task> = {}): Task {
     created: '2026-09-14T21:04:00+05:30',
     updated: '2026-09-14T23:04:00+05:30',
     requirement: 'Old tabs break after deploy.\nShow a banner.',
+    plan: [],
+    notes: [],
     checklist: [
       { text: 'Investigated caching', done: true },
       { text: 'Build step writes version.json', done: false },

@@ -5,9 +5,10 @@
  * both in from the operating system (see ./task-file-node.ts).
  */
 import { parse as parseYaml, stringify as stringifyYaml, YAMLParseError } from 'yaml';
+import { isIsoDay } from './planning.ts';
 import { collapseTilde, expandTilde, resolvePath } from './tilde.ts';
 import { TaskParseError } from './types.ts';
-import type { ChecklistItem, Task, TaskStatus } from './types.ts';
+import type { ChecklistItem, NoteEntry, Task, TaskStatus } from './types.ts';
 
 /**
  * Where a task file's `repo` path is anchored. `home` expands and collapses a leading `~`, and
@@ -26,14 +27,20 @@ const KNOWN_KEYS = new Set([
   'status',
   'order',
   'repo',
+  'planned',
   'sessions',
   'created',
   'updated',
   'parked',
 ]);
 const REQUIREMENT_HEADING = '## Requirement';
+const PLAN_HEADING = '## Plan';
 const CHECKLIST_HEADING = '## Checklist';
+const NOTES_HEADING = '## Notes';
 const CHECKLIST_ITEM = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
+const PLAN_ITEM = /^\s*(?:\d+[.)]|[-*])\s+(.*)$/;
+const NOTE_HEADING = /^###\s+(.+)$/;
+const SECTION_HEADING = /^##\s+(.+)$/;
 
 function pad(n: number): string {
   return String(n).padStart(2, '0');
@@ -106,70 +113,141 @@ function optionalString(data: Record<string, unknown>, key: string): string | un
 
 interface Body {
   requirement: string;
+  plan: string[];
   checklist: ChecklistItem[];
+  notes: NoteEntry[];
   extra: string;
 }
 
-function parseBody(lines: string[]): Body {
-  type State = 'preamble' | 'requirement' | 'checklist' | 'extra';
-  let state: State = 'preamble';
-  const requirement: string[] = [];
-  const checklist: ChecklistItem[] = [];
-  const extra: string[] = [];
-  let sawRequirement = false;
-  let sawChecklist = false;
+/** One `## ` section of the body: its heading line verbatim, and the lines under it. */
+interface Section {
+  /** The heading line exactly as written, or '' for the text before the first heading. */
+  raw: string;
+  /** The trimmed heading text, or '' for the preamble. */
+  heading: string;
+  lines: string[];
+}
 
+/**
+ * Cuts the body into `## ` sections in file order. Splitting first, then interpreting, is what
+ * makes section order in the file irrelevant: the parser can accept Requirement, Plan, Checklist
+ * and Notes in any arrangement and the serializer still writes them in the fixed order.
+ */
+function splitSections(lines: string[]): Section[] {
+  const sections: Section[] = [{ raw: '', heading: '', lines: [] }];
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!sawRequirement && trimmed === REQUIREMENT_HEADING) {
-      state = 'requirement';
-      sawRequirement = true;
-      continue;
-    }
-    if (!sawChecklist && trimmed === CHECKLIST_HEADING) {
-      state = 'checklist';
-      sawChecklist = true;
-      continue;
-    }
-    switch (state) {
-      case 'requirement':
-        if (trimmed.startsWith('## ')) {
-          state = 'extra';
-          extra.push(line);
-        } else {
-          requirement.push(line);
-        }
-        break;
-      case 'checklist': {
-        const m = CHECKLIST_ITEM.exec(line);
-        if (m) {
-          checklist.push({ text: m[2]!.trim(), done: m[1]!.toLowerCase() === 'x' });
-        } else if (trimmed === '') {
-          // Blank lines inside the checklist are layout, not content.
-        } else {
-          state = 'extra';
-          extra.push(line);
-        }
-        break;
-      }
-      default:
-        extra.push(line);
+    if (SECTION_HEADING.test(trimmed)) sections.push({ raw: line, heading: trimmed, lines: [] });
+    else sections[sections.length - 1]!.lines.push(line);
+  }
+  return sections;
+}
+
+/**
+ * Steps in a `## Plan` section, in file order, blank lines ignored. A bulleted list is read as
+ * well as a numbered one and is renumbered on save: the contract asks for an ordered list, and
+ * being strict on input would quietly move a hand-written plan into `extra`. A task-list item
+ * is not a plan step, so `- [ ] x` is left for the checklist rules to deal with.
+ */
+function parsePlan(lines: string[]): string[] {
+  const steps: string[] = [];
+  for (const line of lines) {
+    if (CHECKLIST_ITEM.test(line)) continue;
+    const m = PLAN_ITEM.exec(line);
+    if (m && m[1]!.trim() !== '') steps.push(m[1]!.trim());
+  }
+  return steps;
+}
+
+/**
+ * Dated `### YYYY-MM-DD` subsections of a `## Notes` section. Lines before the first dated
+ * subheading are handed back separately so the caller can keep them verbatim, and a `### ` line
+ * that is not a date stays inside the body of the note it sits in, because a note is free prose.
+ */
+function parseNotes(lines: string[]): { notes: NoteEntry[]; before: string[] } {
+  const notes: NoteEntry[] = [];
+  const before: string[] = [];
+  let current: { date: string; body: string[] } | undefined;
+  for (const line of lines) {
+    const m = NOTE_HEADING.exec(line.trim());
+    const date = m?.[1]?.trim();
+    if (date !== undefined && isIsoDay(date)) {
+      if (current) notes.push({ date: current.date, body: current.body.join('\n').trim() });
+      current = { date, body: [] };
+    } else if (current) {
+      current.body.push(line);
+    } else {
+      before.push(line);
     }
   }
-  return {
-    requirement: requirement.join('\n').trim(),
-    checklist,
-    extra: extra.join('\n').trim(),
-  };
+  if (current) notes.push({ date: current.date, body: current.body.join('\n').trim() });
+  return { notes, before };
+}
+
+/**
+ * Reads the body sections into their fields. A known heading counts only on its first
+ * appearance, and a `## Plan` with no ordered list or a `## Notes` with no dated subsection is
+ * treated as unknown content and preserved verbatim in `extra`, so a v1 file that happens to use
+ * either heading for free prose round trips untouched instead of losing text.
+ */
+function parseBody(lines: string[]): Body {
+  let requirement = '';
+  let plan: string[] = [];
+  let checklist: ChecklistItem[] = [];
+  let notes: NoteEntry[] = [];
+  const extra: string[] = [];
+  const seen = new Set<string>();
+
+  for (const section of splitSections(lines)) {
+    const known = !seen.has(section.heading);
+    if (known && section.heading === REQUIREMENT_HEADING) {
+      requirement = section.lines.join('\n').trim();
+      seen.add(section.heading);
+      continue;
+    }
+    if (known && section.heading === PLAN_HEADING) {
+      const steps = parsePlan(section.lines);
+      if (steps.length > 0) {
+        plan = steps;
+        seen.add(section.heading);
+        continue;
+      }
+    }
+    if (known && section.heading === CHECKLIST_HEADING) {
+      const items: ChecklistItem[] = [];
+      for (const line of section.lines) {
+        const m = CHECKLIST_ITEM.exec(line);
+        if (m) items.push({ text: m[2]!.trim(), done: m[1]!.toLowerCase() === 'x' });
+        else if (line.trim() !== '') extra.push(line);
+      }
+      checklist = items;
+      seen.add(section.heading);
+      continue;
+    }
+    if (known && section.heading === NOTES_HEADING) {
+      const parsed = parseNotes(section.lines);
+      if (parsed.notes.length > 0) {
+        notes = parsed.notes;
+        extra.push(...parsed.before);
+        seen.add(section.heading);
+        continue;
+      }
+    }
+    if (section.raw !== '') extra.push(section.raw);
+    extra.push(...section.lines);
+  }
+  return { requirement, plan, checklist, notes, extra: extra.join('\n').trim() };
 }
 
 /**
  * Parses one task file (YAML frontmatter plus Markdown body) into a Task. Validates the fields
  * Ledge depends on, expands `~` in `repo`, keeps unknown frontmatter keys in `meta`, and splits
- * the body into requirement, checklist and extra text. Throws TaskParseError with the file path
- * and line so callers can report exactly where a hand-edited file went wrong. `paths` says where
- * a `~` and a relative repo path are anchored; with the default empty paths the repo string is
- * kept exactly as the file spells it.
+ * the body into requirement, plan, checklist, notes and extra text, in any order they appear.
+ * Throws TaskParseError with the file path and line so callers can report exactly where a
+ * hand-edited file went wrong. A `planned` value that is not a real `YYYY-MM-DD` day is dropped
+ * rather than thrown, because one mistyped date must never make a task unreadable. `paths` says
+ * where a `~` and a relative repo path are anchored; with the default empty paths the repo string
+ * is kept exactly as the file spells it.
  */
 export function parseTask(markdown: string, file: string = '', paths: TaskPaths = {}): Task {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n');
@@ -206,6 +284,8 @@ export function parseTask(markdown: string, file: string = '', paths: TaskPaths 
       ? undefined
       : resolvePath(expandTilde(repoRaw, paths.home ?? ''), paths.base ?? '');
   const parked = optionalString(data, 'parked');
+  const plannedRaw = optionalString(data, 'planned');
+  const planned = isIsoDay(plannedRaw) ? plannedRaw : undefined;
 
   const meta: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
@@ -222,12 +302,15 @@ export function parseTask(markdown: string, file: string = '', paths: TaskPaths 
     created,
     updated,
     requirement: body.requirement,
+    plan: body.plan,
     checklist: body.checklist,
+    notes: body.notes,
     extra: body.extra,
     file,
   };
   if (repo !== undefined) task.repo = repo;
   if (parked !== undefined) task.parked = parked;
+  if (planned !== undefined) task.planned = planned;
   if (Object.keys(meta).length > 0) task.meta = meta;
   return task;
 }
@@ -235,9 +318,12 @@ export function parseTask(markdown: string, file: string = '', paths: TaskPaths 
 /**
  * Serializes a Task back to the file format, the exact inverse of parseTask. Known frontmatter
  * keys come first in the documented order, then any `meta` keys in their original order; `repo`
- * is written with `~` for paths under the home folder. Both headings are always emitted so
- * Claude Code always has a place to write. Output ends with a single newline. `paths.home` is
- * the folder the `~` stands for; without it an absolute repo path is written as it is.
+ * is written with `~` for paths under the home folder. Body sections are written in the fixed
+ * order Requirement, Plan, Checklist, Notes, then anything else, whatever order they had in the
+ * file they came from, so every task file on disk converges on one shape. Requirement and
+ * Checklist are always emitted so Claude Code always has a place to write; Plan and Notes appear
+ * only when they hold something. Output ends with a single newline. `paths.home` is the folder
+ * the `~` stands for; without it an absolute repo path is written as it is.
  */
 export function serializeTask(task: Task, paths: TaskPaths = {}): string {
   const front: Record<string, unknown> = {
@@ -247,6 +333,7 @@ export function serializeTask(task: Task, paths: TaskPaths = {}): string {
     order: task.order,
   };
   if (task.repo !== undefined) front.repo = collapseTilde(task.repo, paths.home ?? '');
+  if (task.planned !== undefined) front.planned = task.planned;
   front.sessions = task.sessions.map((s) => String(s));
   front.created = task.created;
   front.updated = task.updated;
@@ -258,11 +345,24 @@ export function serializeTask(task: Task, paths: TaskPaths = {}): string {
 
   const parts: string[] = ['---', yamlText, '---', '', REQUIREMENT_HEADING, ''];
   if (task.requirement.trim() !== '') parts.push(task.requirement.trim(), '');
+  const plan = task.plan.map((step) => step.trim()).filter((step) => step !== '');
+  if (plan.length > 0) {
+    parts.push(PLAN_HEADING, '');
+    plan.forEach((step, i) => parts.push(`${i + 1}. ${step}`));
+    parts.push('');
+  }
   parts.push(CHECKLIST_HEADING, '');
   for (const item of task.checklist) {
     parts.push(`- [${item.done ? 'x' : ' '}] ${item.text}`);
   }
   if (task.checklist.length > 0) parts.push('');
+  const notes = task.notes.filter((note) => note.body.trim() !== '');
+  if (notes.length > 0) {
+    parts.push(NOTES_HEADING, '');
+    for (const note of notes) {
+      parts.push(`### ${note.date}`, ...note.body.trim().split('\n'), '');
+    }
+  }
   if (task.extra.trim() !== '') parts.push(task.extra.trim(), '');
   return parts.join('\n').replace(/\n+$/, '\n');
 }

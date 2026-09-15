@@ -10,13 +10,17 @@ import { run as done } from './commands/done.ts';
 import { run as init } from './commands/init.ts';
 import { run as link } from './commands/link.ts';
 import { run as list } from './commands/list.ts';
+import { run as note } from './commands/note.ts';
 import { run as open } from './commands/open.ts';
 import { run as park } from './commands/park.ts';
+import { run as plan } from './commands/plan.ts';
 import { run as scan } from './commands/scan.ts';
 import { run as start } from './commands/start.ts';
 import { run as tick } from './commands/tick.ts';
+import { run as today } from './commands/today.ts';
 import { run as todo } from './commands/todo.ts';
 import { run as untick } from './commands/untick.ts';
+import { run as when } from './commands/when.ts';
 
 /** Output sinks and working directory; tests inject these to capture output. */
 export interface MainIo {
@@ -36,6 +40,10 @@ const COMMANDS: Record<string, CommandRunner> = {
   todo,
   tick,
   untick,
+  plan,
+  note,
+  when,
+  today,
   open,
   scan,
   init,

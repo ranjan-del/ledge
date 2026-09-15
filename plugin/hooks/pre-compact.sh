@@ -1,9 +1,10 @@
 #!/bin/sh
 # Ledge PreCompact hook.
 # Reads the hook payload from stdin, resolves the Ledge task for the session's working
-# directory and prints a one-line reminder to bring its checklist up to date before the
-# context is compacted. Prints nothing when the ledge CLI is missing or no task matches.
-# Always exits 0.
+# directory and prints a one-line reminder to bring its checklist up to date and to append
+# a closing note before the context is compacted. The note is the part that survives
+# compaction: the checklist says what is done, the note says why and what is left.
+# Prints nothing when the ledge CLI is missing or no task matches. Always exits 0.
 
 payload=$(cat 2>/dev/null)
 
@@ -32,7 +33,8 @@ task_json=$(ledge current --repo "$cwd" --json 2>/dev/null) || exit 0
 task_id=$(printf '%s' "$task_json" | json_str id)
 [ -n "$task_id" ] || exit 0
 
-echo "Before compaction, update the Ledge checklist for the current task ($task_id):" \
-  "tick finished items and add new ones with the Edit tool on the file" \
-  "from \`ledge open $task_id\`."
+echo "Before compaction, update the Ledge task ($task_id): tick finished checklist items" \
+  "and add new ones with the Edit tool on the file from \`ledge open $task_id\`, then run" \
+  "\`ledge note $task_id \"...\"\` with what was done, what is left and what the next" \
+  "session needs to know. Do both now; after compaction the reasoning is gone."
 exit 0

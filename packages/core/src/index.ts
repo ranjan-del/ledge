@@ -8,7 +8,7 @@
  * folder, platform) are optional here and default to what Node reports, which is why the
  * desktop app, which has no Node, imports the pure entry instead.
  */
-export type { TaskStatus, ChecklistItem, Task, Config, RepoStatus } from './types.ts';
+export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export { TaskParseError } from './types.ts';
 export {
   ledgeHome,
@@ -23,4 +23,5 @@ export { parseTask, serializeTask } from './task-file-node.ts';
 export { slugify, taskFileName } from './task-file.ts';
 export { TaskStore, matchRepo } from './store.ts';
 export { parsePorcelainV2, findRepos, scanRepos, isPending } from './git.ts';
+export { isoDay, isIsoDay, shiftDay, plannedFor, appendNote, setPlan } from './planning.ts';
 export { buildResumePrompt } from './prompt.ts';

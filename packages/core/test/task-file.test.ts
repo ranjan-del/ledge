@@ -162,6 +162,9 @@ test('parseTask fills defaults for optional fields', () => {
   assert.deepEqual(task.sessions, []);
   assert.equal(task.requirement, '');
   assert.deepEqual(task.checklist, []);
+  assert.deepEqual(task.plan, []);
+  assert.deepEqual(task.notes, []);
+  assert.equal(task.planned, undefined);
   assert.equal(task.extra, '');
   assert.equal(task.file, '');
   assert.equal(task.repo, undefined);
@@ -186,4 +189,229 @@ test('taskFileName is the created date plus id', () => {
     taskFileName({ id: 'release-watch-banner', created: '2026-09-14T21:04:00+05:30' }),
     '2026-09-14-release-watch-banner.md',
   );
+});
+
+const v2 = `---
+id: release-watch-banner
+title: Release watch banner for stale tabs
+status: current
+order: 1
+planned: 2026-09-18
+sessions:
+  - b13e8b5e
+created: 2026-09-15T21:04:00+05:30
+updated: 2026-09-15T23:04:00+05:30
+---
+
+## Requirement
+
+Short statement of what has to be true when this is finished.
+
+## Plan
+
+1. Write version.json at build time
+2. Poll it on an interval and on window focus
+3. Show the banner, reload only when idle
+
+## Checklist
+
+- [x] Investigated why open tabs break after a deploy
+- [ ] Build step that writes version.json
+
+## Notes
+
+### 2026-09-15
+Decided to poll a version file rather than use a service worker, because the app already
+fetches a static config file the same way. Chunk load errors are the safety net.
+
+### 2026-09-16
+Second day: the build step landed.
+`;
+
+test('parseTask reads planned, the plan and the dated notes', () => {
+  const task = parseTask(v2, '/tmp/v2.md');
+  assert.equal(task.planned, '2026-09-18');
+  assert.deepEqual(task.plan, [
+    'Write version.json at build time',
+    'Poll it on an interval and on window focus',
+    'Show the banner, reload only when idle',
+  ]);
+  assert.equal(task.notes.length, 2);
+  assert.equal(task.notes[0]!.date, '2026-09-15');
+  assert.match(task.notes[0]!.body, /^Decided to poll a version file/);
+  assert.match(task.notes[0]!.body, /safety net\.$/);
+  assert.deepEqual(task.notes[1], {
+    date: '2026-09-16',
+    body: 'Second day: the build step landed.',
+  });
+  assert.equal(task.extra, '', 'known sections are not duplicated into extra');
+  assert.equal(task.checklist.length, 2);
+});
+
+test('serializeTask round-trips a v2 file with planned, plan and notes byte for byte', () => {
+  const task = parseTask(v2);
+  assert.equal(serializeTask(task), v2);
+  assert.deepEqual(parseTask(serializeTask(task)), task);
+});
+
+test('a v1 file with no plan, notes or planned date parses empty and round-trips', () => {
+  const v1 = `---
+id: plain
+title: Plain v1 task
+status: current
+order: 1
+sessions: []
+created: 2026-09-14T21:04:00+05:30
+updated: 2026-09-14T21:04:00+05:30
+---
+
+## Requirement
+
+Just the two v1 sections.
+
+## Checklist
+
+- [ ] One step
+`;
+  const task = parseTask(v1, '/tmp/v1.md');
+  assert.deepEqual(task.plan, []);
+  assert.deepEqual(task.notes, []);
+  assert.equal(task.planned, undefined);
+  assert.equal(serializeTask(task), v1, 'byte for byte');
+});
+
+test('body sections parse in any order and are rewritten in the fixed order', () => {
+  const shuffled = `---
+id: shuffled
+title: Shuffled
+status: current
+order: 1
+sessions: []
+created: 2026-09-15T09:00:00+05:30
+updated: 2026-09-15T09:00:00+05:30
+---
+
+## Notes
+
+### 2026-09-15
+A note that came first in the file.
+
+## Checklist
+
+- [ ] Only step
+
+## Plan
+
+1. Only planned step
+
+## Requirement
+
+The requirement came last.
+
+## Appendix
+
+Unknown content stays at the end.
+`;
+  const task = parseTask(shuffled);
+  assert.equal(task.requirement, 'The requirement came last.');
+  assert.deepEqual(task.plan, ['Only planned step']);
+  assert.equal(task.checklist.length, 1);
+  assert.equal(task.notes.length, 1);
+  assert.match(task.extra, /^## Appendix/);
+  const out = serializeTask(task);
+  const order = ['## Requirement', '## Plan', '## Checklist', '## Notes', '## Appendix'];
+  const at = order.map((heading) => out.indexOf(heading));
+  assert.ok(at.every((i) => i > 0), `all headings present in ${out}`);
+  const sorted = [...at].sort((a, b) => a - b);
+  assert.deepEqual(at, sorted, 'fixed order: Requirement, Plan, Checklist, Notes, then the rest');
+  assert.deepEqual(parseTask(out), { ...task, file: '' });
+});
+
+test('a malformed planned value is dropped, not thrown', () => {
+  const head = (planned: string) =>
+    `---\nid: x\ntitle: T\nstatus: current\norder: 1\nplanned: ${planned}\n---\n`;
+  for (const bad of ['tomorrow', '2026-13-01', '2026-02-31', '15/09/2026', '""']) {
+    const task = parseTask(head(bad), '/tmp/bad-planned.md');
+    assert.equal(task.planned, undefined, `dropped ${bad}`);
+    assert.doesNotMatch(serializeTask(task), /^planned:/m);
+  }
+  assert.equal(parseTask(head('2026-09-18')).planned, '2026-09-18');
+});
+
+test('planned is written after repo and before sessions', () => {
+  const task = parseTask(v2);
+  const out = serializeTask({ ...task, repo: '/srv/app' });
+  const lines = out.split('\n');
+  const at = (prefix: string) => lines.findIndex((l) => l.startsWith(prefix));
+  assert.ok(at('repo:') < at('planned:'), 'repo before planned');
+  assert.ok(at('planned:') < at('sessions:'), 'planned before sessions');
+});
+
+test('a Plan or Notes section without list items or dates is kept as extra', () => {
+  const prose = `---
+id: prose
+title: Prose
+status: current
+order: 1
+sessions: []
+created: 2026-09-15T09:00:00+05:30
+updated: 2026-09-15T09:00:00+05:30
+---
+
+## Requirement
+
+R.
+
+## Checklist
+
+## Plan
+
+Some prose where a v1 file used the word Plan.
+
+## Notes
+
+Undated prose, kept verbatim.
+`;
+  const task = parseTask(prose);
+  assert.deepEqual(task.plan, []);
+  assert.deepEqual(task.notes, []);
+  assert.match(task.extra, /## Plan/);
+  assert.match(task.extra, /Undated prose, kept verbatim\./);
+  assert.equal(serializeTask(task), prose, 'nothing is lost or moved');
+});
+
+test('an empty plan or note body is not written back', () => {
+  const task = parseTask(v2);
+  const out = serializeTask({ ...task, plan: [], notes: [{ date: '2026-09-15', body: '  ' }] });
+  assert.doesNotMatch(out, /^## Plan$/m);
+  assert.doesNotMatch(out, /^## Notes$/m);
+});
+
+test('a bulleted plan is read and renumbered on save', () => {
+  const bulleted = `---
+id: bulleted
+title: Bulleted
+status: current
+order: 1
+sessions: []
+created: 2026-09-15T09:00:00+05:30
+updated: 2026-09-15T09:00:00+05:30
+---
+
+## Requirement
+
+R.
+
+## Plan
+
+- Write version.json
+- Poll it on focus
+
+## Checklist
+`;
+  const task = parseTask(bulleted);
+  assert.deepEqual(task.plan, ['Write version.json', 'Poll it on focus']);
+  assert.match(serializeTask(task), /^1\. Write version\.json$/m);
+  assert.match(serializeTask(task), /^2\. Poll it on focus$/m);
+  assert.equal(task.extra, '');
 });

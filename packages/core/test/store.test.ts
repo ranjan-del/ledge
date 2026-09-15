@@ -232,3 +232,51 @@ test('matchRepo ignores tasks without a repo and handles trailing slashes', () =
   assert.equal(matchRepo(tasks, '/srv/a/')?.id, 'a');
   assert.equal(matchRepo(tasks, '/srv'), undefined);
 });
+
+test('setPlanned sets and clears the planned day and rejects a bad one', () => {
+  const store = freshStore();
+  const t = store.add({ title: 'Planned work' });
+  assert.equal(t.planned, undefined);
+  const set = store.setPlanned(t.id, '2026-09-18');
+  assert.equal(set.planned, '2026-09-18');
+  assert.match(readFileSync(set.file, 'utf8'), /^planned: 2026-09-18$/m);
+  assert.equal(store.get(t.id).planned, '2026-09-18');
+  const cleared = store.setPlanned(t.id, undefined);
+  assert.equal(cleared.planned, undefined);
+  assert.doesNotMatch(readFileSync(cleared.file, 'utf8'), /^planned:/m);
+  assert.throws(() => store.setPlanned(t.id, 'tomorrow'), RangeError);
+  assert.throws(() => store.setPlanned('nope', '2026-09-18'), /Task not found/);
+});
+
+test('addNote appends into one dated subsection and survives a reload', () => {
+  const store = freshStore();
+  const t = store.add({ title: 'Noted work' });
+  store.addNote(t.id, 'Chose polling over a service worker.', '2026-09-15');
+  const second = store.addNote(t.id, 'Chunk load errors are the safety net.', '2026-09-15');
+  assert.equal(second.notes.length, 1);
+  assert.equal(second.notes[0]!.date, '2026-09-15');
+  const file = readFileSync(second.file, 'utf8');
+  assert.match(file, /^## Notes$/m);
+  assert.equal((file.match(/^### 2026-09-15$/gm) ?? []).length, 1, 'one subsection for the day');
+  const later = store.addNote(t.id, 'Next day.', '2026-09-16');
+  assert.deepEqual(later.notes.map((n) => n.date), ['2026-09-15', '2026-09-16']);
+  assert.deepEqual(store.get(t.id).notes, later.notes, 'notes survive the round trip');
+  assert.throws(() => store.addNote('nope', 'x'), /Task not found/);
+});
+
+test('setPlan replaces the steps in the file', () => {
+  const store = freshStore();
+  const t = store.add({ title: 'Planned steps' });
+  const planned = store.setPlan(t.id, ['Write version.json', 'Poll it on focus']);
+  assert.deepEqual(planned.plan, ['Write version.json', 'Poll it on focus']);
+  const file = readFileSync(planned.file, 'utf8');
+  assert.match(file, /^## Plan$/m);
+  assert.match(file, /^1\. Write version\.json$/m);
+  assert.match(file, /^2\. Poll it on focus$/m);
+  assert.ok(file.indexOf('## Plan') < file.indexOf('## Checklist'), 'Plan before Checklist');
+  const replaced = store.setPlan(t.id, ['One step only']);
+  assert.deepEqual(replaced.plan, ['One step only']);
+  assert.deepEqual(store.get(t.id).plan, ['One step only']);
+  assert.deepEqual(store.setPlan(t.id, []).plan, []);
+  assert.throws(() => store.setPlan('nope', ['x']), /Task not found/);
+});

@@ -1,7 +1,7 @@
 {
   "name": "ledge",
   "version": "0.1.0",
-  "description": "Ledge tasks from Claude Code: /ledge start, park, done, todo and session hooks.",
+  "description": "Ledge tasks from Claude Code: /ledge start, park, done, todo, plan, note, when.",
   "author": {
     "name": "Ranjan G",
     "url": "https://github.com/ranjan-del"
@@ -9,5 +9,5 @@
   "homepage": "https://github.com/ranjan-del/ledge",
   "repository": "https://github.com/ranjan-del/ledge",
   "license": "MIT",
-  "keywords": ["tasks", "productivity", "local-first", "markdown"]
+  "keywords": ["tasks", "productivity", "local-first", "markdown", "planning", "notes"]
 }

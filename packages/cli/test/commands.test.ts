@@ -14,7 +14,10 @@ interface TaskJson {
   repo?: string;
   sessions: string[];
   parked?: string;
+  planned?: string;
+  plan: string[];
   checklist: { text: string; done: boolean }[];
+  notes: { date: string; body: string }[];
   file: string;
 }
 
@@ -378,5 +381,229 @@ describe('scan', () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].repo, sub);
     assert.equal(rows[0].task?.id, 'scan-task');
+  });
+});
+
+function today(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+describe('plan', () => {
+  test('replaces the steps and prints them numbered', async () => {
+    await addTask('Planned work');
+    const r = await run(['plan', 'planned-work', 'Write version.json', 'Poll on focus']);
+    assert.equal(r.code, 0);
+    assert.equal(
+      r.stdout,
+      'Plan for planned-work:\n  1. Write version.json\n  2. Poll on focus\n',
+    );
+    const replaced = await run(['plan', 'planned-work', 'Only step', '--json']);
+    assert.deepEqual((JSON.parse(replaced.stdout) as TaskJson).plan, ['Only step']);
+  });
+
+  test('writes the Plan section above the Checklist in the file', async (ctx) => {
+    if (coreKind !== 'real') return ctx.skip('the fake core writes no Markdown');
+    await addTask('Filed plan');
+    await run(['todo', 'filed-plan', 'A step']);
+    await run(['plan', 'filed-plan', 'First', 'Second']);
+    const file = (await run(['open', 'filed-plan'])).stdout.trim();
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /^## Plan$/m);
+    assert.match(text, /^1\. First$/m);
+    assert.ok(text.indexOf('## Plan') < text.indexOf('## Checklist'));
+    assert.ok(text.indexOf('## Requirement') < text.indexOf('## Plan'));
+  });
+
+  test('a missing id or no steps exits 1, an unknown id exits 2', async () => {
+    await addTask('Planned work');
+    assert.equal((await run(['plan'])).code, 1);
+    const empty = await run(['plan', 'planned-work']);
+    assert.equal(empty.code, 1);
+    assert.match(empty.stderr, /at least one step/);
+    assert.equal((await run(['plan', 'ghost', 'Step'])).code, 2);
+  });
+});
+
+describe('note', () => {
+  test('appends into one dated subsection per day', async () => {
+    await addTask('Noted work');
+    const first = await run(['note', 'noted-work', 'Chose polling over a service worker.']);
+    assert.equal(first.code, 0);
+    assert.equal(first.stdout, `Added a note to noted-work under ${today()}\n`);
+    const second = await run(['note', 'noted-work', 'Chunk errors are the safety net.', '--json']);
+    const task = JSON.parse(second.stdout) as TaskJson;
+    assert.equal(task.notes.length, 1, 'one entry for today');
+    assert.equal(task.notes[0].date, today());
+    assert.match(task.notes[0].body, /Chose polling over a service worker\./);
+    assert.match(task.notes[0].body, /Chunk errors are the safety net\./);
+  });
+
+  test('writes one dated Notes subsection after the Checklist in the file', async (ctx) => {
+    if (coreKind !== 'real') return ctx.skip('the fake core writes no Markdown');
+    await addTask('Noted work');
+    await run(['note', 'noted-work', 'Chose polling over a service worker.']);
+    await run(['note', 'noted-work', 'Chunk errors are the safety net.']);
+    const file = readFileSync((await run(['open', 'noted-work'])).stdout.trim(), 'utf8');
+    assert.match(file, /^## Notes$/m);
+    assert.equal((file.match(new RegExp(`^### ${today()}$`, 'gm')) ?? []).length, 1);
+    assert.ok(file.indexOf('## Checklist') < file.indexOf('## Notes'));
+  });
+
+  test('a missing id or blank text exits 1, an unknown id exits 2', async () => {
+    await addTask('Noted work');
+    assert.equal((await run(['note'])).code, 1);
+    const blank = await run(['note', 'noted-work', '   ']);
+    assert.equal(blank.code, 1);
+    assert.match(blank.stderr, /note needs the note text/);
+    assert.equal((await run(['note', 'ghost', 'text'])).code, 2);
+  });
+});
+
+describe('when', () => {
+  test('accepts an ISO date, today, tomorrow and none', async () => {
+    await addTask('Timed work');
+    const iso = await run(['when', 'timed-work', '2026-09-18']);
+    assert.equal(iso.code, 0);
+    assert.equal(iso.stdout, 'Planned timed-work for 2026-09-18\n');
+    const now = await run(['when', 'timed-work', 'today', '--json']);
+    assert.equal((JSON.parse(now.stdout) as TaskJson).planned, today());
+    const soon = await run(['when', 'timed-work', 'tomorrow', '--json']);
+    const tomorrow = (JSON.parse(soon.stdout) as TaskJson).planned!;
+    assert.match(tomorrow, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(tomorrow > today(), `${tomorrow} is after ${today()}`);
+
+    const cleared = await run(['when', 'timed-work', 'none']);
+    assert.equal(cleared.stdout, 'Cleared the planned day for timed-work\n');
+    const again = await run(['when', 'timed-work', 'none', '--json']);
+    assert.equal((JSON.parse(again.stdout) as TaskJson).planned, undefined, 'day forgotten');
+  });
+
+  test('writes and clears the planned frontmatter key in the file', async (ctx) => {
+    if (coreKind !== 'real') return ctx.skip('the fake core writes no Markdown');
+    await addTask('Timed work');
+    await run(['when', 'timed-work', '2026-09-18']);
+    const path = (await run(['open', 'timed-work'])).stdout.trim();
+    assert.match(readFileSync(path, 'utf8'), /^planned: 2026-09-18$/m);
+    await run(['when', 'timed-work', 'none']);
+    assert.doesNotMatch(readFileSync(path, 'utf8'), /^planned:/m);
+  });
+
+  test('a bad day exits 1 with the accepted forms, an unknown id exits 2', async () => {
+    await addTask('Timed work');
+    assert.equal((await run(['when'])).code, 1);
+    assert.equal((await run(['when', 'timed-work'])).code, 1);
+    const bad = await run(['when', 'timed-work', 'next week']);
+    assert.equal(bad.code, 1);
+    assert.match(bad.stderr, /YYYY-MM-DD, today, tomorrow or none/);
+    assert.equal((await run(['when', 'timed-work', '2026-02-31'])).code, 1);
+    assert.equal((await run(['when', 'ghost', 'today'])).code, 2);
+  });
+});
+
+describe('today', () => {
+  test('prints planned, overdue and current sections', async () => {
+    await addTask('On for today');
+    await addTask('Late one');
+    await addTask('Just current');
+    await addTask('Parked and late', '--backlog');
+    await run(['when', 'on-for-today', 'today']);
+    await run(['when', 'late-one', '2026-01-05']);
+    await run(['when', 'parked-and-late', '2026-01-06']);
+    const r = await run(['today']);
+    assert.equal(r.code, 0);
+    const lines = r.stdout.split('\n');
+    assert.equal(lines[0], `Today ${today()}`);
+    const at = (needle: string) => r.stdout.indexOf(needle);
+    assert.ok(at('On for today') < at('Overdue'), 'today section comes first');
+    assert.ok(at('Overdue') < at('Late one'), 'overdue rows are under the Overdue heading');
+    assert.ok(at('Late one') < at('\nCurrent'), 'current section comes last');
+    assert.match(r.stdout, /overdue since 2026-01-05 +late-one +Late one/);
+    assert.match(r.stdout, /overdue since 2026-01-06 +parked-and-late/);
+    assert.match(r.stdout, /Just current/);
+    const currentBlock = r.stdout.slice(at('\nCurrent'));
+    assert.doesNotMatch(currentBlock, /On for today/, 'no task is listed twice');
+    assert.doesNotMatch(currentBlock, /Late one/);
+  });
+
+  test('--json prints the day and the three lists, empty when nothing is planned', async () => {
+    await addTask('Nothing planned');
+    const r = await run(['today', '--json']);
+    const view = JSON.parse(r.stdout) as {
+      day: string;
+      planned: TaskJson[];
+      overdue: TaskJson[];
+      current: TaskJson[];
+    };
+    assert.equal(view.day, today());
+    assert.deepEqual(view.planned, []);
+    assert.deepEqual(view.overdue, []);
+    assert.ok(view.current.some((t) => t.id === 'nothing-planned'));
+    const text = await run(['today']);
+    assert.match(text.stdout, new RegExp(`Today ${today()}\\n {2}\\(none\\)`));
+    assert.match(text.stdout, /Overdue\n {2}\(none\)/);
+  });
+});
+
+describe('current --context with plan, notes and planned day', () => {
+  test('carries the plan, the planned day and today\'s note', async () => {
+    await addTask('Rich context', '--repo', '/repos/rich');
+    await run(['plan', 'rich-context', 'Write version.json', 'Poll on focus']);
+    await run(['todo', 'rich-context', 'Open item']);
+    await run(['todo', 'rich-context', 'Closed item']);
+    await run(['tick', 'rich-context', '2']);
+    await run(['note', 'rich-context', 'Decided to poll rather than use a service worker.']);
+    await run(['when', 'rich-context', 'today']);
+    const r = await run(['current', '--repo', '/repos/rich', '--context']);
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, /^Ledge task: Rich context \(id: rich-context\)$/m);
+    assert.match(r.stdout, new RegExp(`^Planned: ${today()} \\(today\\)$`, 'm'));
+    assert.match(r.stdout, /^Plan:$/m);
+    assert.match(r.stdout, /^1\. Write version\.json$/m);
+    assert.match(r.stdout, /^- \[ \] Open item$/m);
+    assert.doesNotMatch(r.stdout, /Closed item/);
+    assert.match(r.stdout, new RegExp(`^Notes \\(${today()}\\):$`, 'm'));
+    assert.match(r.stdout, /Decided to poll rather than use a service worker\./);
+    assert.ok(r.stdout.trimEnd().split('\n').length <= 40);
+  });
+
+  test('labels an overdue planned day and a later one', async () => {
+    await addTask('Dated context', '--repo', '/repos/dated');
+    await run(['when', 'dated-context', '2026-01-05']);
+    const late = await run(['current', '--repo', '/repos/dated', '--context']);
+    assert.match(late.stdout, /^Planned: 2026-01-05 \(overdue\)$/m);
+    await run(['when', 'dated-context', '2099-12-31']);
+    const later = await run(['current', '--repo', '/repos/dated', '--context']);
+    assert.match(later.stdout, /^Planned: 2099-12-31 \(on 2099-12-31\)$/m);
+  });
+
+  test('drops the oldest note lines first and never the requirement or open items', async () => {
+    await addTask('Crowded context', '--repo', '/repos/crowded');
+    await run(['plan', 'crowded-context', 'Step one', 'Step two']);
+    for (let i = 1; i <= 20; i++) await run(['todo', 'crowded-context', `Item ${i}`]);
+    const note = Array.from({ length: 30 }, (_, i) => `Note line ${i + 1}`).join('\n');
+    await run(['note', 'crowded-context', note]);
+    const r = await run(['current', '--repo', '/repos/crowded', '--context']);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.ok(lines.length <= 40, `got ${lines.length} lines`);
+    for (let i = 1; i <= 20; i++) {
+      assert.ok(lines.some((l) => l === `- [ ] Item ${i}`), `item ${i} kept`);
+    }
+    assert.match(r.stdout, /^Plan:$/m);
+    assert.ok(!r.stdout.includes('Note line 1\n'), 'the oldest note line is dropped');
+    assert.doesNotMatch(r.stdout, /more lines/, 'trimming notes was enough');
+  });
+
+  test('drops the note entirely when the task alone fills the block', async () => {
+    await addTask('Packed context', '--repo', '/repos/packed');
+    for (let i = 1; i <= 40; i++) await run(['todo', 'packed-context', `Item ${i}`]);
+    await run(['note', 'packed-context', 'A note that cannot fit anywhere.']);
+    const r = await run(['current', '--repo', '/repos/packed', '--context']);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.equal(lines.length, 40);
+    assert.doesNotMatch(r.stdout, /A note that cannot fit anywhere/);
+    assert.match(r.stdout, /^Requirement:$/m);
+    assert.match(lines[39]!, /more lines/);
   });
 });

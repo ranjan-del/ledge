@@ -19,6 +19,11 @@ export interface ChecklistItem {
   done: boolean;
 }
 
+export interface NoteEntry {
+  date: string;
+  body: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -29,8 +34,11 @@ export interface Task {
   created: string;
   updated: string;
   parked?: string;
+  planned?: string;
   requirement: string;
+  plan: string[];
   checklist: ChecklistItem[];
+  notes: NoteEntry[];
   extra: string;
   file: string;
 }
@@ -213,7 +221,9 @@ export class TaskStore {
       created,
       updated: created,
       requirement: input.requirement ?? '',
+      plan: [],
       checklist: [],
+      notes: [],
       extra: '',
       file: join(this.home, 'tasks', taskFileName({ id, created })),
     };
@@ -273,6 +283,22 @@ export class TaskStore {
     return this.save(task);
   }
 
+  setPlanned(id: string, day: string | undefined): Task {
+    const task = this.get(id);
+    if (day === undefined) delete task.planned;
+    else if (!isIsoDay(day)) throw new RangeError(`Not a YYYY-MM-DD day: ${day}`);
+    else task.planned = day;
+    return this.save(task);
+  }
+
+  addNote(id: string, text: string, day?: string): Task {
+    return this.save(appendNote(this.get(id), text, day));
+  }
+
+  setPlan(id: string, steps: string[]): Task {
+    return this.save(setPlan(this.get(id), steps));
+  }
+
   reorder(status: TaskStatus, ids: string[]): void {
     ids.forEach((id, i) => {
       const task = this.state.tasks.get(id);
@@ -317,4 +343,49 @@ export function buildResumePrompt(task: Task): string {
     for (const item of open) lines.push(`- [ ] ${item.text}`);
   }
   return lines.join('\n').trimEnd();
+}
+
+/** Local calendar day as YYYY-MM-DD. */
+export function isoDay(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** True for a real YYYY-MM-DD calendar day. */
+export function isIsoDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(y!, m! - 1, d!));
+  return date.getUTCMonth() === m! - 1 && date.getUTCDate() === d!;
+}
+
+/** Adds days to a YYYY-MM-DD day. */
+export function shiftDay(day: string, days: number): string {
+  const [y, m, d] = day.split('-').map(Number);
+  const date = new Date(Date.UTC(y!, m! - 1, d!));
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoDay(new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+/** Tasks planned for the day, and overdue ones that are not done. */
+export function plannedFor(tasks: Task[], day: string): { today: Task[]; overdue: Task[] } {
+  const today = tasks.filter((t) => t.planned === day);
+  const overdue = tasks.filter((t) => t.planned && t.planned < day && t.status !== 'done');
+  return { today, overdue };
+}
+
+/** Appends text to the note subsection for the day, creating it when absent. */
+export function appendNote(task: Task, text: string, day: string = isoDay()): Task {
+  const body = text.trim();
+  if (body === '') return { ...task };
+  const notes = task.notes.map((n) => ({ ...n }));
+  const existing = notes.find((n) => n.date === day);
+  if (existing) existing.body = existing.body === '' ? body : `${existing.body}\n\n${body}`;
+  else notes.push({ date: day, body });
+  return { ...task, notes };
+}
+
+/** Replaces the plan steps. */
+export function setPlan(task: Task, steps: string[]): Task {
+  return { ...task, plan: steps.map((s) => s.trim()).filter((s) => s !== '') };
 }

@@ -22,12 +22,21 @@ case "${LEDGE_FAKE_MODE:-task}" in
       "current "*"--context"*)
         printf '%s\n' \
           "Ledge task: Release watch banner for stale tabs (release-watch-banner)" \
+          "Planned: 2026-09-18 (on 2026-09-18)" \
           "" \
-          "Requirement: Users keep old code in open tabs after a deploy." \
+          "Requirement:" \
+          "Users keep old code in open tabs after a deploy." \
           "" \
-          "Unchecked:" \
+          "Plan:" \
+          "1. Write version.json at build time" \
+          "2. Poll it on an interval and on window focus" \
+          "" \
+          "Still to do:" \
           "- [ ] Build step that writes version.json" \
-          "- [ ] Banner component in the shell"
+          "- [ ] Banner component in the shell" \
+          "" \
+          "Notes (2026-09-15):" \
+          "Decided to poll a version file rather than use a service worker."
         exit 0
         ;;
       "current "*"--json"*)

@@ -31,6 +31,49 @@ describe('format', () => {
   test('section prints (none) for empty rows', () => {
     assert.equal(format.section('Pending', []), 'Pending\n  (none)');
   });
+
+  test('latestNote prefers the given day and falls back to the newest entry', () => {
+    const notes = [
+      { date: '2026-09-13', body: 'older' },
+      { date: '2026-09-14', body: 'newer' },
+    ];
+    const task = { notes } as unknown as Task;
+    assert.equal(format.latestNote(task, '2026-09-13')?.body, 'older');
+    assert.equal(format.latestNote(task, '2026-09-15')?.body, 'newer', 'newest when none today');
+    assert.equal(format.latestNote({ notes: [] } as unknown as Task, '2026-09-15'), undefined);
+  });
+
+  test('renderContext keeps the requirement and open items and trims the note', () => {
+    const task = {
+      id: 'ctx',
+      title: 'Context',
+      status: 'current',
+      order: 1,
+      sessions: [],
+      created: '2026-09-15T09:00:00+05:30',
+      updated: '2026-09-15T09:00:00+05:30',
+      planned: '2026-09-15',
+      requirement: 'Must hold.',
+      plan: ['Step one'],
+      checklist: [
+        { text: 'Open one', done: false },
+        { text: 'Closed one', done: true },
+      ],
+      notes: [{ date: '2026-09-15', body: Array.from({ length: 30 },
+        (_, i) => `note ${i + 1}`).join('\n') }],
+      extra: '',
+      file: '/tmp/ctx.md',
+    } as unknown as Task;
+    const out = format.renderContext(task, '2026-09-15', 20).split('\n');
+    assert.ok(out.length <= 20, `got ${out.length} lines`);
+    assert.ok(out.includes('Planned: 2026-09-15 (today)'));
+    assert.ok(out.includes('Must hold.'));
+    assert.ok(out.includes('1. Step one'));
+    assert.ok(out.includes('- [ ] Open one'));
+    assert.ok(!out.includes('- [x] Closed one'));
+    assert.ok(out.includes('note 30'), 'the newest note line is kept');
+    assert.ok(!out.includes('note 1'), 'the oldest note line is dropped');
+  });
 });
 
 describe('taskForRepo', () => {

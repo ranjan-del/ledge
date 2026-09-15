@@ -87,6 +87,10 @@ assert_contains "task: prints unchecked items" "- [ ] Banner component in the sh
 assert_eq "task: calls ledge current --context with cwd" \
   "current --repo /home/user/code/demo-app --context" "$logged"
 
+assert_contains "task: prints the planned day" "Planned: 2026-09-18" "$out"
+assert_contains "task: prints the plan" "1. Write version.json at build time" "$out"
+assert_contains "task: prints the latest note" "Notes (2026-09-15):" "$out"
+
 run_hook session-start.sh session-start.json none "$bin"
 assert_eq "none: exit 0" 0 "$rc"
 assert_eq "none: prints the no-task line" \
@@ -151,8 +155,12 @@ assert_empty "malformed payload: ledge never called" "$logged"
 echo "# pre-compact.sh"
 run_hook pre-compact.sh pre-compact.json task "$bin"
 assert_eq "task: exit 0" 0 "$rc"
-assert_contains "task: prints the reminder" "Before compaction, update the Ledge checklist" "$out"
+assert_contains "task: prints the reminder" "Before compaction, update the Ledge task" "$out"
 assert_contains "task: names the task id" "release-watch-banner" "$out"
+assert_contains "task: asks for the checklist" "tick finished checklist items" "$out"
+assert_contains "task: asks for a closing note" "ledge note release-watch-banner" "$out"
+assert_contains "task: says what the note must cover" \
+  "what was done, what is left and what the next session needs" "$out"
 assert_eq "task: exactly one line" 1 "$(line_count "$out")"
 assert_eq "task: resolves the task by cwd" \
   "current --repo /home/user/code/demo-app --json" "$logged"
@@ -168,6 +176,33 @@ assert_empty "error: prints nothing" "$out"
 run_hook pre-compact.sh pre-compact.json task "$nobin"
 assert_eq "missing ledge: exit 0" 0 "$rc"
 assert_empty "missing ledge: prints nothing" "$out"
+
+echo "# commands/ledge.md"
+cmd="$here/../commands/ledge.md"
+if [ -f "$cmd" ]; then ok "ledge.md exists"; else ko "ledge.md exists" "missing"; fi
+md=$(cat "$cmd")
+for sub in plan note when; do
+  assert_contains "ledge.md documents the $sub subcommand" "### $sub" "$md"
+  assert_contains "ledge.md runs ledge $sub" "ledge $sub <id>" "$md"
+done
+assert_contains "ledge.md documents the planned key" "planned: 2026-09-18" "$md"
+assert_contains "ledge.md documents the Plan section" "## Plan" "$md"
+assert_contains "ledge.md documents dated notes" "### YYYY-MM-DD" "$md"
+assert_contains "ledge.md orders a plan before editing code" \
+  "Write a plan before you edit code." "$md"
+assert_contains "ledge.md orders a note on a decision" \
+  "Append a note when you decide something or something surprises you." "$md"
+assert_contains "ledge.md orders a closing note before compaction and at session end" \
+  "Append a closing note before compaction and at the end of a session." "$md"
+assert_contains "ledge.md says what the closing note covers" \
+  "what is left, and where it was left" "$md"
+assert_contains "ledge.md tells the assistant to read the notes" \
+  "Read the notes at the start." "$md"
+if grep -q '—' "$cmd"; then ko "ledge.md has no em dashes" "found an em dash"; else
+  ok "ledge.md has no em dashes"; fi
+long=$(awk 'length > 100 { print FNR; exit }' "$cmd")
+if [ -z "$long" ]; then ok "ledge.md lines stay under 100"; else
+  ko "ledge.md lines stay under 100" "line $long is longer"; fi
 
 echo
 printf '%s passed, %s failed\n' "$pass" "$fail"

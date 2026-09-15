@@ -8,6 +8,11 @@ import {
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { defaultConfig, expandTilde, ledgeHome, saveConfig } from './config.ts';
+import {
+  appendNote as appendNotePure,
+  isIsoDay,
+  setPlan as setPlanPure,
+} from './planning.ts';
 import { parseTask, serializeTask } from './task-file-node.ts';
 import { formatIso, slugify, taskFileName } from './task-file.ts';
 import type { Task, TaskStatus } from './types.ts';
@@ -147,7 +152,9 @@ export class TaskStore {
       created: now,
       updated: now,
       requirement: (input.requirement ?? '').trim(),
+      plan: [],
       checklist: [],
+      notes: [],
       extra: '',
       file: '',
     };
@@ -227,6 +234,41 @@ export class TaskStore {
     }
     const checklist = task.checklist.map((item, i) => (i === index ? { ...item, done } : item));
     return this.save({ ...task, checklist });
+  }
+
+  /**
+   * Sets or clears the day the person intends to work on the task. Pass undefined to clear it.
+   * Validates the day here rather than at the file boundary so a typo fails loudly on the way in
+   * instead of being silently dropped on the way out.
+   */
+  setPlanned(id: string, day: string | undefined): Task {
+    const task = this.get(id);
+    if (day === undefined) {
+      const next = { ...task };
+      delete next.planned;
+      return this.save(next);
+    }
+    if (!isIsoDay(day)) throw new RangeError(`Not a YYYY-MM-DD day: ${day}`);
+    return this.save({ ...task, planned: day });
+  }
+
+  /**
+   * Appends text to today's note subsection, creating it when absent. This is how a session
+   * records a decision or a dead end: the reasoning behind the checklist, kept in the file so
+   * the next session reads it for free at session start.
+   */
+  addNote(id: string, text: string, day?: string): Task {
+    const task = this.get(id);
+    return this.save(appendNotePure(task, text, day));
+  }
+
+  /**
+   * Replaces the plan steps of a task. Written before work starts, so a session that starts with
+   * no plan has somewhere to put one before it touches code.
+   */
+  setPlan(id: string, steps: string[]): Task {
+    const task = this.get(id);
+    return this.save(setPlanPure(task, steps));
   }
 
   /**

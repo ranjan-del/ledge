@@ -11,6 +11,17 @@ export interface ChecklistItem {
   done: boolean;
 }
 
+/**
+ * One dated entry under `## Notes`. Notes are the session memory: the reasoning, the decisions
+ * and the dead ends that the checklist cannot carry. Newest last, one entry per calendar day.
+ */
+export interface NoteEntry {
+  /** Calendar day, `YYYY-MM-DD`, taken from the `### ` subheading. */
+  date: string;
+  /** Markdown body of that day's note, trimmed. */
+  body: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -25,10 +36,19 @@ export interface Task {
   updated: string;
   /** Reason the task was parked. Only meaningful when status is backlog. */
   parked?: string;
+  /**
+   * Calendar day the person intends to work on this, `YYYY-MM-DD`, no time and no zone. Absent
+   * when nothing is planned; a malformed value in the file is dropped rather than thrown.
+   */
+  planned?: string;
   /** Markdown under `## Requirement`, trimmed. */
   requirement: string;
+  /** Ordered steps under `## Plan`, the intent. Empty when the section is absent. */
+  plan: string[];
   checklist: ChecklistItem[];
-  /** Anything after the checklist, trimmed and preserved verbatim. */
+  /** Dated entries under `## Notes`, newest last. Empty when the section is absent. */
+  notes: NoteEntry[];
+  /** Anything after the known sections, trimmed and preserved verbatim. */
   extra: string;
   /** Absolute path of the .md file, '' when unsaved. */
   file: string;
