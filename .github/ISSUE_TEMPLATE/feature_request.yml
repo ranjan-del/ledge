@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a change to the CLI, the plugin, the desktop app or the task file format
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: "What can you not do today?"
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: "How it would work. If it touches the task file format or config.json, show the new shape."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ledge CLI
+        - "@ledge/core"
+        - Claude Code plugin (/ledge or hooks)
+        - desktop app
+        - terminal support
+        - optional connector
+        - docs
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Fit with the design
+      description: "See ROADMAP.md and docs/adr."
+      options:
+        - label: Works when the task files are edited by hand, by a script and by Claude Code
+        - label: Adds no database, server, daemon or network call to the core
+        - label: Adds no tokens to session start, or says how many and why

@@ -1,0 +1,48 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ledge CLI
+        - "@ledge/core"
+        - Claude Code plugin (/ledge or hooks)
+        - desktop app
+        - docs
+        - CI or release
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: "What you did, what you expected, what happened instead."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: "Minimal steps. If a task file is involved, paste it with anything private removed."
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: "The plugin version, the CLI package version, or the commit hash."
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: "OS, Node and Claude Code versions."
+      placeholder: "macOS 15.6, Node 22.12, Claude Code 2.1"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output or logs
+      description: "CLI output, hook output, or the parse error shown in the panel."
+      render: shell

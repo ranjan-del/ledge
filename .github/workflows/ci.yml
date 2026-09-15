@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  node:
+    name: Node ${{ matrix.node }} tests and typecheck
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+
+  rust:
+    name: cargo check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri 2 Linux prerequisites: https://v2.tauri.app/start/prerequisites/
+      # plus the packages tauri-action's own example installs (patchelf, libappindicator3-dev).
+      - name: Install Tauri prerequisites (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libayatana-appindicator3-dev
+
+      # https://github.com/dtolnay/rust-toolchain: `@stable` selects the stable toolchain.
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # tauri-build's generate_context! needs the frontend dist folder to exist, so build the
+      # Svelte UI first. `--if-present` keeps this step green until apps/desktop has a build script.
+      - name: Build the desktop UI
+        run: |
+          npm ci
+          npm run build --workspace apps/desktop --if-present
+
+      # Advisory for now: the Rust shell is written without a local toolchain in phase 0.
+      # Remove `continue-on-error` and make this job required once the app compiles.
+      - name: cargo check
+        working-directory: apps/desktop/src-tauri
+        continue-on-error: true
+        run: cargo check

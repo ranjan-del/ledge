@@ -2,7 +2,7 @@
 
 Date: 2026-09-14
 Status: approved direction, awaiting spec review
-Author: Ranjan G, with Claude Code
+Author: Ranjan G
 
 ## 1. What Ledge is
 
