@@ -1,0 +1,20 @@
+{
+  "name": "@ledge/cli",
+  "version": "0.1.0",
+  "description": "The ledge command: current tasks, backlog and pending git work.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "ledge": "./bin/ledge.ts" },
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ledge/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.0"
+  }
+}

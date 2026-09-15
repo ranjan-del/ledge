@@ -1,0 +1,28 @@
+{
+  "name": "ledge",
+  "owner": {
+    "name": "Ranjan G",
+    "url": "https://github.com/ranjan-del"
+  },
+  "metadata": {
+    "description": "Ledge, a local-first work assistant for people who use Claude Code",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ledge",
+      "source": "./plugin",
+      "description": "The /ledge command plus SessionStart, Stop and PreCompact hooks",
+      "version": "0.1.0",
+      "author": {
+        "name": "Ranjan G",
+        "url": "https://github.com/ranjan-del"
+      },
+      "homepage": "https://github.com/ranjan-del/ledge",
+      "repository": "https://github.com/ranjan-del/ledge",
+      "license": "MIT",
+      "keywords": ["tasks", "productivity", "local-first", "markdown"],
+      "category": "productivity"
+    }
+  ]
+}
