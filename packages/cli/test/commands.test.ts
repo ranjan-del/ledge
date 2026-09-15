@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -605,5 +605,65 @@ describe('current --context with plan, notes and planned day', () => {
     assert.doesNotMatch(r.stdout, /A note that cannot fit anywhere/);
     assert.match(r.stdout, /^Requirement:$/m);
     assert.match(lines[39]!, /more lines/);
+  });
+});
+
+describe('delete', () => {
+  test('without --yes it explains itself and changes nothing', async () => {
+    await run(['add', 'Created by mistake']);
+    const path = (await run(['open', 'created-by-mistake'])).stdout.trim();
+
+    const refused = await run(['delete', 'created-by-mistake']);
+
+    assert.equal(refused.code, 1, 'refusing to delete is a usage error, not a success');
+    assert.match(refused.stdout, /would permanently delete/i);
+    assert.match(refused.stdout, /no undo/i);
+    assert.match(refused.stdout, /--yes/);
+    assert.match(refused.stdout, /ledge done created-by-mistake/);
+    assert.equal(existsSync(path), true, 'the file is still there');
+  });
+
+  test('--yes destroys the task and its file', async () => {
+    await run(['add', 'Created by mistake']);
+    const path = (await run(['open', 'created-by-mistake'])).stdout.trim();
+    assert.equal(existsSync(path), true);
+
+    const gone = await run(['delete', 'created-by-mistake', '--yes']);
+
+    assert.equal(gone.code, 0);
+    assert.match(gone.stdout, /^Deleted created-by-mistake: Created by mistake$/m);
+    assert.equal(existsSync(path), false, 'the file is gone from disk');
+    const listed = (await desk()).current.map((t) => t.id);
+    assert.ok(!listed.includes('created-by-mistake'));
+  });
+
+  test('it deletes rather than archives, unlike done', async () => {
+    await run(['add', 'Finish me']);
+    await run(['add', 'Bin me']);
+
+    await run(['done', 'finish-me']);
+    await run(['delete', 'bin-me', '--yes']);
+
+    const after = await desk();
+    assert.ok(!after.current.some((t) => t.id === 'finish-me'));
+    assert.ok(!after.current.some((t) => t.id === 'bin-me'));
+    const archive = join(process.env.LEDGE_HOME ?? '', 'archive');
+    const archived = readdirSync(archive);
+    assert.ok(
+      archived.some((f) => f.includes('finish-me')),
+      'done keeps the file in the archive',
+    );
+    assert.ok(
+      !archived.some((f) => f.includes('bin-me')),
+      'delete leaves nothing behind',
+    );
+  });
+
+  test('an unknown id exits not found and a missing id exits usage', async () => {
+    const missing = await run(['delete', 'never-existed', '--yes']);
+    assert.equal(missing.code, 2);
+    const noId = await run(['delete']);
+    assert.equal(noId.code, 1);
+    assert.match(noId.stderr, /delete needs a task id/);
   });
 });

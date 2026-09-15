@@ -9,6 +9,8 @@ export interface Flags {
   json: boolean;
   context: boolean;
   backlog: boolean;
+  /** Confirms a destructive command. Only `delete` reads it, and it refuses to act without it. */
+  yes: boolean;
   repo?: string;
 }
 

@@ -6,6 +6,7 @@ import { EXIT, NotFoundError, UsageError } from './context.ts';
 import { renderCommandHelp, renderHelp } from './help.ts';
 import { run as add } from './commands/add.ts';
 import { run as current } from './commands/current.ts';
+import { run as deleteTask } from './commands/delete.ts';
 import { run as done } from './commands/done.ts';
 import { run as init } from './commands/init.ts';
 import { run as link } from './commands/link.ts';
@@ -34,6 +35,7 @@ const COMMANDS: Record<string, CommandRunner> = {
   add,
   start,
   park,
+  delete: deleteTask,
   done,
   current,
   link,
@@ -70,8 +72,8 @@ function version(): string {
 export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<number> {
   const { out, err, cwd } = { ...defaultIo(), ...io };
 
-  let values: { json?: boolean; context?: boolean; backlog?: boolean; repo?: string;
-    help?: boolean; version?: boolean };
+  let values: { json?: boolean; context?: boolean; backlog?: boolean; yes?: boolean;
+    repo?: string; help?: boolean; version?: boolean };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -80,6 +82,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
         json: { type: 'boolean' },
         context: { type: 'boolean' },
         backlog: { type: 'boolean' },
+        yes: { type: 'boolean' },
         repo: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -115,6 +118,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
     json: values.json ?? false,
     context: values.context ?? false,
     backlog: values.backlog ?? false,
+    yes: values.yes ?? false,
     repo: values.repo,
   };
   const ctx: CommandContext = { args: positionals.slice(1), flags, cwd, out, err };

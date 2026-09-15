@@ -16,6 +16,10 @@ export const COMMANDS: Record<string, HelpEntry> = {
   start: { usage: 'ledge start <id> [--json]', summary: 'Set status current, order 1' },
   park: { usage: 'ledge park <id> "reason" [--json]', summary: 'Set status backlog with a reason' },
   done: { usage: 'ledge done <id> [--json]', summary: 'Set status done, move to archive' },
+  delete: {
+    usage: 'ledge delete <id> --yes [--json]',
+    summary: 'Destroy a task and its file, no undo',
+  },
   current: {
     usage: 'ledge current [--repo path] [--json|--context]',
     summary: 'Print the current task whose repo matches',

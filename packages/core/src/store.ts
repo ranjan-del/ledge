@@ -1,9 +1,10 @@
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
@@ -188,6 +189,19 @@ export class TaskStore {
     const saved = this.save({ ...task, status: 'backlog', order, parked: reason.trim() });
     this.compact(task.status, id);
     return saved;
+  }
+
+/**
+   * Deletes a task and its file for good. This is the one destructive operation in the store:
+   * `done` keeps the file by moving it to the archive, so there was no way to get rid of a task
+   * created by mistake. Anything calling this has to ask the person first, because there is no
+   * undo and nothing is left on disk to recover from.
+   */
+  remove(id: string): Task {
+    const task = this.get(id);
+    if (task.file) rmSync(task.file, { force: true });
+    this.compact(task.status, id);
+    return task;
   }
 
   /**

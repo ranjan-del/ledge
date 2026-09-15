@@ -280,3 +280,46 @@ test('setPlan replaces the steps in the file', () => {
   assert.deepEqual(store.setPlan(t.id, []).plan, []);
   assert.throws(() => store.setPlan('nope', ['x']), /Task not found/);
 });
+
+test('remove deletes the task and its file for good', () => {
+  const store = freshStore();
+  for (const sample of store.list()) store.remove(sample.id);
+  const keep = store.add({ title: 'Keep me' });
+  const doomed = store.add({ title: 'Delete me' });
+  assert.ok(existsSync(doomed.file));
+
+  const removed = store.remove(doomed.id);
+
+  assert.equal(removed.id, doomed.id);
+  assert.equal(existsSync(doomed.file), false, 'the file is gone from disk');
+  assert.equal(existsSync(keep.file), true, 'the other task is untouched');
+  assert.deepEqual(
+    store.list().map((t) => t.id),
+    [keep.id],
+  );
+  assert.equal(store.archived().length, 0, 'remove does not archive, it destroys');
+});
+
+test('remove closes the order gap it leaves behind', () => {
+  const store = freshStore();
+  for (const sample of store.list()) store.remove(sample.id);
+  const a = store.add({ title: 'First' });
+  const b = store.add({ title: 'Second' });
+  const c = store.add({ title: 'Third' });
+  store.reorder('current', [a.id, b.id, c.id]);
+
+  store.remove(b.id);
+
+  assert.deepEqual(
+    store.list('current').map((t) => [t.id, t.order]),
+    [
+      [a.id, 1],
+      [c.id, 2],
+    ],
+  );
+});
+
+test('remove refuses an id that does not exist', () => {
+  const store = freshStore();
+  assert.throws(() => store.remove('never-existed'));
+});
