@@ -2,6 +2,15 @@
   Ledge design tokens.
   Light palette on :root, dark under prefers-color-scheme and an explicit data-theme,
   per-OS overrides on html[data-os]. Every colour used by a component comes from here.
+
+  Two families of colour, kept apart on purpose:
+  - accent, which means "you can act on this" and is the only hue that may be branded;
+  - semantic state (late, attention, review, done, neutral), which means "this is the state
+    the work is in". A state colour must never be the accent hue, or a row that is merely
+    interactive reads as a row that is in trouble.
+  The v1 hue names (--chip-amber-*, --chip-red-* and friends) are gone: they were only ever
+  used to paint the states below, nothing in the app referred to them by hue any more, and a
+  name that says "amber" cannot tell you whether amber meant late or meant attention.
 */
 :root {
   color-scheme: light dark;
@@ -14,6 +23,12 @@
   --fs-lg: 15px;
   --fs-xl: 18px;
   --lh: 1.45;
+  /* Prose line height, for the one place with real paragraphs to read: task notes. */
+  --lh-prose: 1.55;
+
+  /* Panel slide in and out. Kept in step with PANEL_MS in lib/motion.svelte.ts, which is
+     what delays the window hide by the same amount. */
+  --panel-ms: 160ms;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -36,29 +51,41 @@
   --surface-border: rgba(0, 0, 0, 0.06);
   --control: rgba(120, 120, 128, 0.14);
   --control-active: rgba(255, 255, 255, 0.95);
+  /* Hairline between blocks of content. Sits on glass, so it is ink, not a solid line. */
+  --rule: rgba(60, 60, 67, 0.14);
+  /* Text inputs have to read as writable on a translucent ground. */
+  --field-bg: rgba(255, 255, 255, 0.82);
+  --field-border: rgba(0, 0, 0, 0.12);
 
   --text: #1c1c1e;
-  --text-muted: rgba(60, 60, 67, 0.62);
-  --text-faint: rgba(60, 60, 67, 0.38);
+  /* The supporting greys carry real content (repo, branch, counts, dates) and sit on a
+     translucent ground over a wallpaper nobody chose. They are darker than a document
+     would need for exactly that reason. */
+  --text-muted: rgba(60, 60, 67, 0.72);
+  --text-faint: rgba(60, 60, 67, 0.52);
 
   --accent: #2f6fe4;
   --accent-text: #ffffff;
   --focus: #2f6fe4;
   --danger: #c93b3b;
 
-  --chip-amber-bg: rgba(255, 176, 0, 0.2);
-  --chip-amber-fg: #7a5200;
-  --chip-red-bg: rgba(220, 60, 60, 0.16);
-  --chip-red-fg: #8f1f1f;
-  --chip-teal-bg: rgba(0, 150, 150, 0.16);
-  --chip-teal-fg: #005c5c;
-  --chip-green-bg: rgba(40, 170, 90, 0.18);
-  --chip-green-fg: #16612f;
-  --chip-grey-bg: rgba(120, 120, 128, 0.14);
-  --chip-grey-fg: rgba(60, 60, 67, 0.75);
+  --danger-bg: rgba(201, 59, 59, 0.14);
+  --late-bg: rgba(214, 60, 60, 0.16);
+  --late-fg: #8f1f1f;
+  --late-edge: #d0433f;
+  --attention-bg: rgba(255, 176, 0, 0.2);
+  --attention-fg: #7a5200;
+  --attention-edge: #d39200;
+  --review-bg: rgba(0, 150, 150, 0.16);
+  --review-fg: #005c5c;
+  --done-bg: rgba(40, 170, 90, 0.18);
+  --done-fg: #16612f;
+  --done-fill: #35a05c;
+  --neutral-bg: rgba(120, 120, 128, 0.14);
+  --neutral-fg: rgba(60, 60, 67, 0.75);
 
-  --progress-track: rgba(0, 0, 0, 0.08);
-  --progress-fill: var(--accent);
+  --progress-track: rgba(60, 60, 67, 0.16);
+  --progress-fill: var(--done-fill);
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.18);
@@ -78,24 +105,31 @@
     --surface-border: rgba(255, 255, 255, 0.06);
     --control: rgba(120, 120, 128, 0.24);
     --control-active: rgba(99, 99, 102, 0.9);
+    --rule: rgba(235, 235, 245, 0.16);
+    --field-bg: rgba(255, 255, 255, 0.09);
+    --field-border: rgba(255, 255, 255, 0.16);
     --text: #f2f2f7;
-    --text-muted: rgba(235, 235, 245, 0.6);
-    --text-faint: rgba(235, 235, 245, 0.35);
+    --text-muted: rgba(235, 235, 245, 0.7);
+    --text-faint: rgba(235, 235, 245, 0.48);
     --accent: #6f9cff;
     --accent-text: #0b1a3a;
     --focus: #8fb2ff;
     --danger: #ff6b6b;
-    --chip-amber-bg: rgba(255, 176, 0, 0.22);
-    --chip-amber-fg: #ffd17a;
-    --chip-red-bg: rgba(255, 90, 90, 0.2);
-    --chip-red-fg: #ffa3a3;
-    --chip-teal-bg: rgba(0, 190, 190, 0.2);
-    --chip-teal-fg: #8fe8e8;
-    --chip-green-bg: rgba(60, 200, 110, 0.2);
-    --chip-green-fg: #9fe6b6;
-    --chip-grey-bg: rgba(120, 120, 128, 0.24);
-    --chip-grey-fg: rgba(235, 235, 245, 0.7);
-    --progress-track: rgba(255, 255, 255, 0.1);
+    --danger-bg: rgba(255, 107, 107, 0.2);
+    --late-bg: rgba(255, 90, 90, 0.2);
+    --late-fg: #ffb0b0;
+    --late-edge: #ff7a7a;
+    --attention-bg: rgba(255, 176, 0, 0.22);
+    --attention-fg: #ffd17a;
+    --attention-edge: #e0a03c;
+    --review-bg: rgba(0, 190, 190, 0.2);
+    --review-fg: #8fe8e8;
+    --done-bg: rgba(60, 200, 110, 0.2);
+    --done-fg: #9fe6b6;
+    --done-fill: #4cc47a;
+    --neutral-bg: rgba(120, 120, 128, 0.24);
+    --neutral-fg: rgba(235, 235, 245, 0.7);
+    --progress-track: rgba(255, 255, 255, 0.14);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
     --button-bg: rgba(242, 242, 247, 0.92);
     --button-fg: #1c1c1e;
@@ -110,24 +144,31 @@
   --surface-border: rgba(255, 255, 255, 0.06);
   --control: rgba(120, 120, 128, 0.24);
   --control-active: rgba(99, 99, 102, 0.9);
+  --rule: rgba(235, 235, 245, 0.16);
+  --field-bg: rgba(255, 255, 255, 0.09);
+  --field-border: rgba(255, 255, 255, 0.16);
   --text: #f2f2f7;
-  --text-muted: rgba(235, 235, 245, 0.6);
-  --text-faint: rgba(235, 235, 245, 0.35);
+  --text-muted: rgba(235, 235, 245, 0.7);
+  --text-faint: rgba(235, 235, 245, 0.48);
   --accent: #6f9cff;
   --accent-text: #0b1a3a;
   --focus: #8fb2ff;
   --danger: #ff6b6b;
-  --chip-amber-bg: rgba(255, 176, 0, 0.22);
-  --chip-amber-fg: #ffd17a;
-  --chip-red-bg: rgba(255, 90, 90, 0.2);
-  --chip-red-fg: #ffa3a3;
-  --chip-teal-bg: rgba(0, 190, 190, 0.2);
-  --chip-teal-fg: #8fe8e8;
-  --chip-green-bg: rgba(60, 200, 110, 0.2);
-  --chip-green-fg: #9fe6b6;
-  --chip-grey-bg: rgba(120, 120, 128, 0.24);
-  --chip-grey-fg: rgba(235, 235, 245, 0.7);
-  --progress-track: rgba(255, 255, 255, 0.1);
+  --danger-bg: rgba(255, 107, 107, 0.2);
+  --late-bg: rgba(255, 90, 90, 0.2);
+  --late-fg: #ffb0b0;
+  --late-edge: #ff7a7a;
+  --attention-bg: rgba(255, 176, 0, 0.22);
+  --attention-fg: #ffd17a;
+  --attention-edge: #e0a03c;
+  --review-bg: rgba(0, 190, 190, 0.2);
+  --review-fg: #8fe8e8;
+  --done-bg: rgba(60, 200, 110, 0.2);
+  --done-fg: #9fe6b6;
+  --done-fill: #4cc47a;
+  --neutral-bg: rgba(120, 120, 128, 0.24);
+  --neutral-fg: rgba(235, 235, 245, 0.7);
+  --progress-track: rgba(255, 255, 255, 0.14);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
   --button-bg: rgba(242, 242, 247, 0.92);
   --button-fg: #1c1c1e;

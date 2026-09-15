@@ -78,9 +78,4 @@ a {
   white-space: nowrap;
 }
 
-/* Motion is opt-in and short. Nothing loops. */
-@media (prefers-reduced-motion: no-preference) {
-  .motion {
-    transition: background-color 120ms ease, opacity 120ms ease, transform 120ms ease;
-  }
-}
+/* Motion is opt-in, short, and defined in styles/ui.css under one media query. */

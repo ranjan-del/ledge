@@ -8,6 +8,7 @@ import {
   mkdir,
   readDir,
   readTextFile,
+  remove,
   rename,
   stat,
   watch,
@@ -77,6 +78,11 @@ export async function ensureDir(path: string): Promise<void> {
 /** Moves a file within the store (used when a task is marked done). */
 export function moveFile(from: string, to: string): Promise<void> {
   return rename(from, to);
+}
+
+/** Deletes a file for good. Used by task deletion, which does not archive. */
+export function removeFile(path: string): Promise<void> {
+  return remove(path);
 }
 
 /** Modification time of a path as ISO, or undefined when unavailable. */

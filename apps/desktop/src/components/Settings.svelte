@@ -47,37 +47,37 @@
 
   <label>
     <span>Repository roots, one per line</span>
-    <textarea rows="3" bind:value={roots} spellcheck="false"></textarea>
+    <textarea class="field" rows="3" bind:value={roots} spellcheck="false"></textarea>
   </label>
   <label>
     <span>Git scan every (minutes)</span>
-    <input type="number" min="1" step="1" bind:value={interval} />
+    <input class="field" type="number" min="1" step="1" bind:value={interval} />
   </label>
   <label>
     <span>Terminal</span>
-    <input type="text" bind:value={terminal} spellcheck="false" />
+    <input class="field" type="text" bind:value={terminal} spellcheck="false" />
   </label>
   <div class="two">
     <label>
       <span>Claude command</span>
-      <input type="text" bind:value={claudeCommand} spellcheck="false" />
+      <input class="field" type="text" bind:value={claudeCommand} spellcheck="false" />
     </label>
     <label>
       <span>Resume flag</span>
-      <input type="text" bind:value={resumeFlag} spellcheck="false" />
+      <input class="field" type="text" bind:value={resumeFlag} spellcheck="false" />
     </label>
   </div>
   <div class="two">
     <label>
       <span>Edge</span>
-      <select bind:value={edge}>
+      <select class="field" bind:value={edge}>
         <option value="right">Right</option>
         <option value="left">Left</option>
       </select>
     </label>
     <label>
       <span>Theme</span>
-      <select bind:value={theme}>
+      <select class="field" bind:value={theme}>
         <option value="system">System</option>
         <option value="light">Light</option>
         <option value="dark">Dark</option>
@@ -85,7 +85,7 @@
     </label>
   </div>
   <div class="actions">
-    <button type="submit" class="primary">Save</button>
+    <button type="submit" class="btn primary motion">Save</button>
   </div>
 </form>
 
@@ -95,17 +95,6 @@
     flex-direction: column;
     gap: var(--space-3);
     padding: 0 var(--space-1);
-  }
-  .back {
-    align-self: flex-start;
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    padding: 3px var(--space-2) 3px var(--space-1);
-    border-radius: var(--radius-sm);
-    color: var(--accent);
-    font-size: var(--fs-sm);
-    font-weight: 600;
   }
   h2 {
     margin: 0;
@@ -123,18 +112,6 @@
     display: flex;
     gap: var(--space-2);
   }
-  input,
-  textarea,
-  select {
-    padding: 5px var(--space-2);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--surface-border);
-    background: var(--surface);
-    color: var(--text);
-    font-size: var(--fs-base);
-    user-select: text;
-    -webkit-user-select: text;
-  }
   textarea {
     resize: vertical;
     font-family: var(--font-mono);
@@ -144,12 +121,7 @@
     display: flex;
     justify-content: flex-end;
   }
-  .primary {
-    padding: 5px var(--space-4);
-    border-radius: var(--radius-sm);
-    background: var(--accent);
-    color: var(--accent-text);
-    font-size: var(--fs-sm);
-    font-weight: 600;
+  .actions .btn {
+    padding-inline: var(--space-4);
   }
 </style>

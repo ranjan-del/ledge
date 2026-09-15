@@ -10,17 +10,29 @@ import {
   defaultConfig,
   isPending,
   parseTask,
+  plannedFor,
   serializeTask,
+  slugify,
+  taskFileName,
   type Config,
   type RepoStatus,
   type Task,
 } from '@ledge/core/pure';
 import { invoke } from '@tauri-apps/api/core';
 import { homeDir } from '@tauri-apps/api/path';
-import { ensureDir, listDir, moveFile, pathExists, readText, watchPaths, writeText } from './io.ts';
-import { basename, isTaskFile, join, ledgeHomeFor } from './paths.ts';
+import {
+  ensureDir,
+  listDir,
+  moveFile,
+  pathExists,
+  readText,
+  removeFile,
+  watchPaths,
+  writeText,
+} from './io.ts';
+import { basename, expandTilde, isTaskFile, join, ledgeHomeFor } from './paths.ts';
 import { discoverRepos, scanRepoList } from './scan.ts';
-import { nowIso } from './time.ts';
+import { nowIso, todayIso } from './time.ts';
 
 export const WATCH_DEBOUNCE_MS = 150;
 export type Tab = 'current' | 'backlog' | 'pending';
@@ -138,6 +150,31 @@ export function taskTitleForRepo(repo: string): string | undefined {
   return desk.tasks.find((t) => t.repo === repo)?.title;
 }
 
+/**
+ * What is on for today: tasks planned for this day, and ones whose planned day has passed
+ * and which are still not done. Backlog tasks count: planning one for today is how a person
+ * says they mean to pick it up, whatever list it currently sits in.
+ */
+export function todayPlan(day: string = todayIso()): { today: Task[]; overdue: Task[] } {
+  /* `plannedFor` keeps the order it is given, so the sorting is this caller's job: today in
+     the same priority order as the Current list, and overdue oldest first, because the
+     oldest thing you have already missed is the one that matters most. */
+  const { today, overdue } = plannedFor([...desk.tasks].sort(byOrderThenUpdated), day);
+  return {
+    today,
+    overdue: overdue.sort((a, b) => (a.planned ?? '').localeCompare(b.planned ?? '')),
+  };
+}
+
+/**
+ * Repositories from the last scan holding work that is neither committed nor pushed. This is
+ * the "needs attention" count on the home view; `desk.pending` is wider, because a branch
+ * merely behind its upstream is worth listing but is not work of yours that could be lost.
+ */
+export function attentionRepos(): RepoStatus[] {
+  return desk.pending.filter((p) => p.dirty.length > 0 || p.ahead > 0);
+}
+
 /* ------------------------------------------------------------------ ui state */
 
 export function setTab(tab: Tab): void {
@@ -210,7 +247,8 @@ function upsertTask(task: Task): void {
   else desk.tasks[i] = task;
 }
 
-function removeTask(file: string): void {
+/** Drops a task from the desk without touching the disk. Deselects it if it was open. */
+function forgetTask(file: string): void {
   desk.tasks = desk.tasks.filter((t) => t.file !== file);
   desk.broken = desk.broken.filter((b) => b.file !== file);
   if (desk.selectedFile === file) desk.selectedFile = null;
@@ -230,7 +268,7 @@ function markBroken(file: string, e: unknown): void {
 /** Reads and parses one task file, replacing its previous copy in the desk. */
 export async function reloadTask(file: string): Promise<void> {
   if (!(await pathExists(file))) {
-    removeTask(file);
+    forgetTask(file);
     return;
   }
   try {
@@ -243,7 +281,9 @@ export async function reloadTask(file: string): Promise<void> {
 /** Reads every task in tasks/ and counts archive/. Used at boot and on directory events. */
 export async function reloadTasks(): Promise<void> {
   const entries = await listDir(desk.tasksDir);
-  const files = entries.filter((e) => e.isFile && isTaskFile(e.name)).map((e) => join(desk.tasksDir, e.name));
+  const files = entries
+    .filter((e) => e.isFile && isTaskFile(e.name))
+    .map((e) => join(desk.tasksDir, e.name));
   const tasks: Task[] = [];
   const broken: BrokenTask[] = [];
   for (const file of files) {
@@ -277,6 +317,67 @@ export async function toggleChecklist(task: Task, index: number, done: boolean):
   await saveTask({ ...task, checklist });
 }
 
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Everything a view can supply when adding a task. Only the title is required. */
+export interface NewTask {
+  title: string;
+  /** Which list it joins. Defaults to current; the Backlog tab passes backlog. */
+  status?: 'current' | 'backlog';
+  /** Repository path; `~` is expanded against the home folder. */
+  repo?: string;
+  /** YYYY-MM-DD. Anything else is ignored rather than written to the file. */
+  planned?: string;
+}
+
+/** An id not already taken by a task on the desk, so two same-titled tasks cannot collide. */
+function uniqueId(base: string): string {
+  const taken = new Set(desk.tasks.map((t) => t.id));
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 100; n += 1) {
+    if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+/**
+ * Creates a task file. The title is enough: everything else is optional, and the new task
+ * joins the end of its list so it never displaces what is already at the top. `status` is how
+ * the Backlog tab adds straight to the backlog instead of to Current.
+ */
+export async function addTask(input: NewTask): Promise<Task> {
+  const title = input.title.trim();
+  if (title === '') throw new Error('A task needs a title.');
+  const created = nowIso();
+  const id = uniqueId(slugify(title));
+  const status = input.status ?? 'current';
+  const siblings = status === 'backlog' ? backlogTasks() : currentTasks();
+  const orders = siblings.map((t) => t.order);
+  const task: Task = {
+    id,
+    title,
+    status,
+    order: orders.length === 0 ? 1 : Math.max(...orders) + 1,
+    sessions: [],
+    created,
+    updated: created,
+    requirement: '',
+    plan: [],
+    checklist: [],
+    notes: [],
+    extra: '',
+    file: join(desk.tasksDir, taskFileName({ id, created })),
+  };
+  const repo = input.repo?.trim();
+  if (repo) task.repo = expandTilde(repo, desk.home);
+  const planned = input.planned?.trim();
+  if (planned && DAY.test(planned)) task.planned = planned;
+  await ensureDir(desk.tasksDir);
+  await writeText(task.file, serializeTask(task, { home: desk.home }));
+  upsertTask(task);
+  return task;
+}
+
 /** Moves a task to Current at position 1 and shifts the other current tasks down. */
 export async function startTask(task: Task): Promise<void> {
   const others = currentTasks().filter((t) => t.file !== task.file);
@@ -297,8 +398,23 @@ export async function markDone(task: Task): Promise<void> {
   const saved = await saveTask({ ...task, status: 'done' });
   await ensureDir(desk.archiveDir);
   await moveFile(saved.file, join(desk.archiveDir, basename(saved.file)));
-  removeTask(saved.file);
+  forgetTask(saved.file);
   desk.archivedCount += 1;
+}
+
+/**
+ * Deletes a task and its file for good. Unlike `markDone`, nothing is archived: this is the
+ * exit for a task that should never have existed. The task is looked up by id because that is
+ * the identity the rest of the world uses, and the open detail view closes with it.
+ *
+ * `removeTask(id)` is the name @ledge/core/pure and the CLI are gaining for this; it is not
+ * exported from core yet, so the implementation lives here and callers already use that name.
+ */
+export async function removeTask(id: string): Promise<void> {
+  const task = desk.tasks.find((t) => t.id === id);
+  if (!task) return;
+  await removeFile(task.file);
+  forgetTask(task.file);
 }
 
 /* ------------------------------------------------------------------ watching */

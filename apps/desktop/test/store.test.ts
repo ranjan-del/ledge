@@ -54,6 +54,10 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     disk.files.set(b, disk.files.get(a) as string);
     disk.files.delete(a);
   }),
+  remove: vi.fn(async (p: string) => {
+    if (!disk.files.has(p)) throw new Error(`ENOENT ${p}`);
+    disk.files.delete(p);
+  }),
   stat: vi.fn(async () => ({ mtime: new Date() })),
   watch: vi.fn(async (paths: unknown, cb: (e: never) => void, opts: unknown) => {
     disk.state.watchCb = cb as typeof disk.state.watchCb;
@@ -78,13 +82,18 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 import { readTextFile, rename } from '@tauri-apps/plugin-fs';
 import {
   WATCH_DEBOUNCE_MS,
+  addTask,
+  attentionRepos,
   backlogTasks,
   boot,
   currentTasks,
   desk,
   markDone,
   mergeConfig,
+  removeTask,
+  select,
   shutdown,
+  todayPlan,
   toggleChecklist,
 } from '../src/lib/store.svelte.ts';
 
@@ -226,5 +235,126 @@ describe('store', () => {
     const calls = disk.state.gitCalls.length;
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(disk.state.gitCalls.length).toBe(calls + 1);
+  });
+
+  it('adds a task from a title alone and writes a real file', async () => {
+    const created = await addTask({ title: 'Write the release notes' });
+    expect(created.id).toBe('write-the-release-notes');
+    const expected = `${TASKS_DIR}/${created.created.slice(0, 10)}-write-the-release-notes.md`;
+    expect(created.file).toBe(expected);
+    const written = disk.files.get(created.file) as string;
+    expect(written).toContain('title: Write the release notes');
+    expect(written).toContain('status: current');
+    expect(written).toContain('## Requirement');
+    expect(written).toContain('## Checklist');
+    expect(written).not.toContain('repo:');
+    expect(written).not.toContain('planned:');
+    expect(currentTasks().map((t) => t.id)).toContain('write-the-release-notes');
+  });
+
+  it('puts a new task at the end of Current, so it cannot displace the top one', async () => {
+    await addTask({ title: 'Second thing' });
+    await addTask({ title: 'Third thing' });
+    expect(currentTasks().map((t) => t.order)).toEqual([1, 2, 3]);
+    expect(currentTasks()[0].id).toBe('release-watch-banner');
+  });
+
+  it('writes the repo and the planned day when the more fields are used', async () => {
+    const created = await addTask({
+      title: 'Ship the banner',
+      repo: '~/code/app',
+      planned: '2026-09-18',
+    });
+    expect(created.repo).toBe(`${HOME}/code/app`);
+    expect(created.planned).toBe('2026-09-18');
+    const written = disk.files.get(created.file) as string;
+    expect(written).toContain('repo: ~/code/app');
+    expect(written).toContain('planned: 2026-09-18');
+  });
+
+  it('ignores a planned value that is not a calendar day rather than writing it', async () => {
+    const created = await addTask({ title: 'Vague', planned: 'sometime' });
+    expect(created.planned).toBeUndefined();
+    expect(disk.files.get(created.file) as string).not.toContain('planned:');
+  });
+
+  it('refuses a blank title and does not touch the disk', async () => {
+    const before = disk.files.size;
+    await expect(addTask({ title: '   ' })).rejects.toThrow(/needs a title/);
+    expect(disk.files.size).toBe(before);
+  });
+
+  it('never reuses an id, so two tasks with one title stay two files', async () => {
+    const first = await addTask({ title: 'Same title' });
+    const second = await addTask({ title: 'Same title' });
+    expect(first.id).toBe('same-title');
+    expect(second.id).toBe('same-title-2');
+    expect(first.file).not.toBe(second.file);
+  });
+
+  it('sorts today by priority and overdue oldest first, since core keeps input order', () => {
+    const base = currentTasks()[0];
+    desk.tasks = [
+      { ...base, id: 'c', file: 'c.md', order: 3, planned: '2026-09-18' },
+      { ...base, id: 'old', file: 'old.md', order: 9, planned: '2026-09-01' },
+      { ...base, id: 'a', file: 'a.md', order: 1, planned: '2026-09-18' },
+      { ...base, id: 'newer', file: 'newer.md', order: 2, planned: '2026-09-15' },
+      { ...base, id: 'none', file: 'none.md', order: 4, planned: undefined },
+      { ...base, id: 'done', file: 'done.md', order: 5, planned: '2026-09-02', status: 'done' },
+    ];
+    const { today, overdue } = todayPlan('2026-09-18');
+    expect(today.map((t) => t.id)).toEqual(['a', 'c']);
+    expect(overdue.map((t) => t.id)).toEqual(['old', 'newer']);
+  });
+
+  it('reports what is planned for a day, including a task added for today', async () => {
+    const created = await addTask({ title: 'Due today', planned: '2026-09-18' });
+    const { today, overdue } = todayPlan('2026-09-18');
+    expect(today.map((t) => t.id)).toEqual([created.id]);
+    expect(overdue).toEqual([]);
+    expect(todayPlan('2026-09-20').overdue.map((t) => t.id)).toEqual([created.id]);
+  });
+
+  it('deletes a task and its file for good, and closes it if it was open', async () => {
+    select(TASK_A_FILE);
+    expect(desk.selectedFile).toBe(TASK_A_FILE);
+    await removeTask('release-watch-banner');
+    expect(disk.files.has(TASK_A_FILE)).toBe(false);
+    expect(desk.tasks.map((t) => t.id)).toEqual(['optimistic-crud']);
+    expect(desk.selectedFile).toBeNull();
+    /* Deleted, not archived: nothing moved and the done count did not move either. */
+    expect(disk.files.has(`${LEDGE_HOME}/archive/2026-09-14-release-watch-banner.md`)).toBe(false);
+    expect(desk.archivedCount).toBe(0);
+  });
+
+  it('shrugs at an id it does not know rather than throwing', async () => {
+    const before = disk.files.size;
+    await removeTask('never-existed');
+    expect(disk.files.size).toBe(before);
+    expect(desk.tasks).toHaveLength(2);
+  });
+
+  it('can delete a task it just added', async () => {
+    const created = await addTask({ title: 'Junk from a stray keypress' });
+    expect(disk.files.has(created.file)).toBe(true);
+    await removeTask(created.id);
+    expect(disk.files.has(created.file)).toBe(false);
+    expect(desk.tasks.map((t) => t.id)).not.toContain(created.id);
+  });
+
+  it('adds straight to the backlog when asked, numbering within that list', async () => {
+    const created = await addTask({ title: 'Wait for the design', status: 'backlog' });
+    expect(created.status).toBe('backlog');
+    expect(created.order).toBe(2);
+    expect(disk.files.get(created.file) as string).toContain('status: backlog');
+    expect(backlogTasks().map((t) => t.id)).toEqual(['wait-for-the-design', 'optimistic-crud']);
+    expect(currentTasks().map((t) => t.id)).toEqual(['release-watch-banner']);
+  });
+
+  it('counts only repos with uncommitted or unpushed work as needing attention', () => {
+    expect(desk.pending.map((p) => p.repo)).toEqual([`${HOME}/code/app`]);
+    expect(attentionRepos()).toHaveLength(1);
+    desk.pending = [{ ...desk.pending[0], ahead: 0, dirty: [] }];
+    expect(attentionRepos()).toHaveLength(0);
   });
 });

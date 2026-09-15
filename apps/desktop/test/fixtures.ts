@@ -1,4 +1,7 @@
-/** Shared fixtures: task Markdown that follows spec section 2 and a porcelain v2 sample. */
+/**
+ * Shared fixtures: task Markdown that follows spec section 2 and contract section 2, plus a
+ * porcelain v2 sample.
+ */
 import { parseTask, type RepoStatus, type Task } from '@ledge/core/pure';
 
 export const HOME = '/home/t';
@@ -85,6 +88,15 @@ export function taskB(): Task {
   return parseTask(TASK_B, TASK_B_FILE, { home: HOME });
 }
 
+export function taskC(): Task {
+  return parseTask(TASK_C, TASK_C_FILE, { home: HOME });
+}
+
+/** A copy of task A planned for a given day, for the Today block and overdue marking. */
+export function plannedTask(day: string, overrides: Partial<Task> = {}): Task {
+  return { ...taskA(), planned: day, ...overrides };
+}
+
 export function repoStatus(overrides: Partial<RepoStatus> = {}): RepoStatus {
   return {
     repo: `${HOME}/code/app`,
@@ -100,3 +112,51 @@ export function repoStatus(overrides: Partial<RepoStatus> = {}): RepoStatus {
     ...overrides,
   };
 }
+
+/** The day the dated fixtures are written against. Pass it as `day` and the clock cannot bite. */
+export const DAY = '2026-09-15';
+/** Four days before DAY, for overdue rows. */
+export const DAY_PAST = '2026-09-11';
+
+export const TASK_C_FILE = `${TASKS_DIR}/2026-09-11-version-file-rollout.md`;
+
+/** A task with all three contract section 2 additions: planned, a plan, and dated notes. */
+export const TASK_C = `---
+id: version-file-rollout
+title: Roll the version file out to every app
+status: current
+order: 2
+repo: ~/code/admin-web
+planned: ${DAY_PAST}
+sessions:
+  - 4c1d9a2b
+created: 2026-09-11T09:30:00+05:30
+updated: 2026-09-14T18:10:00+05:30
+---
+
+## Requirement
+
+Every app writes version.json at build and the shell reloads when it changes.
+
+## Plan
+
+1. Write version.json in the build step
+2. Poll it on an interval and on window focus
+3. Show the banner and reload only when the tab is idle
+
+## Checklist
+
+- [x] Build step writes version.json
+- [ ] Poll on focus
+- [ ] Banner in the shell
+
+## Notes
+
+### 2026-09-12
+Polling a static file beats a service worker here: the app already fetches its config the
+same way, so there is nothing new to cache-bust.
+
+### 2026-09-14
+Chunk load errors are the safety net, not the mechanism. Caught one in the wild today and the
+reload recovered it, so the banner can stay quiet until the poll notices.
+`;

@@ -89,6 +89,23 @@
       ]
     },
     {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/*"
+        },
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        }
+      ]
+    },
+    {
       "identifier": "fs:allow-exists",
       "allow": [
         {

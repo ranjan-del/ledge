@@ -1,0 +1,274 @@
+/*
+  Shared UI primitives: the handful of things that must look identical everywhere in the
+  panel. They live in one global sheet rather than in each component because a chip in the
+  Today block, a chip on a task row and a chip on a Pending row are the same object, and
+  because Svelte scopes component CSS per component, so repeating them there would ship the
+  same rules five times. Layout stays inside each component; only the shared objects are here.
+*/
+
+/* ---------------------------------------------------------------- state chips */
+/*
+  A chip names a state in words. Colour is the second signal, never the only one, so a chip
+  is readable in greyscale and to anyone who does not see the hue difference.
+*/
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.chip svg {
+  flex: none;
+}
+.chip.late {
+  background: var(--late-bg);
+  color: var(--late-fg);
+}
+.chip.attention {
+  background: var(--attention-bg);
+  color: var(--attention-fg);
+}
+.chip.review {
+  background: var(--review-bg);
+  color: var(--review-fg);
+}
+.chip.done {
+  background: var(--done-bg);
+  color: var(--done-fg);
+}
+.chip.neutral {
+  background: var(--neutral-bg);
+  color: var(--neutral-fg);
+}
+
+/* ---------------------------------------------------------------- cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+}
+
+/* ---------------------------------------------------------------- block headings */
+/*
+  Every block on the home view is announced the same way: a short label, a hairline that
+  carries the eye across the panel, and an optional count. One line, never two.
+*/
+.block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.block-head::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+.block-head .count {
+  order: 3;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+}
+.block-head .chip {
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+.block-head .when {
+  order: 2;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- buttons and fields */
+/*
+  Five states, every one of them different to the eye: rest, hover, active (it presses in),
+  focus-visible (the ring from base.css), and disabled (it stops responding to the pointer
+  as well as looking faded). The primary action is the only filled one on any given screen.
+*/
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: 5px var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--control);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: var(--control-active);
+}
+.btn:active {
+  transform: translateY(0.5px) scale(0.985);
+  filter: brightness(0.96);
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+.btn.danger {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.btn.danger:hover {
+  background: var(--late-bg);
+}
+.btn:disabled {
+  opacity: 0.42;
+  box-shadow: none;
+  pointer-events: none;
+}
+.field {
+  min-width: 0;
+  padding: 5px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--field-border);
+  background: var(--field-bg);
+  color: var(--text);
+  font-size: var(--fs-base);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.field::placeholder {
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- panes */
+/*
+  A tab that can be added to has the same shape: one region that scrolls and one foot that
+  does not, so the add row is reachable however far down the list you are. Current and
+  Backlog both use this; Pending does not, because git rows cannot be typed.
+*/
+.pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-3);
+}
+.pane-foot {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--rule);
+}
+
+/* ---------------------------------------------------------------- repeated layout */
+/* Rows in a block, the back link out of a sub-view, a trailing timestamp, a row of
+   buttons and a line of quiet supporting text: each of these appears in three or four
+   components, and each was written out three or four times before. */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px var(--space-2) 3px var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.when-text {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.quiet {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.quiet.faint {
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------- text utilities */
+.trunc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ---------------------------------------------------------------- motion */
+/*
+  Every transition and keyframe in the app that is not inside a component lives here, and all
+  of it inside one query, so "no motion" is a single switch rather than a promise. Entrances
+  are opt-in through the `enter` class, which is only present for the first moments after the
+  panel paints (see lib/motion.svelte.ts); nothing here loops except the live dot, which has
+  its own component.
+*/
+@media (prefers-reduced-motion: no-preference) {
+  .motion {
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      border-color 120ms ease,
+      opacity 120ms ease,
+      transform 120ms ease;
+  }
+  .rows.enter > * {
+    animation: row-in 200ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  }
+  .rows.enter > *:nth-child(2) { animation-delay: 30ms; }
+  .rows.enter > *:nth-child(3) { animation-delay: 60ms; }
+  .rows.enter > *:nth-child(4) { animation-delay: 90ms; }
+  .rows.enter > *:nth-child(n + 5) { animation-delay: 120ms; }
+  @keyframes row-in {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+  }
+}
