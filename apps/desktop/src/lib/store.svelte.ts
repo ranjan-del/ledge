@@ -15,6 +15,7 @@ import {
   type RepoStatus,
   type Task,
 } from '@ledge/core/pure';
+import { invoke } from '@tauri-apps/api/core';
 import { homeDir } from '@tauri-apps/api/path';
 import { ensureDir, listDir, moveFile, pathExists, readText, watchPaths, writeText } from './io.ts';
 import { basename, isTaskFile, join, ledgeHomeFor } from './paths.ts';
@@ -101,6 +102,32 @@ export function selectedTask(): Task | undefined {
   return desk.selectedFile ? desk.tasks.find((t) => t.file === desk.selectedFile) : undefined;
 }
 
+/**
+ * Turns anything thrown into readable text. The shell and filesystem plugins reject with a
+ * plain string rather than an Error, so reading `.message` blindly renders "undefined" and
+ * hides the only clue about what actually failed.
+ */
+export function report(level: 'warn' | 'error', message: string): void {
+  void invoke('log_message', { level, message }).catch(() => {
+    /* the logger must never be the thing that fails */
+  });
+}
+
+export function errorText(e: unknown): string {
+  if (e instanceof Error && e.message) return e.message;
+  if (typeof e === 'string' && e) return e;
+  if (e && typeof e === 'object') {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === 'string' && m) return m;
+    try {
+      return JSON.stringify(e);
+    } catch {
+      return String(e);
+    }
+  }
+  return String(e);
+}
+
 /** Git status for a task's repo from the last scan, if the repo was scanned. */
 export function statusForRepo(repo: string | undefined): RepoStatus | undefined {
   return repo ? desk.pending.find((p) => p.repo === repo) : undefined;
@@ -156,7 +183,8 @@ async function loadConfigFile(): Promise<void> {
     try {
       next = mergeConfig(JSON.parse(await readText(desk.configPath)));
     } catch (e) {
-      desk.error = `config.json: ${(e as Error).message}`;
+      desk.error = `config.json: ${errorText(e)}`;
+      report('error', desk.error);
     }
   }
   const intervalChanged = next.scan.intervalMinutes !== desk.config.scan.intervalMinutes;
@@ -193,7 +221,7 @@ function markBroken(file: string, e: unknown): void {
   const entry: BrokenTask =
     e instanceof TaskParseError
       ? { file, error: e.message, line: e.line }
-      : { file, error: (e as Error).message ?? String(e) };
+      : { file, error: errorText(e) };
   const i = desk.broken.findIndex((b) => b.file === file);
   if (i === -1) desk.broken = [...desk.broken, entry];
   else desk.broken[i] = entry;
@@ -225,7 +253,7 @@ export async function reloadTasks(): Promise<void> {
       broken.push(
         e instanceof TaskParseError
           ? { file, error: e.message, line: e.line }
-          : { file, error: (e as Error).message ?? String(e) },
+          : { file, error: errorText(e) },
       );
     }
   }
@@ -318,7 +346,8 @@ async function startWatching(): Promise<void> {
       WATCH_DEBOUNCE_MS,
     );
   } catch (e) {
-    desk.error = `watch: ${(e as Error).message}`;
+    desk.error = `watch: ${errorText(e)}`;
+    report('error', desk.error);
   }
 }
 
@@ -352,10 +381,19 @@ export async function scanNow(): Promise<void> {
       .filter(isPending)
       .sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
     desk.lastScan = new Date().toISOString();
-    const cache: ScanCache = { scannedAt: desk.lastScan, repos: results };
-    await writeText(desk.cachePath, JSON.stringify(cache) + '\n');
+    desk.error = null;
+    // The cache only makes the next launch quicker. Losing it must never discard a scan that
+    // already succeeded, so a write failure is reported without throwing the results away.
+    try {
+      const cache: ScanCache = { scannedAt: desk.lastScan, repos: results };
+      await writeText(desk.cachePath, JSON.stringify(cache) + '\n');
+    } catch (e) {
+      desk.error = `could not save the scan cache: ${errorText(e)}`;
+      report('error', desk.error);
+    }
   } catch (e) {
-    desk.error = `scan: ${(e as Error).message}`;
+    desk.error = `scan: ${errorText(e)}`;
+    report('error', desk.error);
   } finally {
     desk.scanning = false;
   }

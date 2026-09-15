@@ -2,7 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Ledge windows: read, write and watch the store under $HOME/.ledge, list folders under $HOME to find repositories, run git status, and launch a terminal.",
-  "windows": ["button", "panel"],
+  "windows": [
+    "button",
+    "panel"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
@@ -19,13 +22,74 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$HOME/.ledge" },
-        { "path": "$HOME/.ledge/**" }
+        {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/*"
+        },
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        }
       ]
     },
-    "fs:allow-read-text-file",
-    "fs:allow-write-text-file",
-    "fs:allow-exists",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/*"
+        },
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/*"
+        },
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        }
+      ]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/*"
+        },
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME/.ledge/.scan-cache.json"
+        },
+        {
+          "path": "$HOME/**"
+        }
+      ]
+    },
     "fs:allow-mkdir",
     "fs:allow-rename",
     "fs:allow-watch",
@@ -33,17 +97,29 @@
     {
       "identifier": "fs:allow-read-dir",
       "allow": [
-        { "path": "$HOME/.ledge" },
-        { "path": "$HOME/.ledge/**" },
-        { "path": "$HOME" },
-        { "path": "$HOME/**" }
+        {
+          "path": "$HOME/.ledge"
+        },
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME"
+        },
+        {
+          "path": "$HOME/**"
+        }
       ]
     },
     {
       "identifier": "fs:allow-stat",
       "allow": [
-        { "path": "$HOME/.ledge/**" },
-        { "path": "$HOME/**/.git/index" }
+        {
+          "path": "$HOME/.ledge/**"
+        },
+        {
+          "path": "$HOME/**/.git/index"
+        }
       ]
     },
     {
@@ -54,7 +130,9 @@
           "cmd": "git",
           "args": [
             "-C",
-            { "validator": "[^\\r\\n]+" },
+            {
+              "validator": "[^\\r\\n]+"
+            },
             "status",
             "--porcelain=v2",
             "--branch"
@@ -65,9 +143,13 @@
           "cmd": "osascript",
           "args": [
             "-e",
-            { "validator": "[\\s\\S]+" },
+            {
+              "validator": "[\\s\\S]+"
+            },
             "-e",
-            { "validator": "[\\s\\S]+" }
+            {
+              "validator": "[\\s\\S]+"
+            }
           ]
         },
         {
@@ -75,10 +157,14 @@
           "cmd": "wt",
           "args": [
             "-d",
-            { "validator": "[^\\r\\n]+" },
+            {
+              "validator": "[^\\r\\n]+"
+            },
             "cmd",
             "/k",
-            { "validator": "[\\s\\S]+" }
+            {
+              "validator": "[\\s\\S]+"
+            }
           ]
         },
         {
@@ -88,7 +174,9 @@
             "-e",
             "sh",
             "-c",
-            { "validator": "[\\s\\S]+" }
+            {
+              "validator": "[\\s\\S]+"
+            }
           ]
         }
       ]

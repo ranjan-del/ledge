@@ -22,7 +22,7 @@ tauri-build = { version = "2", features = [] }
 # on automatically when `app.macOSPrivateApi` is true, but `cargo check` in CI does not, so
 # it is declared here explicitly.
 tauri = { version = "2", features = ["macos-private-api"] }
-tauri-plugin-fs = "2"
+tauri-plugin-fs = { version = "2", features = ["watch"] }
 tauri-plugin-shell = "2"
 tauri-plugin-os = "2"
 window-vibrancy = "0.8"

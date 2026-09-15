@@ -183,19 +183,61 @@ fn apply_glass(panel: &WebviewWindow) {
     }
 }
 
+/// Records a message from the webview on the process error stream. The panel can only show
+/// one line of error text at a time and disappears when it loses focus, so without this a
+/// failure that happens while nobody is looking leaves no trace to debug from.
+#[tauri::command]
+fn log_message(level: String, message: String) {
+    eprintln!("ledge [{level}]: {message}");
+}
+
+/// Parks the button against the right edge of the work area, vertically centred, the first
+/// time the app starts. Without this the window manager decides, which drops a 48 pixel
+/// square in the middle of the screen. The webview calls `snap_button` afterwards with the
+/// position saved in config, so this only has to be a sensible default.
+fn place_button_initial(app: &AppHandle) {
+    let Ok(button) = window(app, BUTTON) else { return };
+    let Ok(Some(monitor)) = button.current_monitor() else { return };
+    let area = monitor.work_area();
+    let Ok(size) = button.outer_size() else { return };
+    let x = area.position.x + area.size.width as i32 - size.width as i32 - MARGIN;
+    let y = area.position.y + (area.size.height as i32 - size.height as i32) / 2;
+    let _ = button.set_position(PhysicalPosition::new(x, y));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
         .setup(|app| {
+            // Ledge is an assistant panel, not an application. Accessory keeps it out of the
+            // Dock and out of the application switcher, so the floating button is the only
+            // thing the person ever sees of it.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             if let Some(panel) = app.get_webview_window(PANEL) {
                 apply_glass(&panel);
+                // The panel opens only when the button is pressed. Hiding it explicitly here
+                // matters because applying the native material realises the window, which can
+                // leave it on screen in the wrong place and covering the button.
+                let _ = panel.hide();
             }
+            place_button_initial(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![toggle_panel, snap_button, open_terminal])
-        .run(tauri::generate_context!())
-        .expect("error while running Ledge");
+        .invoke_handler(tauri::generate_handler![toggle_panel, snap_button, open_terminal, log_message])
+        .build(tauri::generate_context!())
+        .expect("error while building Ledge");
+
+    app.run(|_app, event| {
+        // Hiding the panel must never end the process: the button has to stay on screen.
+        if let tauri::RunEvent::ExitRequested { api, code, .. } = &event {
+            if code.is_none() {
+                api.prevent_exit();
+            }
+        }
+    });
 }
