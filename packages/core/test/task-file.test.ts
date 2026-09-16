@@ -10,6 +10,23 @@ import {
   TaskParseError,
 } from '../src/index.ts';
 
+const HOME = homedir();
+
+/** Minimal valid frontmatter, so a test can focus on one body section. */
+function frontmatter(): string {
+  return [
+    '---',
+    'id: t',
+    'title: T',
+    'status: current',
+    'order: 1',
+    'sessions: []',
+    'created: 2026-09-16T10:00:00+05:30',
+    'updated: 2026-09-16T10:00:00+05:30',
+    '---',
+  ].join('\n');
+}
+
 const sample = `---
 id: release-watch-banner
 title: Release watch banner for stale tabs
@@ -414,4 +431,47 @@ R.
   assert.match(serializeTask(task), /^1\. Write version\.json$/m);
   assert.match(serializeTask(task), /^2\. Poll it on focus$/m);
   assert.equal(task.extra, '');
+});
+
+test('a wrapped plan step keeps its second line instead of losing it', () => {
+  const md = frontmatter() + [
+    '',
+    '## Plan',
+    '',
+    '1. A step that wraps onto',
+    '   a second line with detail',
+    '2. A short step',
+    '',
+  ].join('\n');
+
+  const task = parseTask(md, 'x.md', { home: HOME });
+
+  assert.deepEqual(task.plan, [
+    'A step that wraps onto a second line with detail',
+    'A short step',
+  ]);
+  const twice = parseTask(serializeTask(task, { home: HOME }), 'x.md', { home: HOME });
+  assert.deepEqual(twice.plan, task.plan, 'stable on a second pass');
+});
+
+test('a wrapped checklist item keeps its second line instead of stranding it', () => {
+  const md = frontmatter() + [
+    '',
+    '## Checklist',
+    '',
+    '- [ ] An item that wraps onto',
+    '      a second line with detail',
+    '- [x] A short item',
+    '',
+  ].join('\n');
+
+  const task = parseTask(md, 'x.md', { home: HOME });
+
+  assert.deepEqual(
+    task.checklist.map((c) => c.text),
+    ['An item that wraps onto a second line with detail', 'A short item'],
+  );
+  assert.equal(task.checklist[0]?.done, false);
+  assert.equal(task.checklist[1]?.done, true);
+  assert.equal(task.extra, '', 'the wrapped line is not stranded in extra');
 });

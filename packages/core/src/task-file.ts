@@ -39,6 +39,8 @@ const CHECKLIST_HEADING = '## Checklist';
 const NOTES_HEADING = '## Notes';
 const CHECKLIST_ITEM = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
 const PLAN_ITEM = /^\s*(?:\d+[.)]|[-*])\s+(.*)$/;
+/** An indented line that starts no new item, so it is the wrapped tail of the item above. */
+const CONTINUATION = /^\s+\S/;
 const NOTE_HEADING = /^###\s+(.+)$/;
 const SECTION_HEADING = /^##\s+(.+)$/;
 
@@ -154,7 +156,16 @@ function parsePlan(lines: string[]): string[] {
   for (const line of lines) {
     if (CHECKLIST_ITEM.test(line)) continue;
     const m = PLAN_ITEM.exec(line);
-    if (m && m[1]!.trim() !== '') steps.push(m[1]!.trim());
+    if (m && m[1]!.trim() !== '') {
+      steps.push(m[1]!.trim());
+      continue;
+    }
+    // An indented line that is not a new item belongs to the step above it. Without this a
+    // step wrapped across two lines loses its second line for good on the next save, which is
+    // silent data loss in a file people hand-edit.
+    if (steps.length > 0 && CONTINUATION.test(line)) {
+      steps[steps.length - 1] = `${steps[steps.length - 1]} ${line.trim()}`;
+    }
   }
   return steps;
 }
@@ -217,8 +228,16 @@ function parseBody(lines: string[]): Body {
       const items: ChecklistItem[] = [];
       for (const line of section.lines) {
         const m = CHECKLIST_ITEM.exec(line);
-        if (m) items.push({ text: m[2]!.trim(), done: m[1]!.toLowerCase() === 'x' });
-        else if (line.trim() !== '') extra.push(line);
+        if (m) {
+          items.push({ text: m[2]!.trim(), done: m[1]!.toLowerCase() === 'x' });
+        } else if (items.length > 0 && CONTINUATION.test(line)) {
+          // A wrapped item continues the one above it rather than becoming stray text. Before
+          // this the second line was cut loose into `extra` and reappeared below the list.
+          const last = items[items.length - 1]!;
+          items[items.length - 1] = { ...last, text: `${last.text} ${line.trim()}` };
+        } else if (line.trim() !== '') {
+          extra.push(line);
+        }
       }
       checklist = items;
       seen.add(section.heading);
