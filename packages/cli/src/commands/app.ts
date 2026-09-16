@@ -52,10 +52,12 @@ export async function run(ctx: CommandContext): Promise<number> {
     return EXIT.notFound;
   }
 
-  const child =
-    platform() === 'darwin'
-      ? spawn('open', ['-a', found], { detached: true, stdio: 'ignore' })
-      : spawn(found, [], { detached: true, stdio: 'ignore' });
+  // Run the binary rather than handing the bundle to the system opener. The opener registers
+  // the launch with the system, which puts Ledge in the Dock's recent applications even though
+  // it declares itself an accessory and takes no Dock slot of its own. Ledge is meant to be the
+  // floating button and nothing else, so it starts without announcing itself.
+  const binary = found.endsWith('.app') ? join(found, 'Contents', 'MacOS', 'ledge-desktop') : found;
+  const child = spawn(binary, [], { detached: true, stdio: 'ignore' });
   child.unref();
 
   if (!ctx.flags.json) ctx.out(`Started ${found}`);
