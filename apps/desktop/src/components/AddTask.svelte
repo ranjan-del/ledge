@@ -26,9 +26,34 @@
     defaultRepo?: string;
     /** Start expanded. The empty home view uses this so the field is already there. */
     open?: boolean;
+    /**
+     * Keyboard hint shown right-aligned on the closed row, for example `⌘N`. It is only ever
+     * passed where that key really is wired up, so the row cannot promise a shortcut that does
+     * nothing.
+     */
+    shortcut?: string;
+    /**
+     * Bumping this number opens the row and focuses the field. It is how the ⌘N shortcut
+     * reaches in from the panel without the panel owning this component's state.
+     */
+    focusKey?: number;
+    /**
+     * Show the line that spells the keys out. On the empty state it is off: that screen is
+     * down to a heading, a field and a button, and a field whose placeholder asks a question
+     * does not also need a caption telling you that Enter works.
+     */
+    hint?: boolean;
   }
 
-  let { onadd, status = 'current', defaultRepo = '', open = false }: Props = $props();
+  let {
+    onadd,
+    status = 'current',
+    defaultRepo = '',
+    shortcut,
+    focusKey = 0,
+    open = false,
+    hint = true,
+  }: Props = $props();
 
   const backlog = $derived(status === 'backlog');
   const label = $derived(backlog ? 'Add to the backlog' : 'Add a task');
@@ -47,6 +72,16 @@
   /* Focus follows the field into existence, so the one interaction really is one interaction. */
   $effect(() => {
     if (expanded && field) field.focus();
+  });
+
+  /* A plain let, not $state: this only remembers which bump has been handled, and making it
+     reactive would make the effect retrigger itself. */
+  let handledKey = untrack(() => focusKey);
+  $effect(() => {
+    if (focusKey === handledKey) return;
+    handledKey = focusKey;
+    expanded = true;
+    field?.focus();
   });
 
   function reset(close: boolean) {
@@ -90,7 +125,10 @@
       <path d="M6 1.5v9M1.5 6h9" fill="none" stroke="currentColor" stroke-width="1.6"
         stroke-linecap="round" />
     </svg>
-    {label}
+    <span class="what">{label}</span>
+    {#if shortcut}
+      <span class="kbd">{shortcut}</span>
+    {/if}
   </button>
 {:else}
   <!-- A form is interactive by definition, and Escape has to work from any field in it,
@@ -138,7 +176,7 @@
     {/if}
     {#if error}
       <p class="error">{error}</p>
-    {:else}
+    {:else if hint}
       <p class="tip">
         Enter {backlog ? 'parks it' : 'adds it'}. Escape closes. A title is enough.
       </p>
@@ -159,6 +197,10 @@
     font-size: var(--fs-base);
     font-weight: 500;
     text-align: left;
+  }
+  .open .what {
+    flex: 1;
+    min-width: 0;
   }
   .open:hover {
     background: var(--surface);

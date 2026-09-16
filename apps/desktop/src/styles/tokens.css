@@ -78,6 +78,10 @@
   --attention-edge: #d39200;
   --review-bg: rgba(0, 150, 150, 0.16);
   --review-fg: #005c5c;
+  /* "In Progress": work that has started but is not today's business. Blue, so it cannot be
+     mistaken for the green of work that is running now. */
+  --info-bg: rgba(47, 111, 228, 0.14);
+  --info-fg: #204c9e;
   --done-bg: rgba(40, 170, 90, 0.18);
   --done-fg: #16612f;
   --done-fill: #35a05c;
@@ -88,10 +92,9 @@
   --progress-fill: var(--done-fill);
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.18);
 
-  --button-bg: rgba(28, 28, 30, 0.9);
-  --button-fg: #ffffff;
+  /* The floating button paints itself: the orb, its halo and its contact shadow are drawn in
+     Button.svelte from the icon's geometry, so there is no plate colour to name here. */
   --badge-bg: #ff5f57;
   --badge-fg: #ffffff;
 }
@@ -124,6 +127,8 @@
     --attention-edge: #e0a03c;
     --review-bg: rgba(0, 190, 190, 0.2);
     --review-fg: #8fe8e8;
+    --info-bg: rgba(111, 156, 255, 0.2);
+    --info-fg: #a9c5ff;
     --done-bg: rgba(60, 200, 110, 0.2);
     --done-fg: #9fe6b6;
     --done-fill: #4cc47a;
@@ -131,8 +136,6 @@
     --neutral-fg: rgba(235, 235, 245, 0.7);
     --progress-track: rgba(255, 255, 255, 0.14);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --button-bg: rgba(242, 242, 247, 0.92);
-    --button-fg: #1c1c1e;
   }
 }
 
@@ -163,6 +166,8 @@
   --attention-edge: #e0a03c;
   --review-bg: rgba(0, 190, 190, 0.2);
   --review-fg: #8fe8e8;
+  --info-bg: rgba(111, 156, 255, 0.2);
+  --info-fg: #a9c5ff;
   --done-bg: rgba(60, 200, 110, 0.2);
   --done-fg: #9fe6b6;
   --done-fill: #4cc47a;
@@ -170,8 +175,6 @@
   --neutral-fg: rgba(235, 235, 245, 0.7);
   --progress-track: rgba(255, 255, 255, 0.14);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --button-bg: rgba(242, 242, 247, 0.92);
-  --button-fg: #1c1c1e;
 }
 
 /* Per-OS material and radius. Native vibrancy on macOS and Mica on Windows do most of

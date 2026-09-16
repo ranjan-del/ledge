@@ -13,9 +13,11 @@ import {
   plannedFor,
   serializeTask,
   slugify,
+  surfaceCounts as countSurfaces,
   taskFileName,
   type Config,
   type RepoStatus,
+  type SurfaceCounts,
   type Task,
 } from '@ledge/core/pure';
 import { invoke } from '@tauri-apps/api/core';
@@ -35,7 +37,21 @@ import { discoverRepos, scanRepoList } from './scan.ts';
 import { nowIso, todayIso } from './time.ts';
 
 export const WATCH_DEBOUNCE_MS = 150;
-export type Tab = 'current' | 'backlog' | 'pending';
+
+/**
+ * The four surfaces, in the order the tab strip shows them. They are the whole navigation:
+ * NOW is what is in front of you, SESSIONS is what Claude Code has worked on, TASKS is every
+ * list of work there is, and MEMORY is the reasoning those sessions left behind.
+ */
+export type Surface = 'now' | 'sessions' | 'tasks' | 'memory';
+
+/**
+ * The views inside TASKS. Live and Done are the two halves of the work you own; Backlog and
+ * Pending were top-level tabs before the four surfaces and are views here instead, because
+ * both of them answer "which task" rather than "which part of the app". Done is read from
+ * `archive/`, a folder that only grows, so it is never parsed at boot.
+ */
+export type TaskView = 'live' | 'done' | 'backlog' | 'pending';
 
 export interface BrokenTask {
   file: string;
@@ -60,8 +76,16 @@ export interface Desk {
   broken: BrokenTask[];
   pending: RepoStatus[];
   archivedCount: number;
+  /** Parsed archive files, newest first. Empty until the Done view is first asked for. */
+  archive: Task[];
+  /** True once the archive has been read and while that reading is still trusted. */
+  archiveReady: boolean;
+  archiveLoading: boolean;
   selectedFile: string | null;
-  tab: Tab;
+  surface: Surface;
+  view: TaskView;
+  /** The header search is open. The query lives with it, so reopening starts clean. */
+  searching: boolean;
   scanning: boolean;
   lastScan: string | null;
   panelVisible: boolean;
@@ -81,8 +105,13 @@ export const desk: Desk = $state({
   broken: [],
   pending: [],
   archivedCount: 0,
+  archive: [],
+  archiveReady: false,
+  archiveLoading: false,
   selectedFile: null,
-  tab: 'current',
+  surface: 'now',
+  view: 'live',
+  searching: false,
   scanning: false,
   lastScan: null,
   panelVisible: false,
@@ -107,6 +136,20 @@ export function backlogTasks(): Task[] {
   return desk.tasks
     .filter((t) => t.status === 'backlog')
     .sort((a, b) => b.updated.localeCompare(a.updated));
+}
+
+/** Finished tasks from `archive/`, newest first. Empty until the archive has been read. */
+export function doneTasks(): Task[] {
+  return desk.archive;
+}
+
+/**
+ * How many finished tasks the Done button should claim. The count from `listDir` is right
+ * from boot and costs nothing; once the files have actually been parsed the parsed number
+ * is the honest one, since a file the parser refused is not a row anybody can see.
+ */
+export function doneCount(): number {
+  return desk.archiveReady ? desk.archive.length : desk.archivedCount;
 }
 
 /** The task currently open in the detail view, if any. */
@@ -167,6 +210,66 @@ export function todayPlan(day: string = todayIso()): { today: Task[]; overdue: T
 }
 
 /**
+ * What the NOW surface calls "currently working": current tasks planned for today or for a day
+ * that has already passed.
+ *
+ * When no current task names a planned day at all, every one of them lands here instead. That
+ * is not a guess about the person's intent: it is that `planned` is optional, most task files
+ * never carry it, and a desk with work on it under an empty "currently working" heading would
+ * be a lie told by the layout. As soon as any current task does name a day, the field is being
+ * used, and then a day in the future genuinely means "not today" and belongs in Up next.
+ *
+ * Priority order, the same as the Current list.
+ */
+export function workingTasks(day: string = todayIso()): Task[] {
+  const current = currentTasks();
+  if (!current.some((t) => t.planned !== undefined)) return current;
+  return current.filter((t) => t.planned !== undefined && t.planned <= day);
+}
+
+/** The current tasks NOW did not put under "currently working", in the same priority order. */
+export function upNextTasks(day: string = todayIso()): Task[] {
+  const working = new Set(workingTasks(day).map((t) => t.file));
+  return currentTasks().filter((t) => !working.has(t.file));
+}
+
+/**
+ * The number beside each tab, counted by `surfaceCounts` in core so the panel and the CLI agree
+ * on what each one means: `now` is tasks whose status is current, `sessions` is distinct newest
+ * session ids, `tasks` is every task in the live list, and `memory` is total dated notes. The
+ * archive is not passed in, for the same reason no other listing reads it.
+ */
+export function counts(): SurfaceCounts {
+  return countSurfaces(desk.tasks);
+}
+
+/**
+ * Tasks finished today, from the archive. Undefined until the archive has been read, so the
+ * footer can say what it knows instead of claiming zero before it has looked. A task's `updated`
+ * stamp is when it was last written, and `ledge done` writes it on the way to the archive.
+ */
+export function doneToday(day: string = todayIso()): number | undefined {
+  if (!desk.archiveReady) return undefined;
+  return desk.archive.filter((t) => t.updated.slice(0, 10) === day).length;
+}
+
+/**
+ * When the desk last changed, as an ISO stamp: the newer of the last git scan and the most
+ * recently written task file. Undefined when nothing has happened yet at all.
+ */
+export function lastUpdated(): string | undefined {
+  const stamps = desk.tasks.map((t) => t.updated);
+  if (desk.lastScan) stamps.push(desk.lastScan);
+  let best: string | undefined;
+  for (const stamp of stamps) {
+    const at = Date.parse(stamp);
+    if (Number.isNaN(at)) continue;
+    if (best === undefined || at > Date.parse(best)) best = stamp;
+  }
+  return best;
+}
+
+/**
  * Repositories from the last scan holding work that is neither committed nor pushed. This is
  * the "needs attention" count on the home view; `desk.pending` is wider, because a branch
  * merely behind its upstream is worth listing but is not work of yours that could be lost.
@@ -177,9 +280,28 @@ export function attentionRepos(): RepoStatus[] {
 
 /* ------------------------------------------------------------------ ui state */
 
-export function setTab(tab: Tab): void {
-  desk.tab = tab;
+export function setSurface(surface: Surface): void {
+  desk.surface = surface;
   desk.selectedFile = null;
+}
+
+/**
+ * Switches between the views inside TASKS, and moves to that surface, because the switch these
+ * views belong to only exists there: asking for Pending is asking to be on TASKS looking at
+ * Pending. Reading `archive/` happens here, on the first switch to Done, rather than at boot: a
+ * folder that only ever grows must not be parsed to show a panel whose whole subject is what is
+ * still unfinished.
+ */
+export function setView(view: TaskView): void {
+  desk.view = view;
+  desk.surface = 'tasks';
+  desk.selectedFile = null;
+  if (view === 'done') void loadArchive();
+}
+
+/** Opens or closes the header search. Closing it never changes which surface you are on. */
+export function setSearching(open: boolean): void {
+  desk.searching = open;
 }
 
 export function select(file: string | null): void {
@@ -303,6 +425,45 @@ export async function reloadTasks(): Promise<void> {
   desk.archivedCount = archived.filter((e) => e.isFile && isTaskFile(e.name)).length;
 }
 
+/**
+ * Reads and parses `archive/`, newest first, once. Repeat calls are free: the result is kept
+ * until a watcher event touches the archive folder, which is the only thing that can change
+ * it. A file the parser refuses is logged and left out rather than shown as a broken row: the
+ * archive is a record of finished work, not a list anybody is going to fix.
+ */
+export async function loadArchive(): Promise<void> {
+  if (desk.archiveReady || desk.archiveLoading) return;
+  desk.archiveLoading = true;
+  try {
+    const entries = await listDir(desk.archiveDir);
+    const files = entries
+      .filter((e) => e.isFile && isTaskFile(e.name))
+      .map((e) => join(desk.archiveDir, e.name));
+    const tasks: Task[] = [];
+    for (const file of files) {
+      try {
+        tasks.push(parseTask(await readText(file), file, { home: desk.home }));
+      } catch (e) {
+        report('warn', `archive: could not parse ${file}: ${errorText(e)}`);
+      }
+    }
+    desk.archive = tasks.sort((a, b) => b.updated.localeCompare(a.updated));
+    desk.archivedCount = files.length;
+    desk.archiveReady = true;
+  } finally {
+    desk.archiveLoading = false;
+  }
+}
+
+/**
+ * Drops the cached archive. It is re-read straight away when Done is the view you are looking
+ * at, and lazily on the next switch when it is not.
+ */
+export function invalidateArchive(): void {
+  desk.archiveReady = false;
+  if (desk.surface === 'tasks' && desk.view === 'done') void loadArchive();
+}
+
 /** Serializes and writes a task, bumping `updated`. The local copy updates immediately. */
 export async function saveTask(task: Task): Promise<Task> {
   const next: Task = { ...task, updated: nowIso() };
@@ -400,6 +561,7 @@ export async function markDone(task: Task): Promise<void> {
   await moveFile(saved.file, join(desk.archiveDir, basename(saved.file)));
   forgetTask(saved.file);
   desk.archivedCount += 1;
+  invalidateArchive();
 }
 
 /**
@@ -442,22 +604,27 @@ export function scheduleChange(paths: string[]): void {
 export async function applyChanges(paths: string[]): Promise<void> {
   let reloadConfig = false;
   let reloadAll = false;
+  let archiveTouched = false;
   const files = new Set<string>();
   for (const p of paths) {
     if (basename(p) === 'config.json') reloadConfig = true;
     else if (p === desk.tasksDir) reloadAll = true;
     else if (p.startsWith(desk.tasksDir + '/') && isTaskFile(p)) files.add(p);
+    else if (p === desk.archiveDir || p.startsWith(desk.archiveDir + '/')) archiveTouched = true;
   }
   if (reloadConfig) await loadConfigFile();
   if (reloadAll) await reloadTasks();
   else for (const file of files) await reloadTask(file);
+  if (archiveTouched) invalidateArchive();
 }
 
 async function startWatching(): Promise<void> {
   if (stopWatching) stopWatching();
   try {
     stopWatching = await watchPaths(
-      [desk.tasksDir, desk.ledgeHome],
+      /* The archive is watched too, not because the panel reads it often, but because a task
+         finished in another window has to invalidate the cached Done list. */
+      [desk.tasksDir, desk.archiveDir, desk.ledgeHome],
       scheduleChange,
       WATCH_DEBOUNCE_MS,
     );
@@ -538,6 +705,9 @@ export async function boot(homeOverride?: string): Promise<void> {
   desk.cachePath = join(desk.ledgeHome, '.scan-cache.json');
 
   await ensureDir(desk.tasksDir);
+  /* The archive is created here rather than on the first `ledge done`, because the watcher
+     cannot subscribe to a folder that does not exist yet. */
+  await ensureDir(desk.archiveDir);
   await loadConfigFile();
   await reloadTasks();
   await loadScanCache();

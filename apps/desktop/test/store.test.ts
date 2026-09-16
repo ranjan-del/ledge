@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ARCHIVE_DIR,
+  ARCHIVED_NEW,
+  ARCHIVED_NEW_FILE,
+  ARCHIVED_OLD,
+  ARCHIVED_OLD_FILE,
   BROKEN_TASK,
   CONFIG_PATH,
   HOME,
@@ -88,10 +93,14 @@ import {
   boot,
   currentTasks,
   desk,
+  doneCount,
+  doneTasks,
   markDone,
   mergeConfig,
   removeTask,
   select,
+  setSurface,
+  setView,
   shutdown,
   todayPlan,
   toggleChecklist,
@@ -119,6 +128,9 @@ describe('store', () => {
     disk.state.gitCalls = [];
     disk.dirs.add(LEDGE_HOME);
     disk.dirs.add(TASKS_DIR);
+    disk.dirs.add(ARCHIVE_DIR);
+    disk.files.set(ARCHIVED_OLD_FILE, ARCHIVED_OLD);
+    disk.files.set(ARCHIVED_NEW_FILE, ARCHIVED_NEW);
     disk.dirs.add(`${HOME}/code`);
     disk.dirs.add(`${HOME}/code/app`);
     disk.files.set(`${HOME}/code/app/.git`, '');
@@ -141,7 +153,7 @@ describe('store', () => {
     expect(currentTasks().map((t) => t.id)).toEqual(['release-watch-banner']);
     expect(backlogTasks().map((t) => t.id)).toEqual(['optimistic-crud']);
     expect(currentTasks()[0].repo).toBe(`${HOME}/code/app`);
-    expect(disk.state.watchArgs?.paths).toEqual([TASKS_DIR, LEDGE_HOME]);
+    expect(disk.state.watchArgs?.paths).toEqual([TASKS_DIR, ARCHIVE_DIR, LEDGE_HOME]);
     expect(disk.state.watchArgs?.opts).toMatchObject({ delayMs: 150 });
   });
 
@@ -228,7 +240,8 @@ describe('store', () => {
     expect(rename).toHaveBeenCalledWith(TASK_B_FILE, `${LEDGE_HOME}/archive/2026-09-14-optimistic-crud.md`);
     expect(disk.files.get(`${LEDGE_HOME}/archive/2026-09-14-optimistic-crud.md`)).toContain('status: done');
     expect(desk.tasks).toHaveLength(1);
-    expect(desk.archivedCount).toBe(1);
+    /* Two were already in archive/ from the fixtures, so the new one makes three. */
+    expect(desk.archivedCount).toBe(3);
   });
 
   it('runs the periodic scan on the configured interval', async () => {
@@ -324,7 +337,7 @@ describe('store', () => {
     expect(desk.selectedFile).toBeNull();
     /* Deleted, not archived: nothing moved and the done count did not move either. */
     expect(disk.files.has(`${LEDGE_HOME}/archive/2026-09-14-release-watch-banner.md`)).toBe(false);
-    expect(desk.archivedCount).toBe(0);
+    expect(desk.archivedCount).toBe(2);
   });
 
   it('shrugs at an id it does not know rather than throwing', async () => {
@@ -356,5 +369,82 @@ describe('store', () => {
     expect(attentionRepos()).toHaveLength(1);
     desk.pending = [{ ...desk.pending[0], ahead: 0, dirty: [] }];
     expect(attentionRepos()).toHaveLength(0);
+  });
+
+  it('counts the archive at boot but does not read a single file in it', () => {
+    expect(desk.archivedCount).toBe(2);
+    expect(desk.archive).toEqual([]);
+    expect(desk.archiveReady).toBe(false);
+    expect(readsOf(ARCHIVED_NEW_FILE)).toBe(0);
+    expect(readsOf(ARCHIVED_OLD_FILE)).toBe(0);
+    /* The count is enough to label the Done button before anything is parsed. */
+    expect(doneCount()).toBe(2);
+  });
+
+  it('reads the archive on the first switch to Done, newest first, then caches it', async () => {
+    setView('done');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(desk.archiveReady).toBe(true);
+    expect(doneTasks().map((t) => t.id)).toEqual(['shipped-last', 'shipped-first']);
+    expect(doneTasks()[0].status).toBe('done');
+    const reads = readsOf(ARCHIVED_NEW_FILE);
+
+    /* Switching away and back must not touch the disk again. */
+    setView('live');
+    setView('done');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readsOf(ARCHIVED_NEW_FILE)).toBe(reads);
+  });
+
+  it('a watcher event on the archive re-reads it while Done is the view on screen', async () => {
+    setView('done');
+    await vi.advanceTimersByTimeAsync(0);
+    const reads = readsOf(ARCHIVED_NEW_FILE);
+
+    fire([ARCHIVED_NEW_FILE]);
+    await settle();
+    expect(readsOf(ARCHIVED_NEW_FILE)).toBe(reads + 1);
+    expect(desk.archiveReady).toBe(true);
+  });
+
+  it('leaves the re-read until the next switch when Done is not the view on screen', async () => {
+    setView('done');
+    await vi.advanceTimersByTimeAsync(0);
+    const reads = readsOf(ARCHIVED_NEW_FILE);
+    setView('live');
+
+    fire([ARCHIVE_DIR]);
+    await settle();
+    expect(desk.archiveReady).toBe(false);
+    expect(readsOf(ARCHIVED_NEW_FILE)).toBe(reads);
+
+    setView('done');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readsOf(ARCHIVED_NEW_FILE)).toBe(reads + 1);
+    expect(doneTasks()).toHaveLength(2);
+  });
+
+  it('leaves a task file alone when the change was in the archive, not in tasks/', async () => {
+    const before = readsOf(TASK_A_FILE);
+    fire([ARCHIVED_OLD_FILE]);
+    await settle();
+    expect(readsOf(TASK_A_FILE)).toBe(before);
+  });
+
+  it('marking a task done puts it in the Done list without waiting for the watcher', async () => {
+    setView('done');
+    await vi.advanceTimersByTimeAsync(0);
+    await markDone(backlogTasks()[0]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(doneTasks().map((t) => t.id)).toContain('optimistic-crud');
+    expect(doneCount()).toBe(3);
+  });
+
+  it('keeps the task view when the surface changes, and drops the open task either way', () => {
+    setView('done');
+    select(TASK_A_FILE);
+    setSurface('memory');
+    expect(desk.view).toBe('done');
+    expect(desk.selectedFile).toBeNull();
   });
 });

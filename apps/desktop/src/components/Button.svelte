@@ -1,15 +1,29 @@
 <script lang="ts">
   /**
-   * The floating 44 px circle with a Current count. Press and move drags the window; on release
+   * The floating 44 px mark with a Current count. Press and move drags the window; on release
    * the button snaps to the nearest screen edge and the position is saved. A press without
    * movement toggles the panel.
    *
-   * The mark is a friendly monoline robot face, drawn inline rather than loaded, and it blinks
-   * once every six seconds or so. That blink is the whole point of the thing: a button that
-   * never moves is furniture, and this one is supposed to read as something that is awake and
-   * keeping an eye on your work. The count badge pulses once when the number changes, so a task
-   * arriving while you are in another application is noticeable without being a notification.
-   * Both stop dead under prefers-reduced-motion.
+   * The mark is the Ledge logo: a near-black rounded square carrying a white L, with a green dot
+   * resting in the crook of the letter. It is drawn from the same numbers as the application and
+   * menu bar icons (src-tauri/icons/make-icons.mjs) on the same 0 to 1 grid, scaled by 44, so
+   * the thing on your desktop and the thing in your dock are one mark and not two drawings of
+   * it. Nothing here is a raster: an L at this size needs its stem and foot thicker than any
+   * real typeface would set them, so the letter is two overlapping rounded bars.
+   *
+   * The dot is the same green the panel uses for live work, so it already carries meaning, and
+   * it is drawn last so it sits over the end of the foot. It does not move. The per-task dots in
+   * the panel are the app's one continuous animation, and a second breathing dot on the desktop
+   * would compete with them for the same meaning; a steady dot says the same thing and says it
+   * without motion.
+   *
+   * The plate is near-black on a desktop of unknown colour, so it carries both a light hairline
+   * inside its edge and a soft shadow under it: the hairline is what holds the silhouette
+   * against a dark wallpaper, the shadow against a light one.
+   *
+   * The count badge pulses once when the number changes, so a task arriving while you are in
+   * another application is noticeable without being a notification. That is the only motion
+   * here, and it stops dead under prefers-reduced-motion.
    */
   import { invoke } from '@tauri-apps/api/core';
   import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
@@ -66,18 +80,22 @@
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
-    void getCurrentWindow()
-      .onMoved(() => {
-        if (!dragging) return;
-        moved = true;
-        if (settle !== null) clearTimeout(settle);
-        settle = setTimeout(() => {
-          settle = null;
-          dragging = false;
-          void snap();
-        }, 200);
-      })
-      .then((u) => (unlisten = u));
+    try {
+      void getCurrentWindow()
+        .onMoved(() => {
+          if (!dragging) return;
+          moved = true;
+          if (settle !== null) clearTimeout(settle);
+          settle = setTimeout(() => {
+            settle = null;
+            dragging = false;
+            void snap();
+          }, 200);
+        })
+        .then((u) => (unlisten = u));
+    } catch {
+      /* Outside Tauri (a browser, a screenshot harness) there is no window to listen to. */
+    }
     return () => {
       unlisten?.();
       if (settle !== null) clearTimeout(settle);
@@ -88,43 +106,24 @@
 <div class="wrap">
   <button
     type="button"
-    class="ball motion"
+    class="mark motion"
     class:dragging
     aria-label="Ledge: {count} current task{count === 1 ? '' : 's'}"
     onpointerdown={onPointerDown}
     onpointerup={onPointerUp}
   >
-    <svg class="face" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-      <!-- Antenna, head, eyes, mouth: four strokes, one weight, no fill. -->
-      <path
-        d="M11 2.4V4.4"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-      />
-      <circle cx="11" cy="1.9" r="1.1" fill="currentColor" />
-      <rect
-        x="3.6"
-        y="4.8"
-        width="14.8"
-        height="12.4"
-        rx="4.2"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-      />
-      <g class="eyes">
-        <circle cx="8.2" cy="10.2" r="1.25" fill="currentColor" />
-        <circle cx="13.8" cy="10.2" r="1.25" fill="currentColor" />
-      </g>
-      <path
-        d="M8.4 13.9h5.2"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.5"
-        stroke-linecap="round"
-      />
+    <!-- Every number below is the icon's 0 to 1 geometry multiplied by 44. -->
+    <svg class="logo" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+      <rect class="plate" x="0" y="0" width="44" height="44" rx="9.64" fill="#1b1c20" />
+      <rect class="stem" x="12.54" y="10.34" width="5.94" height="20.46" rx="1.14"
+        fill="#ffffff" />
+      <rect class="foot" x="12.54" y="27.06" width="15.18" height="3.74" rx="1.14"
+        fill="#ffffff" />
+      <circle class="dot" cx="29.7" cy="29.57" r="3.87" fill="#30c75e" />
+      <!-- Drawn last and inset by half its own width, so the silhouette survives a dark
+           wallpaper without the stroke straddling the plate's edge. -->
+      <rect class="rim" x="0.5" y="0.5" width="43" height="43" rx="9.14" fill="none"
+        stroke="rgba(255, 255, 255, 0.18)" stroke-width="1" />
     </svg>
     {#if count > 0}
       {#key pulse}
@@ -142,30 +141,31 @@
     place-items: center;
     background: transparent;
   }
-  .ball {
+  .mark {
     position: relative;
     width: 44px;
     height: 44px;
-    border-radius: 50%;
-    background: var(--button-bg);
-    color: var(--button-fg);
-    box-shadow: var(--shadow-button);
+    border-radius: 10px;
     display: grid;
     place-items: center;
     cursor: grab;
   }
-  .ball:hover {
-    filter: brightness(1.06);
+  .mark:hover {
+    filter: brightness(1.12);
   }
-  .ball:active,
-  .ball.dragging {
+  .mark:active,
+  .mark.dragging {
     cursor: grabbing;
     transform: scale(0.96);
   }
+  .logo {
+    display: block;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.42));
+  }
   .badge {
     position: absolute;
-    top: -2px;
-    right: -2px;
+    top: -3px;
+    right: -3px;
     min-width: 18px;
     height: 18px;
     padding: 0 5px;
@@ -180,24 +180,8 @@
   }
 
   @media (prefers-reduced-motion: no-preference) {
-    /* One blink, roughly every six seconds. The eyes are the only thing that moves, and
-       they move on transform, so nothing around them is laid out again. */
-    .eyes {
-      transform-origin: 11px 10.2px;
-      animation: blink 6.4s ease-in-out infinite;
-    }
     .badge {
       animation: badge-pulse 420ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
-    }
-    @keyframes blink {
-      0%,
-      95.5%,
-      100% {
-        transform: scaleY(1);
-      }
-      97.2% {
-        transform: scaleY(0.08);
-      }
     }
     @keyframes badge-pulse {
       0% {

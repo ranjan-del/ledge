@@ -1,31 +1,43 @@
 <script lang="ts">
   /**
-   * The glass sheet: header with pin, refresh and settings, segmented tabs, then whichever of
-   * the three lists, the home view or the task detail is in front. The Current tab is handed to
-   * Home, which owns the three blocks of contract section 7; Backlog and Pending stay plain
-   * lists, because a list is all they are.
+   * The glass sheet, and the only component that knows about the store. It owns the four
+   * surfaces, the chrome around them and every action a surface can trigger, so the surfaces
+   * themselves take plain data and callbacks and can be rendered in a test without a filesystem.
    *
-   * The panel is a short window now (60 percent of the work area, 420 px to 900 px), so the
-   * chrome is fixed and exactly one region scrolls. Parse warnings and errors sit under the
-   * tabs rather than inside a list, so they are visible whichever tab you are on.
+   * The shape is fixed: a header that never scrolls, the four-surface tab strip, then exactly
+   * one region that scrolls, then a footer. Parse warnings and errors sit under the tabs rather
+   * than inside a list, so they are visible whichever surface you are on. Settings, a task
+   * detail and the search each take the whole scrolling region rather than floating over it,
+   * because 380 px has no room for an overlay that leaves anything useful behind it.
    *
    * The sheet slides and fades in from whichever edge it is docked to, and it plays that in
-   * reverse before the window is actually hidden: the hide is delayed by exactly as long as
-   * the animation, and not at all for someone who asked for less motion. The live dot beside
-   * the name is the panel saying it is still watching.
+   * reverse before the window is actually hidden: the hide is delayed by exactly as long as the
+   * animation, and not at all for someone who asked for less motion.
    */
-  import { collapseTilde, type Task as CoreTask } from '@ledge/core/pure';
+  import {
+    collapseTilde,
+    memoryFor,
+    sessionsFor,
+    type Task as CoreTask,
+  } from '@ledge/core/pure';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-shell';
   import { onMount } from 'svelte';
+  import { personName, summaryParts } from '../lib/derive.ts';
+  import { writeText } from '../lib/io.ts';
   import { PANEL_MS, reducedMotion } from '../lib/motion.svelte.ts';
-  import { openInClaude, type LaunchResult } from '../lib/platform.ts';
+  import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
     attentionRepos,
     backlogTasks,
+    counts,
     currentTasks,
     desk,
+    doneCount,
+    doneTasks,
+    doneToday,
+    lastUpdated,
     markDone,
     parkTask,
     removeTask,
@@ -34,49 +46,69 @@
     select,
     selectedTask,
     setPanelVisible,
-    setTab,
+    setSearching,
+    setSurface,
+    setView,
     startTask,
     statusForRepo,
     taskTitleForRepo,
-    todayPlan,
-    type Tab,
+    upNextTasks,
+    workingTasks,
+    type Surface,
+    type TaskView,
   } from '../lib/store.svelte.ts';
-  import { writeText } from '../lib/io.ts';
-  import AddTask from './AddTask.svelte';
-  import Agenda from './Agenda.svelte';
-  import Home from './Home.svelte';
-  import LiveDot from './LiveDot.svelte';
-  import PendingRow from './PendingRow.svelte';
+  import type { CardAction } from './TaskCard.svelte';
+  import Header from './Header.svelte';
+  import Memory from './Memory.svelte';
+  import Now from './Now.svelte';
+  import Search from './Search.svelte';
+  import Sessions from './Sessions.svelte';
   import Settings from './Settings.svelte';
   import Tabs from './Tabs.svelte';
   import TaskDetail from './TaskDetail.svelte';
-  import TaskRow from './TaskRow.svelte';
+  import Tasks from './Tasks.svelte';
 
   let pinned = $state(false);
   let showSettings = $state(false);
   let launch = $state<LaunchResult | null>(null);
+  /* Bumped by the add shortcut. Now passes it down; AddTask opens and focuses when it changes. */
+  let addKey = $state(0);
   /* False for the first frame and for the 160 ms before the window hides, which is what
      gives the sheet something to animate from and to. */
   let onScreen = $state(false);
 
+  const count = $derived(counts());
   const tabs = $derived([
-    { id: 'current', label: 'Current', count: currentTasks().length },
-    { id: 'backlog', label: 'Backlog', count: backlogTasks().length },
-    { id: 'pending', label: 'Pending', count: desk.pending.length },
+    { id: 'now', label: 'Now', count: count.now },
+    { id: 'sessions', label: 'Sessions', count: count.sessions },
+    { id: 'tasks', label: 'Tasks', count: count.tasks },
+    { id: 'memory', label: 'Memory', count: count.memory },
   ]);
   const selected = $derived(selectedTask());
-
-  /* A task planned for today belongs in the Today block, so it is not repeated below it. */
-  const plan = $derived(todayPlan());
-  const onToday = $derived(new Set([...plan.today, ...plan.overdue].map((t) => t.file)));
-  const working = $derived(currentTasks().filter((t) => !onToday.has(t.file)));
-  const plannedToday = $derived(currentTasks().length - working.length);
+  const working = $derived(workingTasks());
+  const upNext = $derived(upNextTasks());
+  const sessions = $derived(sessionsFor(desk.tasks));
+  const notes = $derived(memoryFor(desk.tasks));
+  const summary = $derived(
+    summaryParts({
+      sessions: count.sessions,
+      working: working.length,
+      pending: upNext.length + backlogTasks().length,
+    }),
+  );
+  const name = $derived(personName(desk.config, desk.home));
   const store = $derived(collapseTilde(desk.tasksDir, desk.home));
   /* Docked right, the sheet leaves to the right. Docked left, it leaves to the left. */
   const slide = $derived(desk.config.ui.edge === 'left' ? '-10px' : '10px');
+  const mac = detectOs() === 'macos';
+  const modifier = mac ? '⌘' : 'Ctrl';
 
   function clockTime(iso: string): string {
     return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function taskById(id: string): CoreTask | undefined {
+    return desk.tasks.find((t) => t.id === id);
   }
 
   async function resume(task: CoreTask, useResume: boolean) {
@@ -95,6 +127,26 @@
     select(null);
   }
 
+  /**
+   * The overflow menu on a card. Every entry here is an action that already existed in the task
+   * detail view; the menu is a short cut to them, not a second set of powers.
+   */
+  function actionsFor(task: CoreTask): CardAction[] {
+    const actions: CardAction[] = [{ label: 'Open task', run: (t) => select(t.file) }];
+    const last = task.sessions[task.sessions.length - 1];
+    actions.push({
+      label: last ? 'Resume in Claude' : 'Open in Claude',
+      run: (t) => void resume(t, Boolean(last)),
+    });
+    if (task.status === 'backlog') {
+      actions.push({ label: 'Start', run: (t) => void startTask(t) });
+    } else {
+      actions.push({ label: 'Park', run: (t) => void parkTask(t, 'Parked from the panel') });
+    }
+    actions.push({ label: 'Mark done', run: (t) => void markDone(t) });
+    return actions;
+  }
+
   /** Plays the sheet out, then hides the window. Instant when motion is not wanted. */
   function dismiss() {
     const win = getCurrentWindow();
@@ -104,6 +156,30 @@
     }
     onScreen = false;
     setTimeout(() => void win.hide(), PANEL_MS);
+  }
+
+  /**
+   * The two shortcuts the chrome promises: the search pill's own key, and the one written on
+   * the add row. Both are only claimed where they work, which is why the modifier is spelled
+   * for this platform rather than assumed.
+   */
+  function onKeydown(event: KeyboardEvent) {
+    const chord = mac ? event.metaKey : event.ctrlKey;
+    if (!chord || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === 'k') {
+      event.preventDefault();
+      select(null);
+      showSettings = false;
+      setSearching(!desk.searching);
+    } else if (key === 'n') {
+      event.preventDefault();
+      setSearching(false);
+      showSettings = false;
+      select(null);
+      if (desk.surface !== 'now' && desk.surface !== 'tasks') setSurface('now');
+      addKey += 1;
+    }
   }
 
   onMount(() => {
@@ -128,67 +204,28 @@
   });
 </script>
 
+<svelte:window onkeydown={onKeydown} />
+
 <div class="panel" class:offscreen={!onScreen} style:--slide={slide}>
-  <header class="header">
-    <h1 class="brand">Ledge</h1>
-    <LiveDot scanning={desk.scanning} awake={desk.panelVisible} />
-    <span class="spacer"></span>
-    <div class="tools">
-      <button
-        type="button"
-        class="tool motion"
-        aria-pressed={pinned}
-        aria-label={pinned ? 'Unpin panel' : 'Pin panel'}
-        title={pinned ? 'Unpin' : 'Pin'}
-        onclick={() => (pinned = !pinned)}
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <path
-            d="M9 1.5 12.5 5 9.5 6 8 9.5 4.5 6 8 4.5z M4.5 9.5 1.5 12.5"
-            fill={pinned ? 'currentColor' : 'none'}
-            stroke="currentColor"
-            stroke-width="1.3"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="tool motion"
-        aria-label="Refresh git"
-        title="Refresh git"
-        disabled={desk.scanning}
-        onclick={() => void scanNow()}
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <path d="M12 7a5 5 0 1 1-1.5-3.6M12 1.5V4.5H9" fill="none" stroke="currentColor"
-            stroke-width="1.4" stroke-linecap="round" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="tool motion"
-        aria-label="Settings"
-        title="Settings"
-        aria-pressed={showSettings}
-        onclick={() => {
-          showSettings = !showSettings;
-          select(null);
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-          <circle cx="7" cy="7" r="2" fill="none" stroke="currentColor" stroke-width="1.4" />
-          <path
-            d="M7 1v2M7 11v2M1 7h2M11 7h2M2.8 2.8l1.4 1.4M9.8 9.8l1.4 1.4
-               M2.8 11.2l1.4-1.4M9.8 4.2l1.4-1.4"
-            stroke="currentColor"
-            stroke-width="1.4"
-            stroke-linecap="round"
-          />
-        </svg>
-      </button>
-    </div>
-  </header>
+  <Header
+    scanning={desk.scanning}
+    awake={desk.panelVisible}
+    {pinned}
+    settingsOpen={showSettings}
+    searchOpen={desk.searching}
+    {modifier}
+    onpin={() => (pinned = !pinned)}
+    onsearch={() => {
+      select(null);
+      showSettings = false;
+      setSearching(!desk.searching);
+    }}
+    onsettings={() => {
+      showSettings = !showSettings;
+      setSearching(false);
+      select(null);
+    }}
+  />
 
   {#if showSettings}
     <div class="body">
@@ -222,11 +259,19 @@
         ondelete={destroy}
       />
     </div>
+  {:else if desk.searching}
+    <Search
+      tasks={desk.tasks}
+      onselect={(t) => {
+        setSearching(false);
+        select(t.file);
+      }}
+      onclose={() => setSearching(false)}
+    />
   {:else}
     <div class="tabs">
-      <Tabs {tabs} active={desk.tab} onchange={(id) => setTab(id as Tab)} />
+      <Tabs {tabs} active={desk.surface} onchange={(id) => setSurface(id as Surface)} />
     </div>
-    <Agenda />
 
     {#if desk.error || desk.broken.length > 0}
       <div class="notices">
@@ -242,55 +287,50 @@
       </div>
     {/if}
 
-    {#if desk.tab === 'current'}
-      <Home
-        current={working}
-        today={plan.today}
-        overdue={plan.overdue}
-        {plannedToday}
-        {store}
+    {#if desk.surface === 'now'}
+      <Now
+        {working}
+        {upNext}
+        {name}
+        {summary}
+        {addKey}
+        addShortcut="{modifier}N"
         attention={attentionRepos().length}
-        backlog={backlogTasks().length}
         statusFor={statusForRepo}
+        {actionsFor}
         onselect={(t) => select(t.file)}
         onadd={addTask}
-        onpending={() => setTab('pending')}
-        onbacklog={() => setTab('backlog')}
+        onpending={() => {
+          setSurface('tasks');
+          setView('pending');
+        }}
       />
-    {:else if desk.tab === 'backlog'}
-      <div class="pane">
-        <div class="pane-scroll rows">
-          {#each backlogTasks() as task (task.file)}
-            <TaskRow
-              {task}
-              status={statusForRepo(task.repo)}
-              onselect={(t) => select(t.file)}
-              onstart={(t) => void startTask(t)}
-              onopen={(t) => void resume(t, false)}
-            />
-          {:else}
-            <p class="quiet">
-              Nothing parked yet. Anything you add here waits until you start it, and
-              <code>/ledge park "reason"</code> in Claude Code moves a task you have set aside.
-            </p>
-          {/each}
-        </div>
-        <div class="pane-foot">
-          <AddTask status="backlog" onadd={addTask} />
-        </div>
-      </div>
+    {:else if desk.surface === 'sessions'}
+      <Sessions
+        {sessions}
+        taskFor={taskById}
+        onselect={(t) => select(t.file)}
+        onresume={(t) => void resume(t, true)}
+      />
+    {:else if desk.surface === 'tasks'}
+      <Tasks
+        view={desk.view}
+        live={currentTasks()}
+        backlog={backlogTasks()}
+        done={doneTasks()}
+        pending={desk.pending}
+        doneCount={doneCount()}
+        archiveLoading={desk.archiveLoading}
+        scanning={desk.scanning}
+        statusFor={statusForRepo}
+        titleForRepo={taskTitleForRepo}
+        {actionsFor}
+        onview={(v) => setView(v as TaskView)}
+        onselect={(t) => select(t.file)}
+        onadd={addTask}
+      />
     {:else}
-      <div class="body list">
-        {#each desk.pending as status (status.repo)}
-          <PendingRow {status} taskTitle={taskTitleForRepo(status.repo)} />
-        {:else}
-          <p class="quiet">
-            {desk.scanning
-              ? 'Scanning repositories'
-              : 'Nothing pending. Everything is pushed and clean.'}
-          </p>
-        {/each}
-      </div>
+      <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />
     {/if}
   {/if}
 
@@ -303,16 +343,26 @@
   {/if}
 
   <footer class="footer">
-    <span>{desk.archivedCount} done and archived</span>
     <span>
-      {#if desk.scanning}
-        checking repositories
-      {:else if desk.lastScan}
-        git checked {clockTime(desk.lastScan)}
+      {#if desk.surface === 'now'}
+        {@const today = doneToday()}
+        {today === undefined ? `${desk.archivedCount} done and archived` : `${today} done today`}
+      {:else if desk.surface === 'sessions'}
+        {count.sessions} linked {count.sessions === 1 ? 'session' : 'sessions'}
+      {:else if desk.surface === 'memory'}
+        {count.memory} {count.memory === 1 ? 'note' : 'notes'}
       {:else}
-        watching {store}
+        {desk.archivedCount} done and archived
       {/if}
     </span>
+    {#if desk.scanning}
+      <span>checking repositories</span>
+    {:else}
+      {@const at = lastUpdated()}
+      <button type="button" class="refresh motion" title="Refresh git" onclick={() => void scanNow()}>
+        {at ? `Last updated ${clockTime(at)}` : `watching ${store}`}
+      </button>
+    {/if}
   </footer>
 </div>
 
@@ -339,42 +389,6 @@
       transform: translateX(var(--slide));
     }
   }
-  .header {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-3) var(--space-3) var(--space-2);
-  }
-  .brand {
-    margin: 0;
-    font-size: var(--fs-lg);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-  .spacer {
-    flex: 1;
-  }
-  .tools {
-    display: flex;
-    gap: 2px;
-  }
-  .tool {
-    width: 26px;
-    height: 26px;
-    display: grid;
-    place-items: center;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-  }
-  .tool:hover,
-  .tool[aria-pressed="true"] {
-    background: var(--control);
-    color: var(--text);
-  }
-  .tool:disabled {
-    opacity: 0.5;
-  }
   .tabs {
     flex: none;
     padding: 0 var(--space-3) var(--space-3);
@@ -392,11 +406,6 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding: 0 var(--space-3) var(--space-3);
-  }
-  .list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
   }
   .notice,
   .warn {
@@ -440,12 +449,27 @@
   .footer {
     flex: none;
     display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: var(--space-2);
     /* The list scrolls right up to this line, so the line has to be there: without it the
        last row looks cut off rather than scrolled. */
     border-top: 1px solid var(--rule);
-    padding: 5px var(--space-3) var(--space-2);
+    padding: 4px var(--space-3) var(--space-2);
     font-size: var(--fs-xs);
     color: var(--text-faint);
+  }
+  /* The timestamp is the refresh button: the thing it reports is the thing pressing it
+     renews, so there is no need for a second icon that means the same. */
+  .refresh {
+    padding: 1px var(--space-1);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-xs);
+    color: var(--text-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .refresh:hover {
+    background: var(--control);
+    color: var(--text-muted);
   }
 </style>

@@ -113,3 +113,32 @@ describe('AddTask', () => {
     expect(await screen.findByText('Task folder is read only')).toBeTruthy();
   });
 });
+
+describe('AddTask, the hint line', () => {
+  it('spells the keys out where the row is one of several things on screen', () => {
+    render(AddTask, { props: { onadd: () => {}, open: true } });
+    expect(screen.getByText(/Enter adds it\. Escape closes\./)).toBeTruthy();
+  });
+
+  it('says nothing where the screen is down to a heading, a field and a button', () => {
+    render(AddTask, { props: { onadd: () => {}, open: true, hint: false } });
+    expect(screen.queryByText(/Escape closes/)).toBeNull();
+    /* The placeholder is doing the explaining now. */
+    expect(screen.getByPlaceholderText('What needs doing?')).toBeTruthy();
+  });
+
+  it('still reports a failure, hint or no hint', async () => {
+    render(AddTask, {
+      props: {
+        onadd: () => {
+          throw new Error('A task needs a title.');
+        },
+        open: true,
+        hint: false,
+      },
+    });
+    await fireEvent.input(screen.getByLabelText('Task title'), { target: { value: 'x' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByText('A task needs a title.')).toBeTruthy();
+  });
+});

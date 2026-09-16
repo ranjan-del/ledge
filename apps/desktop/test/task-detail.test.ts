@@ -38,7 +38,7 @@ describe('TaskDetail', () => {
     const { container } = render(TaskDetail, {
       props: { task: taskC(), day: DAY, onback: () => {}, onsave: () => {} },
     });
-    const steps = [...container.querySelectorAll('.plan li')].map((li) => li.textContent);
+    const steps = [...container.querySelectorAll('.plan-list li')].map((li) => li.textContent);
     expect(steps).toEqual([
       'Write version.json in the build step',
       'Poll it on an interval and on window focus',

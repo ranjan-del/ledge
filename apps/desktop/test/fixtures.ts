@@ -7,6 +7,7 @@ import { parseTask, type RepoStatus, type Task } from '@ledge/core/pure';
 export const HOME = '/home/t';
 export const LEDGE_HOME = `${HOME}/.ledge`;
 export const TASKS_DIR = `${LEDGE_HOME}/tasks`;
+export const ARCHIVE_DIR = `${LEDGE_HOME}/archive`;
 export const CONFIG_PATH = `${LEDGE_HOME}/config.json`;
 
 export const TASK_A_FILE = `${TASKS_DIR}/2026-09-14-release-watch-banner.md`;
@@ -160,3 +161,51 @@ same way, so there is nothing new to cache-bust.
 Chunk load errors are the safety net, not the mechanism. Caught one in the wild today and the
 reload recovered it, so the banner can stay quiet until the poll notices.
 `;
+
+/* Two finished tasks, in `archive/`. The Done view reads these; nothing else does, and
+   nothing reads them at boot. One was finished to the letter and one was not, which is the
+   difference the final progress is there to show. */
+export const ARCHIVED_OLD_FILE = `${ARCHIVE_DIR}/2026-09-02-shipped-first.md`;
+export const ARCHIVED_NEW_FILE = `${ARCHIVE_DIR}/2026-09-08-shipped-last.md`;
+
+export const ARCHIVED_OLD = `---
+id: shipped-first
+title: Version file in the build step
+status: done
+order: 1
+repo: ~/code/app
+sessions:
+  - 3a91f0cc
+created: 2026-09-01T09:00:00+05:30
+updated: 2026-09-03T18:20:00+05:30
+---
+
+## Checklist
+
+- [x] Write version.json
+- [x] Check it into the deploy
+`;
+
+export const ARCHIVED_NEW = `---
+id: shipped-last
+title: Retry the nightly sync once before giving up
+status: done
+order: 2
+sessions: []
+created: 2026-09-05T09:00:00+05:30
+updated: 2026-09-08T11:05:00+05:30
+---
+
+## Checklist
+
+- [x] Bounded retry with backoff
+- [ ] Alert once, not once per record
+`;
+
+/** Archived tasks as the Done view receives them: parsed, newest first. */
+export function archived(): Task[] {
+  return [
+    parseTask(ARCHIVED_NEW, ARCHIVED_NEW_FILE, { home: HOME }),
+    parseTask(ARCHIVED_OLD, ARCHIVED_OLD_FILE, { home: HOME }),
+  ];
+}

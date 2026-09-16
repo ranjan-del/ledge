@@ -174,7 +174,7 @@
   {#if task.plan.length > 0}
     <section>
       <h3 class="block-head">Plan<span class="count">{task.plan.length} steps</span></h3>
-      <ol class="plan selectable">
+      <ol class="plan-list selectable">
         {#each task.plan as step, i (i)}
           <li>{step}</li>
         {/each}
@@ -230,13 +230,13 @@
       <h3 class="block-head">Notes<span class="count">{notes.length}</span></h3>
       <div class="notes">
         {#each notes as note, i (note.date + i)}
-          <article class="note">
+          <article class="note-card">
             <p class="note-date">
               {dayLabel(note.date, day)}
               {#if i === 0 && notes.length > 1}<span>latest</span>{/if}
             </p>
             {#each paragraphs(note.body) as para, i (i)}
-              <p class="note-body selectable">{para}</p>
+              <p class="note-text selectable">{para}</p>
             {/each}
           </article>
         {/each}
@@ -349,9 +349,6 @@
     font-size: var(--fs-sm);
     color: var(--text-muted);
   }
-  .repo {
-    font-weight: 500;
-  }
   .meta :global(.git) {
     display: contents;
   }
@@ -369,20 +366,6 @@
   }
   .parked {
     margin-top: var(--space-2);
-  }
-
-  .plan {
-    margin: 0;
-    padding-left: 1.5em;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    line-height: 1.4;
-  }
-  .plan li::marker {
-    color: var(--text-faint);
-    font-variant-numeric: tabular-nums;
-    font-weight: 700;
   }
 
   .group {
@@ -439,12 +422,6 @@
     flex-direction: column;
     gap: var(--space-2);
   }
-  .note {
-    padding: var(--space-2) var(--space-3);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
-    border: 1px solid var(--surface-border);
-  }
   .note-date {
     display: flex;
     align-items: baseline;
@@ -462,18 +439,6 @@
     text-transform: none;
     color: var(--text-faint);
   }
-  .note-body {
-    margin: 0;
-    font-size: var(--fs-base);
-    line-height: var(--lh-prose);
-    color: var(--text);
-    white-space: pre-wrap;
-    overflow-wrap: break-word;
-  }
-  .note-body + .note-body {
-    margin-top: var(--space-2);
-  }
-
   .rest {
     white-space: pre-wrap;
     overflow-wrap: anywhere;

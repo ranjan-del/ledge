@@ -37,7 +37,8 @@
   background: var(--review-bg);
   color: var(--review-fg);
 }
-.chip.done {
+.chip.done,
+.chip.live {
   background: var(--done-bg);
   color: var(--done-fg);
 }
@@ -271,4 +272,153 @@
       transform: translateY(5px);
     }
   }
+}
+
+/* ---------------------------------------------------------------- surface furniture */
+/*
+  The four surfaces share three shapes: the small uppercase label that names a section, the
+  block of honest text a surface shows when it genuinely has nothing, and the blue chip for
+  work that has started but is not today's business.
+*/
+.chip.info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+.section-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-faint);
+}
+.section-label .count {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+/* An empty surface explains itself in one heading and one paragraph, and never pretends. */
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-1) var(--space-2);
+}
+.empty h3 {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+/*
+  Small item lists: what is left, and what is already ticked. They appear in the card's
+  disclosure and on the NOW surface's Up next block, which is why the shape is here rather
+  than written out twice with two sets of numbers.
+*/
+.item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.item-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.box {
+  flex: none;
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 2px;
+}
+/*
+  A title that is also a link to the thing it names. The row it sits in may not be able to
+  resolve that thing, in which case the button is disabled and stops behaving like a link.
+*/
+.linky:hover:not(:disabled) {
+  color: var(--accent);
+}
+.linky:disabled {
+  cursor: default;
+}
+/* A caption under a line of content: which task, which part of it, which day. */
+.sub {
+  max-width: 100%;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+}
+/*
+  A dated note, as a card. The task detail view and the MEMORY surface show the same object,
+  and notes are the most valuable text in the app, so they get prose leading in both places.
+*/
+.note-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+}
+.note-text {
+  margin: 0;
+  line-height: var(--lh-prose);
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+.note-text + .note-text {
+  margin-top: var(--space-2);
+}
+
+/* An ordered plan, as written before the work started. */
+.plan-list {
+  margin: 0;
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.4;
+}
+.plan-list li::marker {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+/* The repository short name, wherever a row says where the work lives. */
+.repo {
+  min-width: 0;
+  max-width: 150px;
+  font-weight: 500;
+}
+
+/* A field that filters the list under it, with whatever sits beside it. */
+.finder {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3) var(--space-2);
+}
+.finder .field {
+  flex: 1;
+}
+.kbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--control);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-faint);
 }
