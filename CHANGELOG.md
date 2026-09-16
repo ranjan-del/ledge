@@ -17,6 +17,55 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ### Added
 
+- Four surfaces in the desktop panel, replacing the three tabs: Now answers what I am doing,
+  Sessions where I am working, Tasks what I need to accomplish, Memory what I need to remember.
+  Pending did not go away; it became part of what Now and Tasks show.
+- `@ledge/core`: `sessionsFor`, `memoryFor`, `searchMemory`, `nextActionFor` and `surfaceCounts`,
+  with the `SessionRef`, `MemoryEntry`, `NextAction` and `SurfaceCounts` types, exported from both
+  entry points. Sessions are derived from the ids the plugin links and deliberately claim no more
+  than the files record: there is no start time and no liveness, because nothing measures either.
+- `ledge sessions` and `ledge memory [query]`, both with `--json`. Memory search requires every
+  whitespace-separated term to match in the body or the task title, case-insensitively, with no
+  ranking and no fuzzy matching.
+- `ledge delete <id> --yes`, the only command that loses data. It refuses without the flag, and
+  when it refuses it names the file it would destroy and points at `done` as the alternative.
+- `ledge app`, which starts the desktop panel detached, for anyone who turned launch at login off.
+- Launch at login, on by default on a fresh install and switchable afterwards. The decision is
+  recorded in the store rather than reapplied every launch, so turning it off sticks.
+- A task card names the project and keeps its detail collapsed. Expanding shows where the task
+  stands, then the planned steps, then what is done.
+- A next action line per task, taken from the first unticked checklist item or the first plan step,
+  labelled with which of the two it came from so an observation is never mistaken for a guess.
+
+### Changed
+
+- The floating button sits in the top right corner rather than centred on the right edge.
+- The panel takes the full work area height once there is something to show, and stays short while
+  the store is empty. The width does not change.
+
+### Fixed
+
+- The button needed two clicks. macOS spends the first click on an inactive application's window
+  activating it, and Ledge is deliberately an accessory application, so every click was being
+  eaten. Both windows now accept that first click.
+- The button vanished for a second or two whenever the panel opened. Showing the panel activates
+  the application, activating orders the button out, and nothing put it back until the keeper's
+  next tick. It is now restored in the same breath as the panel is shown.
+- The released application took a Dock icon and a slot in the application switcher. Setting the
+  accessory policy at startup is too late in a bundle, because the launch has already placed the
+  icon; `LSUIElement` in the bundle's property list settles it before the process starts.
+- A plan step or checklist item written across two lines lost everything after the first line.
+  The plan continuation was dropped outright, so saving destroyed it; the checklist continuation
+  was stranded below the list. Both were silent.
+- The git scan found nothing. A wildcard in a permission scope never matches a path component
+  beginning with a dot, so the store's own cache file and every `.git` folder fell outside the
+  allowed paths. Each dot path is now named outright.
+- The file watcher was never enabled in the build, and failures rendered as `undefined` because
+  the platform plugins reject with a string rather than an error.
+
+
+### Added
+
 - Task file: three optional additions, from the v2 contract. A `planned` frontmatter key holding
   a calendar day as `YYYY-MM-DD`, a `## Plan` section holding an ordered list of steps, and a
   `## Notes` section holding dated `### YYYY-MM-DD` subsections that carry the reasoning from one

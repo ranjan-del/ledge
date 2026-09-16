@@ -348,6 +348,7 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge start <id>` | Set status current, order 1, shift others down |
 | `ledge park <id> "reason"` | Set status backlog, record reason |
 | `ledge done <id>` | Set status done, move the file to archive |
+| `ledge delete <id> --yes` | Destroy a task and its file. The only command that loses data |
 | `ledge current [--repo path] [--json\|--context]` | Print the task whose repo matches |
 | `ledge link <id> <sessionId>` | Append a session id |
 | `ledge todo <id> "text"` | Append an unchecked checklist item |
@@ -356,8 +357,11 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge note <id> "text"` | Append text to today's notes |
 | `ledge when <id> <YYYY-MM-DD\|today\|tomorrow\|none>` | Set or clear the planned day |
 | `ledge today` | Tasks planned for today, overdue ones, then the remaining current tasks |
+| `ledge sessions [--json]` | Every session id the plugin has linked, newest first |
+| `ledge memory [query] [--json]` | Dated notes across every task, filtered by every term given |
 | `ledge open <id>` | Print the task file path |
 | `ledge scan` | Run the git scan once and print Pending as JSON |
+| `ledge app` | Start the desktop panel, detached |
 | `ledge init` | Create `~/.ledge`, a default `config.json` and a sample task |
 | `ledge help [command]` | Print the help screen, or the usage of one command |
 
