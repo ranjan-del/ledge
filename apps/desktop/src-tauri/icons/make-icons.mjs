@@ -1,5 +1,5 @@
 /**
- * Draws the Ledge marks from one description, with no image libraries, so the identity can be
+ * Draws both Ledge marks from one description, with no image libraries, so the identity can be
  * regenerated on any machine that has Node:
  *
  *   node icons/make-icons.mjs && npm run tauri icon icons/source.png
@@ -10,14 +10,13 @@
  *               container the bundler needs.
  *   tray.png    44 square, a template image: black shapes on transparency and nothing else.
  *               macOS recolours a template itself, white on a dark menu bar and black on a
- *               light one. A colour plate up there renders as a solid block, so the template
- *               is the plate outline with the L cut out of it rather than a filled square.
+ *               light one. A colour plate up there renders as a solid block.
  *
- * The mark is a near-black rounded square carrying a white L, with a green dot resting in the
- * crook of the letter. The dot is the same green the panel uses for live work, so the icon says
- * the same thing the interface says: something is running. Drawn from solid geometry rather than
- * a font, both because a font would have to be embedded and because an L at 16 pixels needs its
- * stem and foot thickened past what any real typeface would do.
+ * The mark is an orb with two eyes: a soft violet sphere lit from the upper left, ringed by a
+ * bright halo, with a pair of white capsule eyes. It is a face reduced to the two features that
+ * still read at 16 pixels. The colour and the glow carry the character at large sizes; at menu
+ * bar size everything but the silhouette and the eyes falls away, which is why the template
+ * variant is only a disc with two holes in it and still looks like the same creature.
  */
 import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
@@ -28,34 +27,29 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /* ------------------------------------------------------------------ geometry */
 
-// Everything on a 0 to 1 grid, so every size draws the same thing.
+// Everything is described on a 0 to 1 grid so both sizes draw the same thing.
+const ORB = { cx: 0.5, cy: 0.475, r: 0.315 };
+const EYE = { dx: 0.093, cy: 0.475, w: 0.062, h: 0.135, r: 0.031 };
+const SHADOW = { cx: 0.5, cy: 0.855, rx: 0.2, ry: 0.035 };
+const HALO_WIDTH = 0.055;
 const PLATE_CORNER = 0.219; // 224 of 1024, the macOS app icon corner
-// The L: a vertical stem and a horizontal foot, as two overlapping rounded bars.
-const STEM = { x0: 0.285, y0: 0.235, x1: 0.42, y1: 0.7, r: 0.026 };
-const FOOT = { x0: 0.285, y0: 0.615, x1: 0.63, y1: 0.7, r: 0.026 };
-// The dot sits in the crook, overlapping the foot's right end.
-const DOT = { cx: 0.675, cy: 0.672, r: 0.088 };
 
-const PLATE = [0x1b, 0x1c, 0x20];
-const LETTER = [0xff, 0xff, 0xff];
-const LIVE = [0x30, 0xc7, 0x5e];
-
-/** Smooth 0 to 1 ramp, so every edge eases rather than stepping. */
+/** Smooth 0 to 1 ramp, used so every edge and falloff eases instead of stepping. */
 function smooth(edge0, edge1, x) {
   const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
 }
 
 /**
- * Coverage of a rounded rectangle at a point, as a signed distance, so edges come out
- * antialiased at every size instead of stepped.
+ * Coverage of a rounded rectangle at a point, as a signed distance, so the eyes come out with
+ * clean antialiased edges at every size rather than stepped ones.
  */
-function rect(x, y, s, scale) {
-  const r = s.r * scale;
-  const left = s.x0 * scale + r;
-  const top = s.y0 * scale + r;
-  const right = s.x1 * scale - r;
-  const bottom = s.y1 * scale - r;
+function roundedRect(x, y, x0, y0, x1, y1, radius, scale) {
+  const r = radius * scale;
+  const left = x0 * scale + r;
+  const top = y0 * scale + r;
+  const right = x1 * scale - r;
+  const bottom = y1 * scale - r;
   const nx = Math.max(left, Math.min(x, right));
   const ny = Math.max(top, Math.min(y, bottom));
   const dx = x - nx;
@@ -63,18 +57,31 @@ function rect(x, y, s, scale) {
   return Math.max(0, Math.min(1, 0.5 - (Math.sqrt(dx * dx + dy * dy) - r)));
 }
 
-/** Coverage of a circle at a point. */
-function circle(x, y, c, scale) {
-  const d = Math.sqrt((x - c.cx * scale) ** 2 + (y - c.cy * scale) ** 2);
-  return smooth(c.r * scale + 0.7, c.r * scale - 0.7, d);
-}
-
-/** Coverage of the L glyph at a point: the stem or the foot, whichever covers more. */
-function letterCoverage(x, y, scale) {
-  return Math.max(rect(x, y, STEM, scale), rect(x, y, FOOT, scale));
+/** Combined coverage of the two eyes at a point. */
+function eyeCoverage(x, y, scale) {
+  const left = roundedRect(
+    x, y,
+    ORB.cx - EYE.dx - EYE.w / 2, EYE.cy - EYE.h / 2,
+    ORB.cx - EYE.dx + EYE.w / 2, EYE.cy + EYE.h / 2,
+    EYE.r, scale,
+  );
+  const right = roundedRect(
+    x, y,
+    ORB.cx + EYE.dx - EYE.w / 2, EYE.cy - EYE.h / 2,
+    ORB.cx + EYE.dx + EYE.w / 2, EYE.cy + EYE.h / 2,
+    EYE.r, scale,
+  );
+  return Math.max(left, right);
 }
 
 /* ------------------------------------------------------------------ colour */
+
+const PLATE_TOP = [0xf2, 0xf1, 0xfd];
+const PLATE_BOTTOM = [0xe4, 0xe8, 0xfb];
+const ORB_HIGHLIGHT = [0xd6, 0xa8, 0xf2]; // pink violet, upper left
+const ORB_MID = [0x8d, 0x7b, 0xef]; // the body of the sphere
+const ORB_DEEP = [0x50, 0x63, 0xe6]; // blue, lower right
+const WHITE = [0xff, 0xff, 0xff];
 
 /** Blends two colours by t in 0 to 1. */
 function mix(a, b, t) {
@@ -84,6 +91,18 @@ function mix(a, b, t) {
     Math.round(a[1] + (b[1] - a[1]) * k),
     Math.round(a[2] + (b[2] - a[2]) * k),
   ];
+}
+
+/**
+ * The sphere's colour at a point inside it. Two blends stacked: a diagonal sweep from the pink
+ * upper left to the blue lower right gives it a light source, and a second blend toward the
+ * highlight near the top left corner keeps the surface from reading flat.
+ */
+function orbColour(nx, ny) {
+  const diagonal = (nx + ny + 2) / 4; // 0 at the upper left of the sphere, 1 at the lower right
+  let rgb = mix(ORB_MID, ORB_DEEP, smooth(0.35, 1.0, diagonal));
+  rgb = mix(rgb, ORB_HIGHLIGHT, smooth(0.6, 0.0, diagonal) * 0.85);
+  return rgb;
 }
 
 /* ------------------------------------------------------------------ png encoding */
@@ -135,47 +154,79 @@ function encodePng(size, rgba) {
 
 /* ------------------------------------------------------------------ the two assets */
 
-/** The application icon: the white L and its green dot on a near-black rounded plate. */
+/** The application icon: the lit orb on a pale lavender plate, with its halo and its shadow. */
 function drawAppIcon(size) {
   const rgba = Buffer.alloc(size * size * 4);
-  const plate = { x0: 0, y0: 0, x1: 1, y1: 1, r: PLATE_CORNER };
+  const cx = ORB.cx * size;
+  const cy = ORB.cy * size;
+  const r = ORB.r * size;
+  const halo = HALO_WIDTH * size;
+
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const px = x + 0.5;
       const py = y + 0.5;
-      let rgb = PLATE;
-      rgb = mix(rgb, LETTER, letterCoverage(px, py, size));
-      // The dot goes on last so it sits over the foot of the letter, which is what puts it
-      // in the crook rather than beside it.
-      rgb = mix(rgb, LIVE, circle(px, py, DOT, size));
+      let rgb = mix(PLATE_TOP, PLATE_BOTTOM, y / (size - 1));
+
+      // Contact shadow, drawn first so everything else sits over it.
+      const sx = (px - SHADOW.cx * size) / (SHADOW.rx * size);
+      const sy = (py - SHADOW.cy * size) / (SHADOW.ry * size);
+      const shade = smooth(1.35, 0.0, Math.sqrt(sx * sx + sy * sy));
+      rgb = mix(rgb, [0x6d, 0x6a, 0xa8], shade * 0.3);
+
+      const d = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+
+      // Halo: brightest right at the rim, gone a little way out, and it also bleeds a touch
+      // inward so the sphere looks lit from behind rather than pasted on.
+      const outward = smooth(r + halo, r, d);
+      const inward = smooth(r - halo * 0.8, r, d);
+      const glow = d >= r ? outward : inward * 0.55;
+      rgb = mix(rgb, WHITE, glow * 0.95);
+
+      // The sphere itself.
+      const inside = smooth(r + 0.75, r - 0.75, d);
+      if (inside > 0) {
+        const nx = (px - cx) / r;
+        const ny = (py - cy) / r;
+        rgb = mix(rgb, orbColour(nx, ny), inside);
+        const eyes = eyeCoverage(px, py, size);
+        if (eyes > 0) rgb = mix(rgb, WHITE, eyes);
+      }
+
+      const plateAlpha = roundedRect(px, py, 0, 0, 1, 1, PLATE_CORNER, size);
       const o = (y * size + x) * 4;
       rgba[o] = rgb[0];
       rgba[o + 1] = rgb[1];
       rgba[o + 2] = rgb[2];
-      rgba[o + 3] = Math.round(rect(px, py, plate, size) * 255);
+      rgba[o + 3] = Math.round(plateAlpha * 255);
     }
   }
   return encodePng(size, rgba);
 }
 
 /**
- * The menu bar icon: the plate's silhouette with the L and the dot cut out of it. A template
- * image has only alpha to work with, so the letter has to be a hole rather than a fill, and the
- * green dot becomes a hole too. Inset slightly, because a menu bar slot wants breathing room.
+ * The menu bar icon: the same creature reduced to a disc with two eye holes, black on
+ * transparency. No halo and no shadow, because a template image has no colour to carry them
+ * and macOS would render any grey as a muddy blob.
  */
 function drawTrayIcon(size) {
   const rgba = Buffer.alloc(size * size * 4);
-  const inset = 0.07;
-  const span = 1 - inset * 2;
-  const plate = { x0: 0, y0: 0, x1: 1, y1: 1, r: PLATE_CORNER };
+  // A menu bar slot wants the mark slightly smaller than the full square.
+  const scale = 0.92;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = ORB.r * size * scale * (1 / 0.95);
+
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      // Work in the mark's own frame, so the glyph keeps its proportions inside the inset.
-      const mx = ((x + 0.5) / size - inset) / span * size;
-      const my = ((y + 0.5) / size - inset) / span * size;
-      let a = rect(mx, my, plate, size);
-      a -= letterCoverage(mx, my, size);
-      a -= circle(mx, my, DOT, size);
+      const px = x + 0.5;
+      const py = y + 0.5;
+      const d = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+      let a = smooth(r + 0.7, r - 0.7, d);
+      // Eyes, mapped into the disc's own frame so they keep their position and proportion.
+      const ex = (px - cx) / (r / (ORB.r * size)) + ORB.cx * size;
+      const ey = (py - cy) / (r / (ORB.r * size)) + ORB.cy * size;
+      a = Math.max(0, a - eyeCoverage(ex, ey, size));
       const o = (y * size + x) * 4;
       rgba[o] = 0;
       rgba[o + 1] = 0;
