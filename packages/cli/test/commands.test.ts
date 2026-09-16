@@ -781,3 +781,22 @@ describe('memory', () => {
     assert.equal(r.stdout, 'Memory\n  (none)\n');
   });
 });
+
+describe('app', () => {
+  test('explains how to get the desktop app when none is installed', async () => {
+    const r = await run(['app']);
+    // Nothing is installed in the test environment, which is the case worth covering: the
+    // command must say what to do rather than fail silently or pretend it started something.
+    assert.equal(r.code, 2);
+    assert.match(r.stderr, /not installed/i);
+    assert.match(r.stderr, /releases/);
+    assert.match(r.stderr, /npm run desktop:build/);
+    assert.equal(r.stdout, '', 'nothing is printed to stdout when nothing started');
+  });
+
+  test('it appears in the help', async () => {
+    const r = await run(['help']);
+    assert.match(r.stdout, /ledge app/);
+    assert.match(r.stdout, /Start the desktop panel/);
+  });
+});

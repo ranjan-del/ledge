@@ -5,6 +5,7 @@ import type { CommandContext, CommandRunner, Flags } from './context.ts';
 import { EXIT, NotFoundError, UsageError } from './context.ts';
 import { renderCommandHelp, renderHelp } from './help.ts';
 import { run as add } from './commands/add.ts';
+import { run as app } from './commands/app.ts';
 import { run as current } from './commands/current.ts';
 import { run as deleteTask } from './commands/delete.ts';
 import { run as done } from './commands/done.ts';
@@ -52,6 +53,7 @@ const COMMANDS: Record<string, CommandRunner> = {
   memory,
   open,
   scan,
+  app,
   init,
 };
 

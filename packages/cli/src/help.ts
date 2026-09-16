@@ -51,6 +51,7 @@ export const COMMANDS: Record<string, HelpEntry> = {
   },
   open: { usage: 'ledge open <id>', summary: 'Print the task file path' },
   scan: { usage: 'ledge scan', summary: 'Run the git scan once and print Pending as JSON' },
+  app: { usage: 'ledge app', summary: 'Start the desktop panel' },
   init: { usage: 'ledge init', summary: 'Create LEDGE_HOME, a default config and a sample task' },
   help: { usage: 'ledge help [command]', summary: 'Show this help' },
 };
