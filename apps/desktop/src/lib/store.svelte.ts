@@ -163,9 +163,14 @@ export function selectedTask(): Task | undefined {
  * hides the only clue about what actually failed.
  */
 export function report(level: 'warn' | 'error', message: string): void {
-  void invoke('log_message', { level, message }).catch(() => {
-    /* the logger must never be the thing that fails */
-  });
+  /* The logger must never be the thing that fails, and that has two halves: a rejected call,
+     and a call that cannot be made at all because there is no Tauri host on the other side of
+     it, which is what happens in a browser and in a screenshot harness. */
+  try {
+    void invoke('log_message', { level, message }).catch(() => {});
+  } catch {
+    /* no host to log to */
+  }
 }
 
 export function errorText(e: unknown): string {

@@ -5,8 +5,14 @@ import { join } from 'node:path';
 import type { CommandContext } from '../context.ts';
 import { EXIT } from '../context.ts';
 
-/** Where a released Ledge lands on each platform, in the order worth trying. */
+/**
+ * Where a released Ledge lands on each platform, in the order worth trying. `LEDGE_APP` names
+ * one explicitly and skips the search, for an installation somewhere unusual and so a test can
+ * decide what is installed instead of depending on the machine it runs on.
+ */
 function candidates(): string[] {
+  const explicit = process.env.LEDGE_APP;
+  if (explicit) return [explicit];
   const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
   switch (platform()) {
     case 'darwin':

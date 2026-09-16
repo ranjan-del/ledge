@@ -20,12 +20,31 @@
     sessionsFor,
     type Task as CoreTask,
   } from '@ledge/core/pure';
+  import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-shell';
   import { onMount } from 'svelte';
   import { personName, summaryParts } from '../lib/derive.ts';
+  import {
+    dismiss as dismissNews,
+    dismissAll as dismissAllNews,
+    dismissAway,
+    markAwaySeen,
+    news,
+    setCentreOpen,
+    startNews,
+    unread,
+  } from '../lib/news.svelte.ts';
+  import type { Notification } from '../lib/observed.ts';
   import { writeText } from '../lib/io.ts';
   import { PANEL_MS, reducedMotion } from '../lib/motion.svelte.ts';
+  import type { PaletteCommand } from '../lib/palette.ts';
+  import {
+    createPanelSizer,
+    needsFullHeight,
+    panelContent,
+    type PanelCounts,
+  } from '../lib/sizing.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
@@ -37,6 +56,7 @@
     doneCount,
     doneTasks,
     doneToday,
+    errorText,
     lastUpdated,
     markDone,
     parkTask,
@@ -58,10 +78,11 @@
     type TaskView,
   } from '../lib/store.svelte.ts';
   import type { CardAction } from './TaskCard.svelte';
+  import CommandPalette from './CommandPalette.svelte';
   import Header from './Header.svelte';
   import Memory from './Memory.svelte';
+  import Notifications from './Notifications.svelte';
   import Now from './Now.svelte';
-  import Search from './Search.svelte';
   import Sessions from './Sessions.svelte';
   import Settings from './Settings.svelte';
   import Tabs from './Tabs.svelte';
@@ -95,6 +116,31 @@
       working: working.length,
       pending: upNext.length + backlogTasks().length,
     }),
+  );
+  /*
+   * How tall the window should be. The counts are the ones this component already derives, so
+   * the sizing rule reads the same lists the surfaces do; the rule itself is in lib/sizing.ts.
+   */
+  const counted = $derived<PanelCounts>({
+    surface: desk.surface,
+    view: desk.view,
+    detailOpen: selected !== undefined,
+    working: working.length,
+    upNext: upNext.length,
+    attention: attentionRepos().length,
+    sessions: sessions.length,
+    notes: notes.length,
+    live: currentTasks().length,
+    done: doneCount(),
+    backlog: backlogTasks().length,
+    pending: desk.pending.length,
+  });
+  const full = $derived(
+    needsFullHeight(
+      panelContent(counted),
+      typeof screen === 'undefined' ? 0 : screen.availHeight,
+      typeof window === 'undefined' ? 1 : window.devicePixelRatio,
+    ),
   );
   const name = $derived(personName(desk.config, desk.home));
   const store = $derived(collapseTilde(desk.tasksDir, desk.home));
@@ -147,6 +193,52 @@
     return actions;
   }
 
+  /**
+   * Runs what a palette row asked for. Every branch is an action the panel already performs
+   * from a button somewhere, which is the rule the palette's own rows are built to: it is a
+   * faster way to the app's verbs, not a second set of them.
+   */
+  function runCommand(command: PaletteCommand) {
+    setSearching(false);
+    if (command.type === 'open-task') select(command.file);
+    else if (command.type === 'surface') setSurface(command.surface);
+    else if (command.type === 'rescan') void scanNow();
+    else if (command.type === 'add-task') {
+      showSettings = false;
+      select(null);
+      setSurface('now');
+      void addTask({ title: command.title }).catch((e: unknown) => (desk.error = errorText(e)));
+    }
+  }
+
+  /**
+   * Opens what a notification is about. A task notification opens that task; a repository one
+   * goes to the Pending view, which is the only place the panel says anything about a
+   * repository. Either way the centre closes, because it was a way in rather than a place.
+   */
+  function openNotification(item: Notification) {
+    setCentreOpen(false);
+    if (item.file) {
+      showSettings = false;
+      select(item.file);
+    } else if (item.repo) {
+      setSurface('tasks');
+      setView('pending');
+    }
+  }
+
+  /*
+   * One sizer for the life of the window. It swallows an answer that has not changed and waits
+   * for the dust to settle before it calls, so a burst of watcher events cannot make the window
+   * re-size and re-place itself several times over.
+   */
+  const sizer = createPanelSizer((hasContent) => {
+    void invoke('resize_panel', { hasContent }).catch(() => {
+      /* Outside Tauri, or a window that has since been hidden: the size is not worth an error
+         line in the panel. */
+    });
+  });
+
   /** Plays the sheet out, then hides the window. Instant when motion is not wanted. */
   function dismiss() {
     const win = getCurrentWindow();
@@ -169,8 +261,7 @@
     const key = event.key.toLowerCase();
     if (key === 'k') {
       event.preventDefault();
-      select(null);
-      showSettings = false;
+      setCentreOpen(false);
       setSearching(!desk.searching);
     } else if (key === 'n') {
       event.preventDefault();
@@ -182,9 +273,21 @@
     }
   }
 
+  /* Nothing is asked of a window nobody can see: a hidden panel is re-sized and re-placed by
+     `toggle_panel` on its way back on screen, and this corrects it a moment later if the button
+     guessed wrong. A pinned panel counts as on screen even while another application has the
+     focus, because it stays visible. */
+  $effect(() => {
+    if (desk.panelVisible || pinned) sizer.update(full);
+  });
+
   onMount(() => {
     let unlisten: (() => void) | undefined;
     const raf = requestAnimationFrame(() => (onScreen = true));
+    /* Only this window watches for news. The button window boots the same store, and two
+       writers of one observation file would each undo the other's record of what it had
+       already seen. */
+    const stopNews = startNews();
     try {
       void getCurrentWindow()
         .onFocusChanged(({ payload: focused }) => {
@@ -199,6 +302,8 @@
     }
     return () => {
       cancelAnimationFrame(raf);
+      sizer.stop();
+      stopNews();
       unlisten?.();
     };
   });
@@ -213,11 +318,13 @@
     {pinned}
     settingsOpen={showSettings}
     searchOpen={desk.searching}
+    unread={unread()}
+    notifyOpen={news.open}
     {modifier}
     onpin={() => (pinned = !pinned)}
+    onnotify={() => setCentreOpen(!news.open)}
     onsearch={() => {
-      select(null);
-      showSettings = false;
+      setCentreOpen(false);
       setSearching(!desk.searching);
     }}
     onsettings={() => {
@@ -259,15 +366,6 @@
         ondelete={destroy}
       />
     </div>
-  {:else if desk.searching}
-    <Search
-      tasks={desk.tasks}
-      onselect={(t) => {
-        setSearching(false);
-        select(t.file);
-      }}
-      onclose={() => setSearching(false)}
-    />
   {:else}
     <div class="tabs">
       <Tabs {tabs} active={desk.surface} onchange={(id) => setSurface(id as Surface)} />
@@ -304,6 +402,13 @@
           setSurface('tasks');
           setView('pending');
         }}
+        away={news.away}
+        onresumeaway={(file) => {
+          dismissAway();
+          select(file);
+        }}
+        ondismissaway={dismissAway}
+        onawayseen={markAwaySeen}
       />
     {:else if desk.surface === 'sessions'}
       <Sessions
@@ -332,6 +437,26 @@
     {:else}
       <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />
     {/if}
+  {/if}
+
+  {#if desk.searching}
+    <CommandPalette
+      tasks={desk.tasks}
+      surface={desk.surface}
+      {modifier}
+      onrun={runCommand}
+      onclose={() => setSearching(false)}
+    />
+  {/if}
+
+  {#if news.open}
+    <Notifications
+      items={news.items}
+      onopen={openNotification}
+      ondismiss={dismissNews}
+      ondismissall={dismissAllNews}
+      onclose={() => setCentreOpen(false)}
+    />
   {/if}
 
   {#if launch && !launch.ok}
@@ -368,6 +493,7 @@
 
 <style>
   .panel {
+    position: relative;
     height: 100%;
     display: flex;
     flex-direction: column;

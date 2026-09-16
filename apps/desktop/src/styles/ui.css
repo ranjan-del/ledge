@@ -402,6 +402,83 @@
   font-weight: 500;
 }
 
+/* ---------------------------------------------------------------- floating sheets */
+/*
+  The command palette and the notification centre are the same object at two sizes: a head that
+  does not scroll, one region that does, and groups inside it under quiet labels. The shapes are
+  here rather than in each component because they were identical in both, and because a scoped
+  copy in each would ship the same rules twice with two different suffixes on every selector.
+*/
+.sheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--rule);
+}
+.sheet-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-2);
+}
+.sheet-list .section-label {
+  padding: 0 var(--space-1);
+}
+.sheet-head .section-label {
+  flex: 1;
+  margin: 0;
+}
+.sheet-group + .sheet-group {
+  margin-top: var(--space-3);
+}
+/* A row in a sheet: the line that names the thing, the quiet caption under it. */
+.sheet-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+/*
+  A small round state mark. It appears on the attention line of NOW and on every notification,
+  and it is always the second signal: the words beside it say the same thing, so the row still
+  reads in greyscale and to anyone who does not see the hue difference.
+*/
+.state-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.state-dot.attention {
+  background: var(--attention-edge);
+}
+.state-dot.done {
+  background: var(--done-fill);
+}
+
+/*
+  The quiet control that takes something away: the cross on a notification and on the return to
+  work summary. Where it sits belongs to the thing it is dismissing; that it is a faint mark
+  which comes up to full strength under the pointer is one decision taken here.
+*/
+.drop {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+}
+.drop:hover {
+  color: var(--text);
+}
+
 /* A field that filters the list under it, with whatever sits beside it. */
 .finder {
   flex: none;
@@ -412,6 +489,20 @@
 }
 .finder .field {
   flex: 1;
+}
+/*
+  A count riding on the corner of a round control: the floating button's current tasks, the
+  header bell's unread notifications. Where it sits and how big it is belongs to the control;
+  that it is a red pill with a white tabular number is one decision taken here.
+*/
+.pip {
+  position: absolute;
+  border-radius: var(--radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  font-weight: 700;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .kbd {
   padding: 1px 5px;

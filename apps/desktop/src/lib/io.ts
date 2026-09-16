@@ -43,10 +43,15 @@ function noteDenied(op: string, path: string, e: unknown): void {
   if (denials >= 3) return;
   denials += 1;
   const detail = e instanceof Error ? e.message : String(e);
-  void invoke('log_message', {
-    level: 'warn',
-    message: `${op} refused for ${path}: ${detail}`,
-  }).catch(() => {});
+  try {
+    void invoke('log_message', {
+      level: 'warn',
+      message: `${op} refused for ${path}: ${detail}`,
+    }).catch(() => {});
+  } catch {
+    /* Outside Tauri there is nothing to report to, and a refusal report must not itself
+       become the failure the caller has to handle. */
+  }
 }
 
 /** Lists a directory's immediate children. Returns an empty list when unreadable. */

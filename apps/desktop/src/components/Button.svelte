@@ -4,37 +4,50 @@
    * the button snaps to the nearest screen edge and the position is saved. A press without
    * movement toggles the panel.
    *
-   * The mark is the Ledge logo: a near-black rounded square carrying a white L, with a green dot
-   * resting in the crook of the letter. It is drawn from the same numbers as the application and
-   * menu bar icons (src-tauri/icons/make-icons.mjs) on the same 0 to 1 grid, scaled by 44, so
-   * the thing on your desktop and the thing in your dock are one mark and not two drawings of
-   * it. Nothing here is a raster: an L at this size needs its stem and foot thicker than any
-   * real typeface would set them, so the letter is two overlapping rounded bars.
+   * The mark is the orb: a violet sphere lit from the upper left, ringed by a bright halo, with
+   * two white capsule eyes and a faint contact shadow under it. It is a face reduced to the two
+   * features that still read at 16 px, and it is drawn from the same numbers as the application
+   * and menu bar icons (src-tauri/icons/make-icons.mjs) on the same 0 to 1 grid, multiplied by
+   * 100 here so the geometry reads as whole numbers. The thing on your desktop and the thing in
+   * your dock are one mark and not two drawings of it. Nothing here is a raster: at 44 px a
+   * sprite would be soft on every display the app actually runs on.
    *
-   * The dot is the same green the panel uses for live work, so it already carries meaning, and
-   * it is drawn last so it sits over the end of the foot. It does not move. The per-task dots in
-   * the panel are the app's one continuous animation, and a second breathing dot on the desktop
-   * would compete with them for the same meaning; a steady dot says the same thing and says it
-   * without motion.
+   * There is no plate. The orb and its halo fill the button, which is what makes it read as an
+   * object sitting on the desktop rather than as an application icon parked on one.
    *
-   * The plate is near-black on a desktop of unknown colour, so it carries both a light hairline
-   * inside its edge and a soft shadow under it: the hairline is what holds the silhouette
-   * against a dark wallpaper, the shadow against a light one.
+   * The blink is the character of the thing, and it is the reason the button is not furniture.
+   * Both eyes close together and open again in about 140 ms, quicker shut than open, and the
+   * gap between blinks is drawn fresh from a 5 to 7 second range with the occasional double,
+   * because a perfectly regular blink reads as a clock. The schedule is in lib/blink.ts; all
+   * this component does is put a class on the eyes. Only the eyes move: they scale on a
+   * transform, so the orb never shifts and nothing is laid out again.
    *
    * The count badge pulses once when the number changes, so a task arriving while you are in
-   * another application is noticeable without being a notification. That is the only motion
-   * here, and it stops dead under prefers-reduced-motion.
+   * another application is noticeable without being a notification. Both the blink and the
+   * pulse stop dead under prefers-reduced-motion, where the eyes simply stay open.
    */
   import { invoke } from '@tauri-apps/api/core';
   import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, untrack } from 'svelte';
-  import { currentTasks, desk, saveConfigFile } from '../lib/store.svelte.ts';
+  import { startBlinking } from '../lib/blink.ts';
+  import { reducedMotion } from '../lib/motion.svelte.ts';
+  import { needsFullHeight, panelContent } from '../lib/sizing.ts';
+  import {
+    attentionRepos,
+    currentTasks,
+    desk,
+    saveConfigFile,
+    upNextTasks,
+    workingTasks,
+  } from '../lib/store.svelte.ts';
 
   const count = $derived(currentTasks().length);
 
   let dragging = $state(false);
   /* Bumped whenever the count changes, to restart the badge animation from the top. */
   let pulse = $state(0);
+  /* True while the eyes are shut. The only state the blink has. */
+  let shut = $state(false);
   let moved = false;
   let settle: ReturnType<typeof setTimeout> | null = null;
   /* Where the count was when this window opened: the badge should not pulse for the tasks
@@ -72,14 +85,44 @@
     void getCurrentWindow().startDragging();
   }
 
+  /**
+   * Whether the panel should open at its full height, so it opens at the right size instead of
+   * re-sizing a moment after it appears. This is the button window's own answer, and it can
+   * only be an answer about NOW: the panel window keeps its own surface and its own open task,
+   * and two webviews share no state. The panel corrects this for itself as soon as it has the
+   * focus, so a wrong guess costs one resize rather than a wrong-sized panel.
+   */
+  function panelWantsFullHeight(): boolean {
+    const content = panelContent({
+      surface: 'now',
+      view: 'live',
+      detailOpen: false,
+      working: workingTasks().length,
+      upNext: upNextTasks().length,
+      attention: attentionRepos().length,
+      sessions: 0,
+      notes: 0,
+      live: currentTasks().length,
+      done: 0,
+      backlog: 0,
+      pending: desk.pending.length,
+    });
+    const avail = typeof screen === 'undefined' ? 0 : screen.availHeight;
+    const ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio;
+    return needsFullHeight(content, avail, ratio);
+  }
+
   function onPointerUp(e: PointerEvent) {
     if (e.button !== 0 || !dragging) return;
     dragging = false;
-    if (!moved) void invoke('toggle_panel');
+    if (!moved) void invoke('toggle_panel', { hasContent: panelWantsFullHeight() });
   }
 
   onMount(() => {
     let unlisten: (() => void) | undefined;
+    /* The script half of the motion policy: under reduced motion no timer is started at all,
+       so the eyes are not merely still, nothing is scheduled. */
+    const stopBlinking = reducedMotion() ? null : startBlinking((v) => (shut = v));
     try {
       void getCurrentWindow()
         .onMoved(() => {
@@ -98,6 +141,7 @@
     }
     return () => {
       unlisten?.();
+      stopBlinking?.();
       if (settle !== null) clearTimeout(settle);
     };
   });
@@ -112,22 +156,43 @@
     onpointerdown={onPointerDown}
     onpointerup={onPointerUp}
   >
-    <!-- Every number below is the icon's 0 to 1 geometry multiplied by 44. -->
-    <svg class="logo" width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-      <rect class="plate" x="0" y="0" width="44" height="44" rx="9.64" fill="#1b1c20" />
-      <rect class="stem" x="12.54" y="10.34" width="5.94" height="20.46" rx="1.14"
-        fill="#ffffff" />
-      <rect class="foot" x="12.54" y="27.06" width="15.18" height="3.74" rx="1.14"
-        fill="#ffffff" />
-      <circle class="dot" cx="29.7" cy="29.57" r="3.87" fill="#30c75e" />
-      <!-- Drawn last and inset by half its own width, so the silhouette survives a dark
-           wallpaper without the stroke straddling the plate's edge. -->
-      <rect class="rim" x="0.5" y="0.5" width="43" height="43" rx="9.14" fill="none"
-        stroke="rgba(255, 255, 255, 0.18)" stroke-width="1" />
+    <!-- Every number below is the icon's 0 to 1 geometry multiplied by 100. The viewBox is
+         square and centred on the drawing, which runs from the top of the halo to the bottom
+         of the contact shadow, so the orb fills the button without the shadow being clipped. -->
+    <svg class="logo" width="44" height="44" viewBox="10.75 10.5 78.5 78.5" aria-hidden="true">
+      <defs>
+        <!-- The sphere: a diagonal sweep from the pink violet upper left through the body to
+             the blue lower right, which is the same two-blend construction make-icons uses. -->
+        <linearGradient id="ledge-orb" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#d6a8f2" />
+          <stop offset="0.42" stop-color="#8d7bef" />
+          <stop offset="1" stop-color="#5063e6" />
+        </linearGradient>
+        <!-- The halo is brightest against the sphere and gone one halo-width out. -->
+        <radialGradient id="ledge-halo">
+          <stop offset="0.851" stop-color="#ffffff" stop-opacity="0.95" />
+          <stop offset="0.925" stop-color="#ffffff" stop-opacity="0.45" />
+          <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient id="ledge-shade">
+          <stop offset="0" stop-color="#6d6aa8" stop-opacity="0.3" />
+          <stop offset="0.74" stop-color="#6d6aa8" stop-opacity="0.12" />
+          <stop offset="1" stop-color="#6d6aa8" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <ellipse class="shade" cx="50" cy="85.5" rx="20" ry="3.5" fill="url(#ledge-shade)" />
+      <circle class="halo" cx="50" cy="47.5" r="37" fill="url(#ledge-halo)" />
+      <circle class="orb" cx="50" cy="47.5" r="31.5" fill="url(#ledge-orb)" />
+      <!-- Both eyes in one group, so one transform closes both and the pair can never blink
+           out of step. -->
+      <g class="eyes" class:shut>
+        <rect x="37.6" y="40.75" width="6.2" height="13.5" rx="3.1" fill="#ffffff" />
+        <rect x="56.2" y="40.75" width="6.2" height="13.5" rx="3.1" fill="#ffffff" />
+      </g>
     </svg>
     {#if count > 0}
       {#key pulse}
-        <span class="badge">{count}</span>
+        <span class="badge pip">{count}</span>
       {/key}
     {/if}
   </button>
@@ -145,7 +210,7 @@
     position: relative;
     width: 44px;
     height: 44px;
-    border-radius: 10px;
+    border-radius: 50%;
     display: grid;
     place-items: center;
     cursor: grab;
@@ -158,28 +223,41 @@
     cursor: grabbing;
     transform: scale(0.96);
   }
+  /* The halo and the contact shadow are drawn into the mark itself, so there is no plate to
+     cast a shadow and nothing here to add one. */
   .logo {
     display: block;
-    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.42));
   }
   .badge {
-    position: absolute;
     top: -3px;
     right: -3px;
     min-width: 18px;
     height: 18px;
     padding: 0 5px;
-    border-radius: var(--radius-pill);
-    background: var(--badge-bg);
-    color: var(--badge-fg);
     font-size: var(--fs-xs);
-    font-weight: 700;
     line-height: 18px;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
   }
 
   @media (prefers-reduced-motion: no-preference) {
+    /*
+      The blink, as two transitions rather than a keyframe, because the schedule that fires it
+      is irregular on purpose and a keyframe can only repeat on a fixed period. The close is
+      the quicker half and eases in; the open eases out. Together they are about 140 ms.
+
+      Only scaleY is animated, on a group whose transform box is its own bounding box, so the
+      eyes shut about their own centre line and neither the orb nor the badge is touched. No
+      property here can trigger layout.
+    */
+    .eyes {
+      transform-box: fill-box;
+      transform-origin: center;
+      transition: transform 85ms cubic-bezier(0.2, 0.6, 0.35, 1);
+    }
+    .eyes.shut {
+      transform: scaleY(0.1);
+      transition-duration: 55ms;
+      transition-timing-function: cubic-bezier(0.45, 0, 0.9, 0.6);
+    }
     .badge {
       animation: badge-pulse 420ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
     }

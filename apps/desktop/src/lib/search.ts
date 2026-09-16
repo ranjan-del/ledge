@@ -25,11 +25,17 @@ export interface Hit {
   date?: string;
 }
 
-function terms(query: string): string[] {
+/**
+ * The whitespace-separated terms of a query, lowercased, blanks dropped. Exported because the
+ * command palette matches session ids, repository paths and action labels with the same rule,
+ * and two definitions of "what counts as a match" would let the two surfaces disagree.
+ */
+export function terms(query: string): string[] {
   return query.toLowerCase().split(/\s+/).filter((w) => w !== '');
 }
 
-function matches(haystack: string, words: string[]): boolean {
+/** True when every term appears in `haystack`, ignoring case. The whole matching rule. */
+export function matches(haystack: string, words: string[]): boolean {
   const hay = haystack.toLowerCase();
   return words.every((word) => hay.includes(word));
 }

@@ -24,7 +24,7 @@ describe('Now, empty', () => {
   it('greets nobody and counts nothing when there is nothing to count', () => {
     const { container } = render(Now, { props: { ...base, name: 'Ranjan', attention: 3 } });
     expect(container.querySelector('.greet')).toBeNull();
-    expect(container.querySelector('.attention')).toBeNull();
+    expect(container.querySelector('.attention-line')).toBeNull();
     expect(container.querySelector('.pane-foot')).toBeNull();
   });
 
@@ -105,7 +105,7 @@ describe('Now, with work on it', () => {
     expect(onpending).toHaveBeenCalled();
     unmount();
     const quiet = render(Now, { props: { ...loaded, attention: 0, onpending } });
-    expect(quiet.container.querySelector('.attention')).toBeNull();
+    expect(quiet.container.querySelector('.attention-line')).toBeNull();
   });
 
   it('spells the add shortcut out only when it was given one that works', () => {

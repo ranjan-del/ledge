@@ -784,9 +784,16 @@ describe('memory', () => {
 
 describe('app', () => {
   test('explains how to get the desktop app when none is installed', async () => {
+    // Point the lookup at a path that cannot exist, so the result does not depend on whether
+    // this machine happens to have Ledge installed. The first version of this test passed
+    // until the app was installed on the development machine, which is exactly the kind of
+    // hidden dependency on machine state a test should not have.
+    const previous = process.env.LEDGE_APP;
+    process.env.LEDGE_APP = join(process.env.LEDGE_HOME ?? '/', 'no-such-ledge-app');
     const r = await run(['app']);
-    // Nothing is installed in the test environment, which is the case worth covering: the
-    // command must say what to do rather than fail silently or pretend it started something.
+    if (previous === undefined) delete process.env.LEDGE_APP;
+    else process.env.LEDGE_APP = previous;
+
     assert.equal(r.code, 2);
     assert.match(r.stderr, /not installed/i);
     assert.match(r.stderr, /releases/);

@@ -8,6 +8,10 @@
    * The dot is the app saying it is still watching your files, and a spinner for as long as a
    * git scan is actually running. The pin is here rather than in a menu because the panel hides
    * when it loses focus, so keeping it open has to be one click away wherever you are.
+   *
+   * The bell carries the number of changes Ledge has noticed and you have not read. It is a
+   * count and not a dot, because "three things happened" and "something happened" are different
+   * sentences, and it disappears entirely at zero rather than sitting there saying nothing.
    */
   import LiveDot from './LiveDot.svelte';
 
@@ -22,11 +26,17 @@
     settingsOpen?: boolean;
     /** The search overlay is open. */
     searchOpen?: boolean;
+    /** Unread notifications. Zero hides the count. */
+    unread?: number;
+    /** The notification centre is open, so the bell reads as pressed. */
+    notifyOpen?: boolean;
     /** The modifier shown in the search pill: `⌘` on macOS, `Ctrl` elsewhere. */
     modifier?: string;
     onpin: () => void;
     onsearch: () => void;
     onsettings: () => void;
+    /** Absent where there is no centre to open, which is how the bell is left out. */
+    onnotify?: () => void;
   }
 
   let {
@@ -35,10 +45,13 @@
     pinned = false,
     settingsOpen = false,
     searchOpen = false,
+    unread = 0,
+    notifyOpen = false,
     modifier = '⌘',
     onpin,
     onsearch,
     onsettings,
+    onnotify,
   }: Props = $props();
 </script>
 
@@ -81,6 +94,33 @@
     </svg>
     <span class="key">{modifier}K</span>
   </button>
+
+  {#if onnotify}
+    <button
+      type="button"
+      class="tool motion bell"
+      aria-pressed={notifyOpen}
+      aria-label={unread > 0
+        ? `Notifications, ${unread} unread`
+        : 'Notifications, nothing unread'}
+      title="Notifications"
+      onclick={onnotify}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <path
+          d="M3.4 9.6V6.4a3.6 3.6 0 0 1 7.2 0v3.2l1 1.4H2.4zM5.7 12a1.4 1.4 0 0 0 2.6 0"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+      {#if unread > 0}
+        <span class="count pip" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>
+      {/if}
+    </button>
+  {/if}
 
   <button
     type="button"
@@ -150,6 +190,20 @@
   .search[aria-pressed="true"] {
     background: var(--control-active);
     color: var(--text);
+  }
+  /* The count rides on the bell's upper right rather than beside it, so the strip's shape is
+     the same whether or not there is anything unread. */
+  .bell {
+    position: relative;
+  }
+  .bell .count {
+    top: -1px;
+    right: -2px;
+    min-width: 13px;
+    height: 13px;
+    padding: 0 3px;
+    font-size: 9px;
+    line-height: 13px;
   }
   .key {
     font-family: var(--font-mono);

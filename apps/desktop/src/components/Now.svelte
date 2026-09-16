@@ -12,15 +12,21 @@
    * The scroll region holds the blocks and the add row sits below it, so a task is always one
    * interaction away however far down you are. When there is nothing at all, the add row moves
    * up under the heading and that is the entire empty state.
+   *
+   * One thing comes before the greeting, and only sometimes: the summary of what changed while
+   * the panel was closed. It leads because it is the only thing on the surface that will not be
+   * true in a minute's time, and it takes itself away once it has been read.
    */
   import type { RepoStatus, Task } from '@ledge/core/pure';
   import { onMount } from 'svelte';
+  import type { AwaySummary } from '../lib/away.ts';
   import { greeting } from '../lib/derive.ts';
   import { startStaggerWindow, staggering } from '../lib/motion.svelte.ts';
   import { basename } from '../lib/paths.ts';
   import type { NewTask } from '../lib/store.svelte.ts';
   import { todayIso } from '../lib/time.ts';
   import AddTask from './AddTask.svelte';
+  import ReturnToWork from './ReturnToWork.svelte';
   import TaskCard, { type CardAction } from './TaskCard.svelte';
   import Typewriter from './Typewriter.svelte';
 
@@ -35,6 +41,14 @@
     summary?: string[];
     /** Repositories with uncommitted or unpushed work. Zero hides the attention line. */
     attention?: number;
+    /** What changed while the panel was closed. Absent unless there was a real absence. */
+    away?: AwaySummary;
+    /** Opens the task the summary offers to go back to. */
+    onresumeaway?: (file: string) => void;
+    /** Takes the summary off the surface. */
+    ondismissaway?: () => void;
+    /** Records the absence as reported, so it is not shown twice. */
+    onawayseen?: () => void;
     /** Today as YYYY-MM-DD. A prop so this is testable without touching the clock. */
     day?: string;
     /** Bumping this opens the add row and focuses it, which is what the ⌘N shortcut does. */
@@ -55,6 +69,10 @@
     name = '',
     summary = [],
     attention = 0,
+    away,
+    onresumeaway,
+    ondismissaway,
+    onawayseen,
     day = todayIso(),
     addKey = 0,
     addShortcut,
@@ -77,6 +95,15 @@
 
 <div class="pane">
   <div class="pane-scroll">
+    {#if away && onresumeaway && ondismissaway}
+      <ReturnToWork
+        summary={away}
+        onresume={onresumeaway}
+        ondismiss={ondismissaway}
+        onseen={onawayseen}
+      />
+    {/if}
+
     {#if empty}
       <section class="start" aria-labelledby="start-heading">
         <h2 id="start-heading" aria-label={EMPTY_LINE}><Typewriter text={EMPTY_LINE} /></h2>
@@ -136,8 +163,8 @@
       {/if}
 
       {#if attention > 0 && onpending}
-        <button type="button" class="attention" onclick={() => onpending?.()}>
-          <span class="dot" aria-hidden="true"></span>
+        <button type="button" class="attention-line" onclick={() => onpending?.()}>
+          <span class="state-dot attention" aria-hidden="true"></span>
           <span class="what">
             {attention}
             {attention === 1 ? 'repository has' : 'repositories have'} uncommitted or unpushed work
@@ -233,8 +260,10 @@
     max-width: 110px;
   }
 
-  /* The attention line is deliberately quiet: one line, no card, no count badge. */
-  .attention {
+  /* The attention line is deliberately quiet: one line, no card, no count badge. Its class is
+     not `attention`, which is the name of a tone: a state dot inside it carrying that tone
+     would otherwise pick up this rule and lay itself out as the row. */
+  .attention-line {
     display: flex;
     align-items: center;
     gap: var(--space-2);
@@ -245,19 +274,12 @@
     font-size: var(--fs-sm);
     text-align: left;
   }
-  .attention:hover {
+  .attention-line:hover {
     background: var(--surface);
     color: var(--text);
   }
-  .attention .what {
+  .attention-line .what {
     flex: 1;
     min-width: 0;
-  }
-  .dot {
-    flex: none;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--attention-edge);
   }
 </style>

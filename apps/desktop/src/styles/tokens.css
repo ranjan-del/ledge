@@ -34,7 +34,6 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-5: 24px;
 
   /* Radius is overridden per OS below (macos 14, windows 8, linux 10). */
   --radius: 10px;
@@ -93,6 +92,14 @@
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05);
 
+  /* The two sheets that float over the panel rather than replacing it: the command palette
+     and the notification centre. The ground behind them is dimmed rather than blurred, and
+     the sheet itself is denser than --surface, because it has to be readable over whatever
+     it is covering. */
+  --scrim: rgba(28, 28, 30, 0.3);
+  --overlay: rgba(252, 252, 254, 0.95);
+  --overlay-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+
   /* The floating button paints itself: the orb, its halo and its contact shadow are drawn in
      Button.svelte from the icon's geometry, so there is no plate colour to name here. */
   --badge-bg: #ff5f57;
@@ -136,6 +143,9 @@
     --neutral-fg: rgba(235, 235, 245, 0.7);
     --progress-track: rgba(255, 255, 255, 0.14);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --scrim: rgba(0, 0, 0, 0.5);
+    --overlay: rgba(40, 40, 44, 0.96);
+    --overlay-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   }
 }
 
@@ -175,6 +185,9 @@
   --neutral-fg: rgba(235, 235, 245, 0.7);
   --progress-track: rgba(255, 255, 255, 0.14);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --scrim: rgba(0, 0, 0, 0.5);
+  --overlay: rgba(40, 40, 44, 0.96);
+  --overlay-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 
 /* Per-OS material and radius. Native vibrancy on macOS and Mica on Windows do most of
