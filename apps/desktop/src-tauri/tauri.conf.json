@@ -34,15 +34,17 @@
         "title": "Ledge",
         "url": "index.html",
         "width": 380,
-        "height": 450,
+        "height": 900,
         "transparent": true,
         "decorations": false,
         "visible": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "resizable": false,
+        "resizable": true,
         "visibleOnAllWorkspaces": true,
-        "acceptFirstMouse": true
+        "acceptFirstMouse": true,
+        "minWidth": 320,
+        "minHeight": 300
       }
     ],
     "security": {

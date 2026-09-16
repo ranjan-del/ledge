@@ -67,6 +67,35 @@ fn panel_height(area_h: i32, has_content: bool) -> u32 {
         .min(fitted) as u32
 }
 
+/// Where the person last dragged the panel's edges to, if they ever did. Kept in its own small
+/// file rather than in config.json, which the webview owns and rewrites: two writers on one
+/// file is how a setting quietly disappears.
+fn saved_panel_size(app: &AppHandle) -> Option<(u32, u32)> {
+    let path = ledge_home()?.join(".panel-size.json");
+    let text = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let w = v.get("width")?.as_u64()? as u32;
+    let h = v.get("height")?.as_u64()? as u32;
+    let _ = app;
+    if w < 200 || h < 200 { None } else { Some((w, h)) }
+}
+
+/// Records the size after a drag, so the panel opens the way it was left.
+fn save_panel_size(width: u32, height: u32) {
+    let Some(home) = ledge_home() else { return };
+    let _ = std::fs::create_dir_all(&home);
+    let body = format!("{{\n  \"width\": {width},\n  \"height\": {height}\n}}\n");
+    let _ = std::fs::write(home.join(".panel-size.json"), body);
+}
+
+/// The store folder, honouring LEDGE_HOME the same way the command line tool does.
+fn ledge_home() -> Option<std::path::PathBuf> {
+    if let Some(explicit) = std::env::var_os("LEDGE_HOME") {
+        return Some(std::path::PathBuf::from(explicit));
+    }
+    dirs_home().map(|h| h.join(".ledge"))
+}
+
 /// Sizes the panel per the contract and parks it beside the button on the same screen edge,
 /// centred on the button vertically so it reads as belonging to the button rather than to
 /// the screen. Both axes are clamped inside the work area, so a button near the top or
@@ -87,8 +116,13 @@ fn place_panel(app: &AppHandle, has_content: bool) -> Result<(), String> {
     let area_y = area.position.y;
     let area_w = area.size.width as i32;
     let area_h = area.size.height as i32;
-    let height = panel_height(area_h, has_content);
-    let width = panel_size.width;
+    // Full height by default, every time. The short layout is gone: people said the panel
+    // should fill the screen, and a size they chose themselves beats anything computed here.
+    let (width, height) = match saved_panel_size(app) {
+        Some((w, h)) => (w, h.min((area_h - 2 * MARGIN).max(200) as u32)),
+        None => (panel_size.width, panel_height(area_h, true)),
+    };
+    let _ = has_content;
 
     let button_center_x = button_pos.x + button_size.width as i32 / 2;
     let on_left = button_center_x < area_x + area_w / 2;
@@ -602,6 +636,17 @@ pub fn run() {
         // Activating another application can order the button out even with a status window
         // level set at startup, and a button nobody can see leaves no way to open the panel.
         // Re-asserting it whenever focus moves is what actually keeps it there.
+        // Remember a drag. The event fires continuously while the edge is moving, and writing a
+        // tiny file on each is cheap enough that debouncing would cost more than it saves.
+        tauri::RunEvent::WindowEvent {
+            label,
+            event: tauri::WindowEvent::Resized(size),
+            ..
+        } => {
+            if label == PANEL && size.width > 0 && size.height > 0 {
+                save_panel_size(size.width, size.height);
+            }
+        }
         tauri::RunEvent::WindowEvent {
             label,
             event: tauri::WindowEvent::Focused(_focused),
