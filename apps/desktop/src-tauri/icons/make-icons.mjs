@@ -12,10 +12,11 @@
  *               macOS recolours a template itself, white on a dark menu bar and black on a
  *               light one. A colour plate up there renders as a solid block.
  *
- * The mark is a robot head, because the thing behind the button is an assistant and it should
- * look like one. It is drawn from solid geometry rather than strokes so it survives being
- * shrunk to 16 pixels, where a monoline outline turns to mush. The features are deliberately
- * few: an antenna, a head, two eyes and a mouth. Anything more disappears at menu bar size.
+ * The mark is an orb with two eyes: a soft violet sphere lit from the upper left, ringed by a
+ * bright halo, with a pair of white capsule eyes. It is a face reduced to the two features that
+ * still read at 16 pixels. The colour and the glow carry the character at large sizes; at menu
+ * bar size everything but the silhouette and the eyes falls away, which is why the template
+ * variant is only a disc with two holes in it and still looks like the same creature.
  */
 import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
@@ -24,78 +25,84 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
-/* ------------------------------------------------------------------ the drawing */
+/* ------------------------------------------------------------------ geometry */
+
+// Everything is described on a 0 to 1 grid so both sizes draw the same thing.
+const ORB = { cx: 0.5, cy: 0.475, r: 0.315 };
+const EYE = { dx: 0.093, cy: 0.475, w: 0.062, h: 0.135, r: 0.031 };
+const SHADOW = { cx: 0.5, cy: 0.855, rx: 0.2, ry: 0.035 };
+const HALO_WIDTH = 0.055;
+const PLATE_CORNER = 0.219; // 224 of 1024, the macOS app icon corner
+
+/** Smooth 0 to 1 ramp, used so every edge and falloff eases instead of stepping. */
+function smooth(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
 
 /**
- * The robot, described once on a 0 to 1 grid so both sizes draw the same thing. `add` shapes
- * build the silhouette, `cut` shapes are removed from it, which is what makes the eyes and
- * mouth read as holes in both a coloured plate and a transparent template.
+ * Coverage of a rounded rectangle at a point, as a signed distance, so the eyes come out with
+ * clean antialiased edges at every size rather than stepped ones.
  */
-const ROBOT = {
-  add: [
-    // Antenna: a stalk with a ball on top, offset slightly left so the head is not a perfect
-    // mirror. A face with no asymmetry at all reads as a logo rather than a character.
-    { kind: 'circle', cx: 0.44, cy: 0.145, r: 0.062 },
-    { kind: 'rect', x0: 0.424, y0: 0.185, x1: 0.456, y1: 0.275, r: 0.016 },
-    // Head.
-    { kind: 'rect', x0: 0.175, y0: 0.265, x1: 0.825, y1: 0.735, r: 0.15 },
-    // Ears.
-    { kind: 'rect', x0: 0.108, y0: 0.415, x1: 0.183, y1: 0.585, r: 0.037 },
-    { kind: 'rect', x0: 0.817, y0: 0.415, x1: 0.892, y1: 0.585, r: 0.037 },
-    // Neck and shoulders, so the head is not floating.
-    { kind: 'rect', x0: 0.425, y0: 0.735, x1: 0.575, y1: 0.79, r: 0.02 },
-    { kind: 'rect', x0: 0.255, y0: 0.79, x1: 0.745, y1: 0.87, r: 0.055 },
-  ],
-  cut: [
-    // Eyes. Tall rounded slots rather than dots: at 16 pixels a dot vanishes, a slot holds.
-    { kind: 'rect', x0: 0.295, y0: 0.375, x1: 0.415, y1: 0.525, r: 0.055 },
-    { kind: 'rect', x0: 0.585, y0: 0.375, x1: 0.705, y1: 0.525, r: 0.055 },
-    // Mouth.
-    { kind: 'rect', x0: 0.355, y0: 0.605, x1: 0.645, y1: 0.655, r: 0.025 },
-    // A notch out of the shoulders, which reads as arms without drawing any.
-    { kind: 'rect', x0: 0.455, y0: 0.845, x1: 0.545, y1: 0.885, r: 0.018 },
-  ],
-};
-
-/**
- * Coverage of a shape at a point, sampled as a signed distance so edges come out smooth rather
- * than stepped. Returns 0 outside, 1 inside, and a fraction across the one pixel boundary band.
- * Both shape kinds reduce to the same rounded-rectangle distance, a circle being the case where
- * the rectangle has collapsed to its centre.
- */
-function coverage(shape, x, y, scale) {
-  let left;
-  let top;
-  let right;
-  let bottom;
-  let radius;
-  if (shape.kind === 'circle') {
-    left = shape.cx * scale;
-    top = shape.cy * scale;
-    right = left;
-    bottom = top;
-    radius = shape.r * scale;
-  } else {
-    radius = shape.r * scale;
-    left = shape.x0 * scale + radius;
-    top = shape.y0 * scale + radius;
-    right = shape.x1 * scale - radius;
-    bottom = shape.y1 * scale - radius;
-  }
+function roundedRect(x, y, x0, y0, x1, y1, radius, scale) {
+  const r = radius * scale;
+  const left = x0 * scale + r;
+  const top = y0 * scale + r;
+  const right = x1 * scale - r;
+  const bottom = y1 * scale - r;
   const nx = Math.max(left, Math.min(x, right));
   const ny = Math.max(top, Math.min(y, bottom));
   const dx = x - nx;
   const dy = y - ny;
-  return Math.max(0, Math.min(1, 0.5 - (Math.sqrt(dx * dx + dy * dy) - radius)));
+  return Math.max(0, Math.min(1, 0.5 - (Math.sqrt(dx * dx + dy * dy) - r)));
 }
 
-/** Silhouette coverage at a point: everything added, minus everything cut. */
-function robotCoverage(x, y, scale) {
-  let on = 0;
-  for (const s of ROBOT.add) on = Math.max(on, coverage(s, x, y, scale));
-  let off = 0;
-  for (const s of ROBOT.cut) off = Math.max(off, coverage(s, x, y, scale));
-  return Math.max(0, on - off);
+/** Combined coverage of the two eyes at a point. */
+function eyeCoverage(x, y, scale) {
+  const left = roundedRect(
+    x, y,
+    ORB.cx - EYE.dx - EYE.w / 2, EYE.cy - EYE.h / 2,
+    ORB.cx - EYE.dx + EYE.w / 2, EYE.cy + EYE.h / 2,
+    EYE.r, scale,
+  );
+  const right = roundedRect(
+    x, y,
+    ORB.cx + EYE.dx - EYE.w / 2, EYE.cy - EYE.h / 2,
+    ORB.cx + EYE.dx + EYE.w / 2, EYE.cy + EYE.h / 2,
+    EYE.r, scale,
+  );
+  return Math.max(left, right);
+}
+
+/* ------------------------------------------------------------------ colour */
+
+const PLATE_TOP = [0xf2, 0xf1, 0xfd];
+const PLATE_BOTTOM = [0xe4, 0xe8, 0xfb];
+const ORB_HIGHLIGHT = [0xd6, 0xa8, 0xf2]; // pink violet, upper left
+const ORB_MID = [0x8d, 0x7b, 0xef]; // the body of the sphere
+const ORB_DEEP = [0x50, 0x63, 0xe6]; // blue, lower right
+const WHITE = [0xff, 0xff, 0xff];
+
+/** Blends two colours by t in 0 to 1. */
+function mix(a, b, t) {
+  const k = Math.max(0, Math.min(1, t));
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * k),
+    Math.round(a[1] + (b[1] - a[1]) * k),
+    Math.round(a[2] + (b[2] - a[2]) * k),
+  ];
+}
+
+/**
+ * The sphere's colour at a point inside it. Two blends stacked: a diagonal sweep from the pink
+ * upper left to the blue lower right gives it a light source, and a second blend toward the
+ * highlight near the top left corner keeps the surface from reading flat.
+ */
+function orbColour(nx, ny) {
+  const diagonal = (nx + ny + 2) / 4; // 0 at the upper left of the sphere, 1 at the lower right
+  let rgb = mix(ORB_MID, ORB_DEEP, smooth(0.35, 1.0, diagonal));
+  rgb = mix(rgb, ORB_HIGHLIGHT, smooth(0.6, 0.0, diagonal) * 0.85);
+  return rgb;
 }
 
 /* ------------------------------------------------------------------ png encoding */
@@ -147,66 +154,79 @@ function encodePng(size, rgba) {
 
 /* ------------------------------------------------------------------ the two assets */
 
-const TEAL_TOP = [0x18, 0xa5, 0xaf];
-const TEAL_BOTTOM = [0x09, 0x51, 0x59];
-const PLATE_CORNER = 0.219; // 224 of 1024, the macOS app icon corner
-
-/** Blends two colours by t in 0 to 1. */
-function mix(a, b, t) {
-  return [
-    Math.round(a[0] + (b[0] - a[0]) * t),
-    Math.round(a[1] + (b[1] - a[1]) * t),
-    Math.round(a[2] + (b[2] - a[2]) * t),
-  ];
-}
-
-/** The application icon: a white robot on a rounded teal plate with a vertical gradient. */
+/** The application icon: the lit orb on a pale lavender plate, with its halo and its shadow. */
 function drawAppIcon(size) {
   const rgba = Buffer.alloc(size * size * 4);
-  const plate = {
-    kind: 'rect',
-    x0: 0,
-    y0: 0,
-    x1: 1,
-    y1: 1,
-    r: PLATE_CORNER,
-  };
-  // The robot is inset so it does not crowd the plate's corners.
-  const inset = 0.1;
-  const span = 1 - inset * 2;
+  const cx = ORB.cx * size;
+  const cy = ORB.cy * size;
+  const r = ORB.r * size;
+  const halo = HALO_WIDTH * size;
+
   for (let y = 0; y < size; y += 1) {
-    const ground = mix(TEAL_TOP, TEAL_BOTTOM, y / (size - 1));
     for (let x = 0; x < size; x += 1) {
       const px = x + 0.5;
       const py = y + 0.5;
-      const onPlate = coverage(plate, px, py, size);
-      const rx = (px / size - inset) / span;
-      const ry = (py / size - inset) / span;
-      const onRobot = rx < -0.2 || rx > 1.2 || ry < -0.2 || ry > 1.2
-        ? 0
-        : robotCoverage(rx * size, ry * size, size);
-      const rgb = mix(ground, [0xff, 0xff, 0xff], onRobot);
+      let rgb = mix(PLATE_TOP, PLATE_BOTTOM, y / (size - 1));
+
+      // Contact shadow, drawn first so everything else sits over it.
+      const sx = (px - SHADOW.cx * size) / (SHADOW.rx * size);
+      const sy = (py - SHADOW.cy * size) / (SHADOW.ry * size);
+      const shade = smooth(1.35, 0.0, Math.sqrt(sx * sx + sy * sy));
+      rgb = mix(rgb, [0x6d, 0x6a, 0xa8], shade * 0.3);
+
+      const d = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+
+      // Halo: brightest right at the rim, gone a little way out, and it also bleeds a touch
+      // inward so the sphere looks lit from behind rather than pasted on.
+      const outward = smooth(r + halo, r, d);
+      const inward = smooth(r - halo * 0.8, r, d);
+      const glow = d >= r ? outward : inward * 0.55;
+      rgb = mix(rgb, WHITE, glow * 0.95);
+
+      // The sphere itself.
+      const inside = smooth(r + 0.75, r - 0.75, d);
+      if (inside > 0) {
+        const nx = (px - cx) / r;
+        const ny = (py - cy) / r;
+        rgb = mix(rgb, orbColour(nx, ny), inside);
+        const eyes = eyeCoverage(px, py, size);
+        if (eyes > 0) rgb = mix(rgb, WHITE, eyes);
+      }
+
+      const plateAlpha = roundedRect(px, py, 0, 0, 1, 1, PLATE_CORNER, size);
       const o = (y * size + x) * 4;
       rgba[o] = rgb[0];
       rgba[o + 1] = rgb[1];
       rgba[o + 2] = rgb[2];
-      rgba[o + 3] = Math.round(onPlate * 255);
+      rgba[o + 3] = Math.round(plateAlpha * 255);
     }
   }
   return encodePng(size, rgba);
 }
 
-/** The menu bar icon: the same robot as black on transparency, with no plate behind it. */
+/**
+ * The menu bar icon: the same creature reduced to a disc with two eye holes, black on
+ * transparency. No halo and no shadow, because a template image has no colour to carry them
+ * and macOS would render any grey as a muddy blob.
+ */
 function drawTrayIcon(size) {
   const rgba = Buffer.alloc(size * size * 4);
-  // Menu bar items want a little breathing room inside their slot.
-  const inset = 0.06;
-  const span = 1 - inset * 2;
+  // A menu bar slot wants the mark slightly smaller than the full square.
+  const scale = 0.92;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = ORB.r * size * scale * (1 / 0.95);
+
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
-      const rx = (x + 0.5) / size;
-      const ry = (y + 0.5) / size;
-      const a = robotCoverage(((rx - inset) / span) * size, ((ry - inset) / span) * size, size);
+      const px = x + 0.5;
+      const py = y + 0.5;
+      const d = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+      let a = smooth(r + 0.7, r - 0.7, d);
+      // Eyes, mapped into the disc's own frame so they keep their position and proportion.
+      const ex = (px - cx) / (r / (ORB.r * size)) + ORB.cx * size;
+      const ey = (py - cy) / (r / (ORB.r * size)) + ORB.cy * size;
+      a = Math.max(0, a - eyeCoverage(ex, ey, size));
       const o = (y * size + x) * 4;
       rgba[o] = 0;
       rgba[o + 1] = 0;
