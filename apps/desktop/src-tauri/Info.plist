@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Ledge is an assistant panel, not an application: the floating button and the menu bar item
+    are the whole of it, and it should never take a slot in the Dock or the application
+    switcher. Calling set_activation_policy(Accessory) at startup is not enough on its own,
+    because by then the launch has already put the icon in the Dock. LSUIElement tells macOS
+    before the process starts, so the icon never appears at all.
+
+    Tauri merges this file into the bundle's generated Info.plist at build time.
+  -->
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
