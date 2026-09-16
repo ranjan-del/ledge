@@ -210,12 +210,32 @@ export function renderContext(task: Task, day: string, max = CONTEXT_MAX_LINES):
   const fixed = head.length + tail.length;
   let noteLines: string[] = [];
   if (note) {
-    const body = note.body.trim().split('\n');
+    const lines = note.body.trim().split('\n');
     const room = max - fixed - 2;
-    const kept = room >= body.length ? body : body.slice(body.length - Math.max(room, 0));
-    if (kept.length > 0) noteLines = ['', `Notes (${note.date}):`, ...kept];
+    // When the note has to be shortened it also needs a line to say so, so the budget for the
+    // note itself is one smaller in that case. Without this the block came out one line over
+    // and was trimmed a second time, which put a second marker in and cost a note line.
+    const fits = room >= lines.length;
+    const kept = fits ? lines : lines.slice(lines.length - Math.max(room - 1, 0));
+    if (kept.length > 0) {
+      noteLines = ['', `Notes (${note.date}):`];
+      // Say when the note is only partly here. Relying on the whole block being cut to signal
+      // this stopped working once the closing instruction was protected from truncation, and a
+      // silently shortened note is worse than an obviously shortened one.
+      if (!fits) {
+        noteLines.push(`... ${lines.length - kept.length} earlier lines, see ledge open`);
+      }
+      noteLines.push(...kept);
+    } else {
+      noteLines = ['', `Notes (${note.date}): not shown, see ledge open`];
+    }
   }
-  return truncateLines([...head, ...noteLines, ...tail].join('\n'), max);
+  // The tail is never truncated. It carries the file path and the one instruction that changes
+  // behaviour, and cutting the block as a whole dropped exactly those lines whenever the
+  // requirement and the notes were long, which is precisely when they matter most. So the
+  // middle is trimmed to make room and the tail is always appended after.
+  const body = truncateLines([...head, ...noteLines].join('\n'), Math.max(max - tail.length, 1));
+  return [body, ...tail].join('\n');
 }
 
 /**

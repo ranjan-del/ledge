@@ -287,7 +287,10 @@ describe('current', () => {
     const r = await run(['current', '--repo', '/repos/long', '--context']);
     const lines = r.stdout.trimEnd().split('\n');
     assert.equal(lines.length, 40);
-    assert.match(lines[39], /more lines/);
+    // The last line is the instruction, which is now protected from truncation, so the marker
+    // saying the block is partial sits above it rather than at the bottom.
+    assert.match(lines[39]!, /Tick items, append notes and keep the plan current/);
+    assert.match(r.stdout, /more lines, see ledge open/);
   });
 
   test('no match exits 2 and --json with --context exits 1', async () => {
@@ -604,7 +607,8 @@ describe('current --context with plan, notes and planned day', () => {
     assert.equal(lines.length, 40);
     assert.doesNotMatch(r.stdout, /A note that cannot fit anywhere/);
     assert.match(r.stdout, /^Requirement:$/m);
-    assert.match(lines[39]!, /more lines/);
+    assert.match(lines[39]!, /Tick items, append notes and keep the plan current/);
+    assert.match(r.stdout, /see ledge open/, 'something still says the block is partial');
   });
 });
 

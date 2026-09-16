@@ -90,3 +90,32 @@ describe('taskForRepo', () => {
     assert.equal(pending.taskForRepo(tasks, '/r/outerlong'), undefined);
   });
 });
+
+test('the closing instruction survives a long requirement and long notes', () => {
+  const task = {
+    id: 'ctx',
+    title: 'Context',
+    status: 'current',
+    order: 1,
+    sessions: [],
+    created: '2026-09-16T09:00:00+05:30',
+    updated: '2026-09-16T09:00:00+05:30',
+    requirement: Array.from({ length: 40 }, (_, i) => `requirement line ${i}`).join('\n'),
+    plan: [],
+    checklist: [{ text: 'Open one', done: false }],
+    notes: [
+      { date: '2026-09-16', body: Array.from({ length: 40 }, (_, i) => `note ${i}`).join('\n') },
+    ],
+    extra: '',
+    file: '/home/t/.ledge/tasks/2026-09-16-x.md',
+  } as unknown as Task;
+
+  const out = format.renderContext(task, '2026-09-16');
+
+  // The point of the block is that it tells the assistant what to do with the file. Losing
+  // that line to truncation removes the only instruction in it, and it was being lost exactly
+  // when the requirement and notes were long, which is when it matters most.
+  assert.match(out, /Task file: \/home\/t\/\.ledge\/tasks\/2026-09-16-x\.md/);
+  assert.match(out, /Tick items, append notes and keep the plan current/);
+  assert.match(out, /more lines, see ledge open/, 'the middle is still trimmed');
+});
