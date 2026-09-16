@@ -34,13 +34,13 @@ pub struct Snapped {
 /// Places the panel beside the button on the same screen edge, vertically centred on the
 /// button, then shows or hides it. Returns the new visibility.
 #[tauri::command]
-fn toggle_panel(app: AppHandle) -> Result<bool, String> {
+fn toggle_panel(app: AppHandle, has_content: Option<bool>) -> Result<bool, String> {
     let panel = window(&app, PANEL)?;
     if panel.is_visible().map_err(err)? {
         panel.hide().map_err(err)?;
         return Ok(false);
     }
-    place_panel(&app)?;
+    place_panel(&app, has_content.unwrap_or(false))?;
     panel.show().map_err(err)?;
     panel.set_focus().map_err(err)?;
     Ok(true)
@@ -52,8 +52,11 @@ fn toggle_panel(app: AppHandle) -> Result<bool, String> {
 /// a small laptop display and a tall external one. The result is then trimmed to what the
 /// work area can actually hold once the margins are taken off, so a short display gets a
 /// short panel instead of one that hangs off the screen.
-fn panel_height(area_h: i32) -> u32 {
+fn panel_height(area_h: i32, has_content: bool) -> u32 {
     let fitted = (area_h - 2 * MARGIN).max(1);
+    if has_content {
+        return fitted as u32;
+    }
     let wanted = (f64::from(area_h) * PANEL_HEIGHT_FRACTION).round() as i32;
     wanted
         .clamp(PANEL_HEIGHT_MIN, PANEL_HEIGHT_MAX)
@@ -64,7 +67,7 @@ fn panel_height(area_h: i32) -> u32 {
 /// centred on the button vertically so it reads as belonging to the button rather than to
 /// the screen. Both axes are clamped inside the work area, so a button near the top or
 /// bottom edge still gets a panel that is fully on screen.
-fn place_panel(app: &AppHandle) -> Result<(), String> {
+fn place_panel(app: &AppHandle, has_content: bool) -> Result<(), String> {
     let button = window(app, BUTTON)?;
     let panel = window(app, PANEL)?;
     let monitor = button
@@ -80,7 +83,7 @@ fn place_panel(app: &AppHandle) -> Result<(), String> {
     let area_y = area.position.y;
     let area_w = area.size.width as i32;
     let area_h = area.size.height as i32;
-    let height = panel_height(area_h);
+    let height = panel_height(area_h, has_content);
     let width = panel_size.width;
 
     let button_center_x = button_pos.x + button_size.width as i32 / 2;
@@ -91,16 +94,29 @@ fn place_panel(app: &AppHandle) -> Result<(), String> {
         button_pos.x - width as i32 - MARGIN
     };
 
-    let button_center_y = button_pos.y + button_size.height as i32 / 2;
+    // The panel hangs from the top of the work area rather than centring on the button, because
+    // the button now sits in the corner and a panel centred on it would run off the screen.
     let top = area_y + MARGIN;
     let bottom = area_y + area_h - height as i32 - MARGIN;
-    let y = (button_center_y - height as i32 / 2).clamp(top, bottom.max(top));
+    let y = top.min(bottom.max(top));
 
     panel
         .set_size(PhysicalSize::new(width, height))
         .map_err(err)?;
     panel.set_position(PhysicalPosition::new(x, y)).map_err(err)?;
     Ok(())
+}
+
+/// Re-sizes and re-places the panel once the webview knows whether it has anything to show. An
+/// empty panel at full height is mostly empty glass, so it stays short until there is content,
+/// and the webview is the only thing that can answer that question.
+#[tauri::command]
+fn resize_panel(app: AppHandle, has_content: bool) -> Result<(), String> {
+    let panel = window(&app, PANEL)?;
+    if !panel.is_visible().map_err(err)? {
+        return Ok(());
+    }
+    place_panel(&app, has_content)
 }
 
 /// Moves the button flush against the requested screen edge (`left` or `right`) at
@@ -131,7 +147,8 @@ fn snap_button(app: AppHandle, edge: String, y: i32) -> Result<Snapped, String> 
     button.set_position(PhysicalPosition::new(x, y)).map_err(err)?;
     if let Ok(panel) = window(&app, PANEL) {
         if panel.is_visible().unwrap_or(false) {
-            place_panel(&app)?;
+            let tall = panel.outer_size().map(|s| s.height > 0).unwrap_or(false);
+            place_panel(&app, tall)?;
         }
     }
     Ok(Snapped {
@@ -291,6 +308,56 @@ fn pin_above_all_apps(win: &WebviewWindow) {
     }
 }
 
+/// Turns on launching at login the first time Ledge starts, and never again. A marker file in
+/// the store records that the decision has been made, so someone who switches it off in
+/// Settings is not overruled the next time the application starts.
+fn enable_autostart_on_first_run(app: &AppHandle) {
+    use tauri_plugin_autostart::ManagerExt;
+    let Some(home) = std::env::var_os("LEDGE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs_home().map(|h| h.join(".ledge")))
+    else {
+        return;
+    };
+    let marker = home.join(".autostart-asked");
+    if marker.exists() {
+        return;
+    }
+    if let Err(e) = app.autolaunch().enable() {
+        eprintln!("ledge: could not set launch at login: {e}");
+    }
+    let _ = std::fs::create_dir_all(&home);
+    let _ = std::fs::write(&marker, "Ledge set launch at login once. Change it in Settings.\n");
+}
+
+/// The person's home folder, without pulling in a crate for one lookup.
+fn dirs_home() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(std::path::PathBuf::from)
+}
+
+/// Whether Ledge is set to launch when the person logs in. Read rather than assumed, because
+/// the login item is system state that can be changed outside the application.
+#[tauri::command]
+fn autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(err)
+}
+
+/// Turns launching at login on or off. A panel that has to be started by hand every morning is
+/// a panel that stops getting used, so this is on by default on a fresh install, and this
+/// command is how Settings lets someone change their mind.
+#[tauri::command]
+fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(err)?;
+    } else {
+        manager.disable().map_err(err)?;
+    }
+    manager.is_enabled().map_err(err)
+}
+
 /// Records a message from the webview on the process error stream. The panel can only show
 /// one line of error text at a time and disappears when it loses focus, so without this a
 /// failure that happens while nobody is looking leaves no trace to debug from.
@@ -309,7 +376,10 @@ fn place_button_initial(app: &AppHandle) {
     let area = monitor.work_area();
     let Ok(size) = button.outer_size() else { return };
     let x = area.position.x + area.size.width as i32 - size.width as i32 - MARGIN;
-    let y = area.position.y + (area.size.height as i32 - size.height as i32) / 2;
+    // Top right, not centred: the corner is where a status item belongs, it is the one part of
+    // the screen almost nothing else competes for, and it puts the button beside the menu bar
+    // item that does the same job.
+    let y = area.position.y + MARGIN;
     let _ = button.set_position(PhysicalPosition::new(x, y));
 }
 
@@ -458,7 +528,9 @@ fn on_screen(button: &WebviewWindow) -> bool {
 fn show_panel(app: AppHandle) -> Result<(), String> {
     let panel = window(&app, PANEL)?;
     restore_button(&app);
-    place_panel(&app)?;
+    // The menu bar has no idea what is in the store, so it asks for the taller layout and the
+    // webview corrects it through `resize_panel` once it has counted what it is showing.
+    place_panel(&app, true)?;
     panel.show().map_err(err)?;
     panel.set_focus().map_err(err)?;
     Ok(())
@@ -470,6 +542,10 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             // Ledge is an assistant panel, not an application. Accessory keeps it out of the
             // Dock and out of the application switcher, so the floating button is the only
@@ -493,6 +569,7 @@ pub fn run() {
             }
             place_button_initial(app.handle());
             build_tray(app.handle())?;
+            enable_autostart_on_first_run(app.handle());
             #[cfg(target_os = "macos")]
             keep_button_on_screen(app.handle());
             Ok(())
@@ -500,9 +577,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             toggle_panel,
             show_panel,
+            resize_panel,
             snap_button,
             open_terminal,
-            log_message
+            log_message,
+            autostart_enabled,
+            set_autostart
         ])
         .build(tauri::generate_context!())
         .expect("error while building Ledge");
@@ -544,15 +624,18 @@ mod tests {
     #[test]
     fn panel_height_follows_the_contract() {
         // A tall external display: the 60 percent share exceeds the ceiling.
-        assert_eq!(panel_height(2400), 900);
+        assert_eq!(panel_height(2400, false), 900);
         // A typical laptop work area: 60 percent lands between the floor and the ceiling.
-        assert_eq!(panel_height(1000), 600);
+        assert_eq!(panel_height(1000, false), 600);
         // 60 percent is below the floor, so the floor wins.
-        assert_eq!(panel_height(600), 420);
+        assert_eq!(panel_height(600, false), 420);
         // The floor does not survive a work area too short to hold it with margins.
-        assert_eq!(panel_height(400), 376);
+        assert_eq!(panel_height(400, false), 376);
         // Exactly at the ceiling and exactly at the floor.
-        assert_eq!(panel_height(1500), 900);
-        assert_eq!(panel_height(700), 420);
+        assert_eq!(panel_height(1500, false), 900);
+        // With content it takes the whole work area, less the margins.
+        assert_eq!(panel_height(1500, true), 1476);
+        assert_eq!(panel_height(2400, true), 2376);
+        assert_eq!(panel_height(700, false), 420);
     }
 }
