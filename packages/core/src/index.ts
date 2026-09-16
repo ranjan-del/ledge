@@ -9,6 +9,7 @@
  * desktop app, which has no Node, imports the pure entry instead.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
+export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
 export { TaskParseError } from './types.ts';
 export {
   ledgeHome,
@@ -25,3 +26,10 @@ export { TaskStore, matchRepo } from './store.ts';
 export { parsePorcelainV2, findRepos, scanRepos, isPending } from './git.ts';
 export { isoDay, isIsoDay, shiftDay, plannedFor, appendNote, setPlan } from './planning.ts';
 export { buildResumePrompt } from './prompt.ts';
+export {
+  sessionsFor,
+  memoryFor,
+  searchMemory,
+  nextActionFor,
+  surfaceCounts,
+} from './surfaces.ts';

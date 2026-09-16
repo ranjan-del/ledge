@@ -97,3 +97,57 @@ export class TaskParseError extends Error {
     this.line = line;
   }
 }
+
+/**
+ * One Claude Code session id as it appears on a task, shaped so the Sessions surface can render
+ * a row without going back to the task. A session is where work happened; the task is what was
+ * being accomplished, and the pairing is what this carries.
+ */
+export interface SessionRef {
+  /** The Claude Code session id, exactly as the Stop hook recorded it. */
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  /** Absolute path of the task's repo, absent when the task names none. */
+  repo?: string;
+  /**
+   * ISO 8601 timestamp: the task's `updated`, which is when the newest id on that task was last
+   * recorded. For an older id it is an upper bound, not a measurement. Nothing in the files
+   * times a session, so this is as close as the data gets.
+   */
+  lastSeen: string;
+  /** True for the newest session id of its task, false for every earlier one. */
+  isLatest: boolean;
+}
+
+/**
+ * One dated note, carrying the task it came from. The Memory surface reads notes across every
+ * task, where a NoteEntry on its own would have lost which task wrote it.
+ */
+export interface MemoryEntry {
+  taskId: string;
+  taskTitle: string;
+  /** Absolute path of the task's repo, absent when the task names none. */
+  repo?: string;
+  /** Calendar day, `YYYY-MM-DD`, from the note's `### ` subheading. */
+  date: string;
+  /** The note body exactly as the file spells it. */
+  body: string;
+}
+
+/**
+ * The single next step for a task, quoted from the file rather than composed. `source` says
+ * where the text came from so a reader can tell a tracked item from a planned one.
+ */
+export interface NextAction {
+  text: string;
+  source: 'checklist' | 'plan';
+}
+
+/** One count per surface. What each one means is documented on `surfaceCounts`. */
+export interface SurfaceCounts {
+  now: number;
+  sessions: number;
+  tasks: number;
+  memory: number;
+}

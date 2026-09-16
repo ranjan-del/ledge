@@ -8,7 +8,7 @@
 //   the fake never writes Markdown itself. Tests plant one to exercise exit code 3.
 // - scanRepos() returns the JSON array in the LEDGE_FAKE_SCAN environment variable, or [].
 // - Constructing a TaskStore whose home is the real ~/.ledge throws, so no test can touch it.
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 
@@ -253,6 +253,19 @@ export class TaskStore {
     return this.save(task);
   }
 
+  /**
+   * Destroys a task and its file, mirroring the real store. The fake fell behind when `remove`
+   * was added, which made the three delete tests fail only under LEDGE_FAKE_CORE, exactly the
+   * mode meant to prove the CLI does not depend on the real core.
+   */
+  remove(id: string): Task {
+    const task = this.get(id);
+    if (task.file) rmSync(task.file, { force: true });
+    this.state.tasks.delete(id);
+    this.state.archive.delete(id);
+    return structuredClone(task);
+  }
+
   done(id: string): Task {
     const task = this.get(id);
     task.status = 'done';
@@ -388,4 +401,113 @@ export function appendNote(task: Task, text: string, day: string = isoDay()): Ta
 /** Replaces the plan steps. */
 export function setPlan(task: Task, steps: string[]): Task {
   return { ...task, plan: steps.map((s) => s.trim()).filter((s) => s !== '') };
+}
+
+export interface SessionRef {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  repo?: string;
+  lastSeen: string;
+  isLatest: boolean;
+}
+
+export interface MemoryEntry {
+  taskId: string;
+  taskTitle: string;
+  repo?: string;
+  date: string;
+  body: string;
+}
+
+export interface NextAction {
+  text: string;
+  source: 'checklist' | 'plan';
+}
+
+export interface SurfaceCounts {
+  now: number;
+  sessions: number;
+  tasks: number;
+  memory: number;
+}
+
+/** Session ids across tasks, newest lastSeen first, newest id of a task marked latest. */
+export function sessionsFor(tasks: Task[]): SessionRef[] {
+  const refs: SessionRef[] = [];
+  for (const task of tasks) {
+    const seen = new Set<string>();
+    for (let i = task.sessions.length - 1; i >= 0; i--) {
+      const id = (task.sessions[i] ?? '').trim();
+      if (id === '' || seen.has(id)) continue;
+      seen.add(id);
+      const ref: SessionRef = {
+        id,
+        taskId: task.id,
+        taskTitle: task.title,
+        lastSeen: task.updated,
+        isLatest: i === task.sessions.length - 1,
+      };
+      if (task.repo !== undefined) ref.repo = task.repo;
+      refs.push(ref);
+    }
+  }
+  return refs.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen));
+}
+
+/** Dated notes across tasks, newest date first. */
+export function memoryFor(tasks: Task[]): MemoryEntry[] {
+  const entries: MemoryEntry[] = [];
+  for (const task of tasks) {
+    for (let i = task.notes.length - 1; i >= 0; i--) {
+      const note = task.notes[i]!;
+      const entry: MemoryEntry = {
+        taskId: task.id,
+        taskTitle: task.title,
+        date: note.date,
+        body: note.body,
+      };
+      if (task.repo !== undefined) entry.repo = task.repo;
+      entries.push(entry);
+    }
+  }
+  return entries.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+/** Case-insensitive, every term must match the body or the title; input order is kept. */
+export function searchMemory(entries: MemoryEntry[], query: string): MemoryEntry[] {
+  const terms = query.toLowerCase().split(/\s+/).filter((term) => term !== '');
+  if (terms.length === 0) return [...entries];
+  return entries.filter((entry) => {
+    const haystack = `${entry.body}\n${entry.taskTitle}`.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  });
+}
+
+/** First unticked checklist item, else the first plan step when there is no checklist. */
+export function nextActionFor(task: Task): NextAction | undefined {
+  const open = task.checklist.find((item) => !item.done);
+  if (open) return { text: open.text, source: 'checklist' };
+  if (task.checklist.length === 0 && task.plan.length > 0) {
+    return { text: task.plan[0]!, source: 'plan' };
+  }
+  return undefined;
+}
+
+/** Current tasks, distinct latest session ids, every task given, and total note entries. */
+export function surfaceCounts(tasks: Task[]): SurfaceCounts {
+  const latest = new Set<string>();
+  let memory = 0;
+  let now = 0;
+  for (const task of tasks) {
+    if (task.status === 'current') now++;
+    memory += task.notes.length;
+    for (let i = task.sessions.length - 1; i >= 0; i--) {
+      const id = (task.sessions[i] ?? '').trim();
+      if (id === '') continue;
+      latest.add(id);
+      break;
+    }
+  }
+  return { now, sessions: latest.size, tasks: tasks.length, memory };
 }

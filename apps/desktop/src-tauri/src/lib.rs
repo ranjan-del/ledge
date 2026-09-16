@@ -43,6 +43,10 @@ fn toggle_panel(app: AppHandle, has_content: Option<bool>) -> Result<bool, Strin
     place_panel(&app, has_content.unwrap_or(false))?;
     panel.show().map_err(err)?;
     panel.set_focus().map_err(err)?;
+    // Showing the panel makes the application active, and activating orders the button out.
+    // Restoring it here rather than waiting for the keeper's next tick is the difference
+    // between a button that stays put and one that blinks out for a second or two.
+    restore_button(&app);
     Ok(true)
 }
 
@@ -396,7 +400,7 @@ fn keep_button_on_screen(app: &AppHandle) {
     let handle = app.clone();
     std::thread::spawn(move || {
         loop {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            std::thread::sleep(std::time::Duration::from_millis(400));
             let h = handle.clone();
             let inner = handle.clone();
             let _ = h.run_on_main_thread(move || {
@@ -533,6 +537,7 @@ fn show_panel(app: AppHandle) -> Result<(), String> {
     place_panel(&app, true)?;
     panel.show().map_err(err)?;
     panel.set_focus().map_err(err)?;
+    restore_button(&app);
     Ok(())
 }
 
@@ -599,10 +604,10 @@ pub fn run() {
         // Re-asserting it whenever focus moves is what actually keeps it there.
         tauri::RunEvent::WindowEvent {
             label,
-            event: tauri::WindowEvent::Focused(focused),
+            event: tauri::WindowEvent::Focused(_focused),
             ..
         } => {
-            if label == PANEL && !*focused {
+            if label == PANEL {
                 restore_button(handle);
             }
             if label == BUTTON {

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 import { freshHome, initHome, removeHome, run } from './helpers.ts';
 
 const ALL_COMMANDS = ['add', 'start', 'park', 'done', 'current', 'link', 'todo', 'tick', 'untick',
-  'open', 'scan', 'init'];
+  'sessions', 'memory', 'open', 'scan', 'init'];
 
 describe('main dispatch and exit codes', () => {
   let home: string;

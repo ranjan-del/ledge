@@ -608,6 +608,13 @@ describe('current --context with plan, notes and planned day', () => {
   });
 });
 
+/**
+ * True when the suite is running against the in-memory fake core. The fake keeps tasks in a
+ * map rather than on disk, so an assertion about a file existing can only be made against the
+ * real core; the behaviour either way is asserted through the command output.
+ */
+const onDisk = process.env.LEDGE_FAKE_CORE !== '1';
+
 describe('delete', () => {
   test('without --yes it explains itself and changes nothing', async () => {
     await run(['add', 'Created by mistake']);
@@ -620,19 +627,19 @@ describe('delete', () => {
     assert.match(refused.stdout, /no undo/i);
     assert.match(refused.stdout, /--yes/);
     assert.match(refused.stdout, /ledge done created-by-mistake/);
-    assert.equal(existsSync(path), true, 'the file is still there');
+    if (onDisk) assert.equal(existsSync(path), true, 'the file is still there');
   });
 
   test('--yes destroys the task and its file', async () => {
     await run(['add', 'Created by mistake']);
     const path = (await run(['open', 'created-by-mistake'])).stdout.trim();
-    assert.equal(existsSync(path), true);
+    if (onDisk) assert.equal(existsSync(path), true);
 
     const gone = await run(['delete', 'created-by-mistake', '--yes']);
 
     assert.equal(gone.code, 0);
     assert.match(gone.stdout, /^Deleted created-by-mistake: Created by mistake$/m);
-    assert.equal(existsSync(path), false, 'the file is gone from disk');
+    if (onDisk) assert.equal(existsSync(path), false, 'the file is gone from disk');
     const listed = (await desk()).current.map((t) => t.id);
     assert.ok(!listed.includes('created-by-mistake'));
   });
@@ -647,6 +654,7 @@ describe('delete', () => {
     const after = await desk();
     assert.ok(!after.current.some((t) => t.id === 'finish-me'));
     assert.ok(!after.current.some((t) => t.id === 'bin-me'));
+    if (!onDisk) return;
     const archive = join(process.env.LEDGE_HOME ?? '', 'archive');
     const archived = readdirSync(archive);
     assert.ok(
@@ -665,5 +673,111 @@ describe('delete', () => {
     const noId = await run(['delete']);
     assert.equal(noId.code, 1);
     assert.match(noId.stderr, /delete needs a task id/);
+  });
+});
+
+describe('sessions', () => {
+  test('lists every linked session id, newest per task marked latest', async () => {
+    await addTask('Banner work', '--repo', '/repos/banner');
+    await run(['link', 'banner-work', 'aaa111']);
+    await run(['link', 'banner-work', 'bbb222']);
+    const r = await run(['sessions']);
+    assert.equal(r.code, 0);
+    const lines = r.stdout.trimEnd().split('\n');
+    assert.equal(lines[0], 'Sessions');
+    assert.match(lines[1]!, /^ {2}bbb222 {2}latest {2}Banner work/);
+    assert.match(lines[2]!, /^ {2}aaa111 {2}/);
+    assert.doesNotMatch(lines[2]!, /latest/);
+    assert.match(r.stdout, /\/repos\/banner/);
+  });
+
+  test('--json carries the task, the repo and the lastSeen bound', async () => {
+    await addTask('Banner work', '--repo', '/repos/banner');
+    await run(['link', 'banner-work', 'aaa111']);
+    const r = await run(['sessions', '--json']);
+    const refs = JSON.parse(r.stdout) as {
+      id: string;
+      taskId: string;
+      taskTitle: string;
+      repo?: string;
+      lastSeen: string;
+      isLatest: boolean;
+    }[];
+    assert.equal(refs.length, 1);
+    assert.equal(refs[0]!.id, 'aaa111');
+    assert.equal(refs[0]!.taskId, 'banner-work');
+    assert.equal(refs[0]!.taskTitle, 'Banner work');
+    assert.equal(refs[0]!.repo, '/repos/banner');
+    assert.equal(refs[0]!.isLatest, true);
+    assert.match(refs[0]!.lastSeen, /^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  test('a store with no linked session prints (none) and an empty list', async () => {
+    await addTask('Unlinked work');
+    const text = await run(['sessions']);
+    assert.equal(text.code, 0);
+    assert.equal(text.stdout, 'Sessions\n  (none)\n');
+    assert.deepEqual(JSON.parse((await run(['sessions', '--json'])).stdout), []);
+  });
+});
+
+describe('memory', () => {
+  test('lists every dated note with its task, newest first', async () => {
+    await addTask('Banner work', '--repo', '/repos/banner');
+    await addTask('Login parity');
+    await run(['note', 'banner-work', 'Chose polling over a service worker.']);
+    await run(['note', 'login-parity', 'The OTP contract is shared.']);
+    const r = await run(['memory']);
+    assert.equal(r.code, 0);
+    assert.match(r.stdout, new RegExp(`^Memory$`, 'm'));
+    assert.match(r.stdout, new RegExp(`^ {2}${today()} {2}Banner work \\(banner-work\\)`, 'm'));
+    assert.match(r.stdout, /^ {4}Chose polling over a service worker\.$/m);
+    assert.match(r.stdout, new RegExp(`^ {2}${today()} {2}Login parity \\(login-parity\\)`, 'm'));
+    assert.match(r.stdout, /^ {4}The OTP contract is shared\.$/m);
+  });
+
+  test('a query filters on every term, in the body or the title, ignoring case', async () => {
+    await addTask('Banner work');
+    await addTask('Login parity');
+    await run(['note', 'banner-work', 'Chose polling over a service worker.']);
+    await run(['note', 'login-parity', 'The OTP contract is shared.']);
+    const hit = await run(['memory', 'POLLING']);
+    assert.equal(hit.code, 0);
+    assert.match(hit.stdout, /Chose polling over a service worker\./);
+    assert.doesNotMatch(hit.stdout, /OTP contract/);
+    const both = await run(['memory', 'parity', 'otp']);
+    assert.match(both.stdout, /OTP contract/);
+    assert.doesNotMatch(both.stdout, /service worker/);
+    const none = await run(['memory', 'polling otp']);
+    assert.equal(none.stdout, 'Memory\n  (none)\n');
+  });
+
+  test('--json prints the entries, and an empty store prints an empty list', async () => {
+    await addTask('Banner work', '--repo', '/repos/banner');
+    await run(['note', 'banner-work', 'Chose polling over a service worker.']);
+    const r = await run(['memory', '--json']);
+    const entries = JSON.parse(r.stdout) as {
+      taskId: string;
+      taskTitle: string;
+      repo?: string;
+      date: string;
+      body: string;
+    }[];
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0], {
+      taskId: 'banner-work',
+      taskTitle: 'Banner work',
+      repo: '/repos/banner',
+      date: today(),
+      body: 'Chose polling over a service worker.',
+    });
+    assert.deepEqual(JSON.parse((await run(['memory', 'zzz', '--json'])).stdout), []);
+  });
+
+  test('a store with no note prints (none)', async () => {
+    await addTask('Quiet work');
+    const r = await run(['memory']);
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout, 'Memory\n  (none)\n');
   });
 });

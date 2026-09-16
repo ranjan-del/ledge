@@ -11,11 +11,13 @@ import { run as done } from './commands/done.ts';
 import { run as init } from './commands/init.ts';
 import { run as link } from './commands/link.ts';
 import { run as list } from './commands/list.ts';
+import { run as memory } from './commands/memory.ts';
 import { run as note } from './commands/note.ts';
 import { run as open } from './commands/open.ts';
 import { run as park } from './commands/park.ts';
 import { run as plan } from './commands/plan.ts';
 import { run as scan } from './commands/scan.ts';
+import { run as sessions } from './commands/sessions.ts';
 import { run as start } from './commands/start.ts';
 import { run as tick } from './commands/tick.ts';
 import { run as today } from './commands/today.ts';
@@ -46,6 +48,8 @@ const COMMANDS: Record<string, CommandRunner> = {
   note,
   when,
   today,
+  sessions,
+  memory,
   open,
   scan,
   init,

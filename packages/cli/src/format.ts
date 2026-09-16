@@ -1,7 +1,7 @@
 // Plain text rendering. No colour libraries: tables are aligned with spaces so the output reads
 // the same in a terminal, a hook transcript and a test assertion.
 import { homedir } from 'node:os';
-import type { NoteEntry, RepoStatus, Task } from '@ledge/core';
+import type { MemoryEntry, NoteEntry, RepoStatus, SessionRef, Task } from '@ledge/core';
 
 /** A pending repo plus the task that references it, when one does. */
 export interface PendingRow extends RepoStatus {
@@ -216,4 +216,42 @@ export function renderContext(task: Task, day: string, max = CONTEXT_MAX_LINES):
     if (kept.length > 0) noteLines = ['', `Notes (${note.date}):`, ...kept];
   }
   return truncateLines([...head, ...noteLines, ...tail].join('\n'), max);
+}
+
+/**
+ * Row for the Sessions section: the session id, a `latest` marker for the newest id of its task,
+ * the task title, the repo and the lastSeen timestamp. The marker is a word rather than a symbol
+ * so a row copied out of the terminal still says what it is.
+ */
+export function sessionRow(ref: SessionRef): string[] {
+  const repo = ref.repo ? shortPath(ref.repo) : '';
+  return [ref.id, ref.isLatest ? 'latest' : '', ref.taskTitle, repo, ref.lastSeen];
+}
+
+/** Renders the Sessions section, `(none)` when no task has a session id recorded. */
+export function renderSessions(refs: SessionRef[]): string {
+  return section('Sessions', refs.map(sessionRow));
+}
+
+/**
+ * Renders one memory entry: a heading line with the day and the task, then the note body
+ * indented under it. Notes are prose over several lines, so they are blocks rather than table
+ * rows; the body is printed as written and never reflowed.
+ */
+export function memoryBlock(entry: MemoryEntry): string {
+  const head = `  ${entry.date}  ${entry.taskTitle} (${entry.taskId})`;
+  const body = entry.body
+    .split('\n')
+    .map((line) => (line.trim() === '' ? '' : `    ${line}`));
+  return [head, ...body].join('\n');
+}
+
+/**
+ * Renders the Memory section: every dated note across the tasks, newest first, one block each
+ * separated by a blank line. `(none)` when there is nothing to show, which is also what a query
+ * that matched nothing prints, so an empty result is never mistaken for a missing section.
+ */
+export function renderMemory(entries: MemoryEntry[]): string {
+  if (entries.length === 0) return 'Memory\n  (none)';
+  return ['Memory', '', entries.map(memoryBlock).join('\n\n')].join('\n');
 }

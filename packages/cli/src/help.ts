@@ -41,6 +41,14 @@ export const COMMANDS: Record<string, HelpEntry> = {
     usage: 'ledge today [--json]',
     summary: 'Tasks planned for today, overdue ones, then current',
   },
+  sessions: {
+    usage: 'ledge sessions [--json]',
+    summary: 'Claude session ids recorded on tasks, newest first',
+  },
+  memory: {
+    usage: 'ledge memory [query] [--json]',
+    summary: 'Dated notes across every task, newest first, filtered by query',
+  },
   open: { usage: 'ledge open <id>', summary: 'Print the task file path' },
   scan: { usage: 'ledge scan', summary: 'Run the git scan once and print Pending as JSON' },
   init: { usage: 'ledge init', summary: 'Create LEDGE_HOME, a default config and a sample task' },
