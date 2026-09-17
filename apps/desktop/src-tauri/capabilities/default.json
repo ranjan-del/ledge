@@ -51,6 +51,18 @@
         },
         {
           "path": "$HOME/**/.git"
+        },
+        {
+          "path": "$HOME/.claude"
+        },
+        {
+          "path": "$HOME/.claude/projects"
+        },
+        {
+          "path": "$HOME/.claude/projects/*"
+        },
+        {
+          "path": "$HOME/.claude/projects/**"
         }
       ]
     },
@@ -167,6 +179,18 @@
         },
         {
           "path": "$HOME/**"
+        },
+        {
+          "path": "$HOME/.claude"
+        },
+        {
+          "path": "$HOME/.claude/projects"
+        },
+        {
+          "path": "$HOME/.claude/projects/*"
+        },
+        {
+          "path": "$HOME/.claude/projects/**"
         }
       ]
     },
@@ -193,6 +217,18 @@
         },
         {
           "path": "$HOME/.git/index"
+        },
+        {
+          "path": "$HOME/.claude"
+        },
+        {
+          "path": "$HOME/.claude/projects"
+        },
+        {
+          "path": "$HOME/.claude/projects/*"
+        },
+        {
+          "path": "$HOME/.claude/projects/**"
         }
       ]
     },
