@@ -87,6 +87,21 @@ export function appendNote(task: Task, text: string, day: string = isoDay()): Ta
 }
 
 /**
+ * Adds `text` under whatever is already in `## References`, separated by one blank line, and
+ * returns a copy of the task. Appending rather than replacing is the whole point: the common act
+ * is pasting a second thing to look at an hour after the first, and that must never mean
+ * re-editing what is already there. Trailing whitespace is dropped so the file grows no blank
+ * tail; nothing else about the text is touched. Blank text is a no-op, so an accidental empty
+ * paste leaves the task exactly as it was.
+ */
+export function appendReference(task: Task, text: string): Task {
+  const body = text.replace(/\s+$/, '');
+  if (body.trim() === '') return { ...task };
+  const current = task.references ?? '';
+  return { ...task, references: current === '' ? body : `${current}\n\n${body}` };
+}
+
+/**
  * Replaces the plan with `steps`, dropping blank ones and trimming the rest. The plan is the
  * intent written before work starts, so replacing it wholesale is the honest operation: a plan
  * that has changed is a new plan, not an edited list.

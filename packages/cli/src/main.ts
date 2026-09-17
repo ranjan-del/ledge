@@ -21,6 +21,7 @@ import { run as note } from './commands/note.ts';
 import { run as open } from './commands/open.ts';
 import { run as park } from './commands/park.ts';
 import { run as plan } from './commands/plan.ts';
+import { run as ref } from './commands/ref.ts';
 import { run as scan } from './commands/scan.ts';
 import { run as settle } from './commands/settle.ts';
 import { run as sessions } from './commands/sessions.ts';
@@ -63,6 +64,7 @@ const COMMANDS: Record<string, CommandRunner> = {
   untick,
   plan,
   note,
+  ref,
   when,
   today,
   sessions,

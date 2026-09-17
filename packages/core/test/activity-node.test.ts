@@ -54,6 +54,7 @@ function task(over: Partial<Task> = {}): Task {
     plan: [],
     checklist: [],
     notes: [],
+    references: '',
     extra: '',
     file: '',
     ...over,

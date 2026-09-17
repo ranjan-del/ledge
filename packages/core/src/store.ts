@@ -11,6 +11,7 @@ import { join, resolve, sep } from 'node:path';
 import { defaultConfig, expandTilde, ledgeHome, saveConfig } from './config.ts';
 import {
   appendNote as appendNotePure,
+  appendReference as appendReferencePure,
   isIsoDay,
   setPlan as setPlanPure,
 } from './planning.ts';
@@ -155,6 +156,7 @@ export class TaskStore {
       requirement: (input.requirement ?? '').trim(),
       plan: [],
       checklist: [],
+      references: '',
       notes: [],
       extra: '',
       file: '',
@@ -274,6 +276,16 @@ export class TaskStore {
   addNote(id: string, text: string, day?: string): Task {
     const task = this.get(id);
     return this.save(appendNotePure(task, text, day));
+  }
+
+  /**
+   * Adds raw material to a task's `## References`, under whatever is already there. This is
+   * where a pasted message, link, error or snippet goes: input to the work, not a record of it,
+   * so it appends and never replaces. The text is written exactly as given.
+   */
+  addReference(id: string, text: string): Task {
+    const task = this.get(id);
+    return this.save(appendReferencePure(task, text));
   }
 
   /**

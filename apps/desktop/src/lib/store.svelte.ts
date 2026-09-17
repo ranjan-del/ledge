@@ -569,6 +569,7 @@ export async function addTask(input: NewTask): Promise<Task> {
     title,
     status,
     order: orders.length === 0 ? 1 : Math.max(...orders) + 1,
+    references: '',
     sessions: [],
     created,
     updated: created,

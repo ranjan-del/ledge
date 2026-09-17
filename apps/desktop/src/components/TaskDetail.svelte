@@ -49,7 +49,7 @@
   import { appendNote, serializeTask, setPlan, type RepoStatus, type Task } from '@ledge/core/pure';
   import { reducedMotion } from '../lib/motion.svelte.ts';
   import { paragraphs } from '../lib/prose.ts';
-  import { appendReference, referencesOf, restOf, withReferences } from '../lib/references.ts';
+  import { appendReference } from '@ledge/core/pure';
   import { dayLabel, daysBetween, lateLabel, relativeTime, todayIso } from '../lib/time.ts';
   import ConfirmButton from './ConfirmButton.svelte';
   import FieldEdit from './FieldEdit.svelte';
@@ -153,14 +153,14 @@
   /** Every other dated note, newest first. On screen the newest is the one you need first. */
   const earlier = $derived([...task.notes].reverse().filter((n) => n.date !== day));
   /** The pasted raw material, exactly as it sits in the file. */
-  const references = $derived(referencesOf(task));
+  const references = $derived(task.references);
   const refLines = $derived(references === '' ? [] : references.split('\n'));
   const shownRefs = $derived(
     allRefs ? references : refLines.slice(0, REF_LINES).join('\n'),
   );
   const moreRefLines = $derived(Math.max(0, refLines.length - REF_LINES));
   /* Whatever the file holds that is not a section Ledge knows about, the references aside. */
-  const rest = $derived(restOf(task));
+  const rest = $derived(task.extra);
   const behind = $derived(task.planned ? daysBetween(task.planned, day) : undefined);
 
   /**
@@ -398,7 +398,7 @@
       stopEdit();
       return;
     }
-    if (await write(withReferences(task, text))) stopEdit();
+    if (await write({ ...task, references: text })) stopEdit();
   }
 
   /* ---------------------------------------------------------------- chrome */

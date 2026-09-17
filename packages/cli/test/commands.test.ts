@@ -18,6 +18,7 @@ interface TaskJson {
   plan: string[];
   checklist: { text: string; done: boolean }[];
   notes: { date: string; body: string }[];
+  references: string;
   file: string;
 }
 
@@ -464,6 +465,72 @@ describe('note', () => {
   });
 });
 
+describe('ref', () => {
+  const PASTE = [
+    'Sonal wrote:',
+    '',
+    '> the tabs are wrong for FLN, it says TnT not TNT',
+    '',
+    '```ts',
+    '## Plan',
+    'const tabs = config().resourceNames;',
+    '```',
+  ].join('\n');
+
+  test('appends rather than replaces, and keeps the paste exactly as given', async () => {
+    await addTask('Referenced work');
+    const first = await run(['ref', 'referenced-work', PASTE]);
+    assert.equal(first.code, 0);
+    assert.match(first.stdout, /^Added a reference to referenced-work \(8 lines in References/);
+    const second = await run(['ref', 'referenced-work', 'And a link: https://x.test/y', '--json']);
+    const task = JSON.parse(second.stdout) as TaskJson;
+    assert.equal(task.references, `${PASTE}\n\nAnd a link: https://x.test/y`);
+    assert.deepEqual(task.plan, [], 'the fenced ## Plan is text, not the task plan');
+  });
+
+  test('writes References after the Checklist and before the Notes in the file', async (ctx) => {
+    if (coreKind !== 'real') return ctx.skip('the fake core writes no Markdown');
+    await addTask('Referenced work');
+    await run(['todo', 'referenced-work', 'A step']);
+    await run(['note', 'referenced-work', 'A note.']);
+    await run(['ref', 'referenced-work', PASTE]);
+    const text = readFileSync((await run(['open', 'referenced-work'])).stdout.trim(), 'utf8');
+    assert.match(text, /^## References$/m);
+    assert.ok(text.indexOf('## Checklist') < text.indexOf('## References'));
+    assert.ok(text.indexOf('## References') < text.indexOf('## Notes'));
+    assert.ok(text.includes(PASTE), 'the paste is in the file byte for byte');
+    /* And the file still parses back to the same task, which is the whole point of the fix. */
+    const again = (await desk()).current.find((t) => t.id === 'referenced-work');
+    assert.equal(again?.references, PASTE);
+    assert.deepEqual(again?.plan, []);
+  });
+
+  test('a bare heading in the paste stays in the paste, silently and whole', async (ctx) => {
+    if (coreKind !== 'real') return ctx.skip('the fake core parses no Markdown');
+    const paste = 'From the team:\n\n## Plan\n\n1. THEIR step, not ours';
+    await addTask('Referenced work');
+
+    const r = await run(['ref', 'referenced-work', paste]);
+
+    assert.equal(r.code, 0);
+    assert.equal(r.stderr, '', 'nothing to warn about, so nothing is said');
+    const task = (await desk()).current.find((t) => t.id === 'referenced-work');
+    assert.equal(task?.references, paste, 'and the file gives every line of it back');
+    assert.deepEqual(task?.plan, [], "the task's own plan is untouched");
+    const file = readFileSync((await run(['open', 'referenced-work'])).stdout.trim(), 'utf8');
+    assert.match(file, /^\\## Plan$/m, 'the escape is in the file, not in the value');
+  });
+
+  test('a missing id or blank text exits 1, an unknown id exits 2', async () => {
+    await addTask('Referenced work');
+    assert.equal((await run(['ref'])).code, 1);
+    const blank = await run(['ref', 'referenced-work', '   ']);
+    assert.equal(blank.code, 1);
+    assert.match(blank.stderr, /ref needs the text to add/);
+    assert.equal((await run(['ref', 'ghost', 'text'])).code, 2);
+  });
+});
+
 describe('when', () => {
   test('accepts an ISO date, today, tomorrow and none', async () => {
     await addTask('Timed work');
@@ -596,6 +663,22 @@ describe('current --context with plan, notes and planned day', () => {
     assert.match(r.stdout, /^Plan:$/m);
     assert.ok(!r.stdout.includes('Note line 1\n'), 'the oldest note line is dropped');
     assert.doesNotMatch(r.stdout, /more lines/, 'trimming notes was enough');
+  });
+
+  test('says references exist and how much, and never puts the paste in the block', async () => {
+    await addTask('Referred context', '--repo', '/repos/referred');
+    const bare = await run(['current', '--repo', '/repos/referred', '--context']);
+    assert.doesNotMatch(bare.stdout, /References/, 'nothing is said when there are none');
+
+    const paste = Array.from({ length: 60 }, (_, i) => `pasted line ${i + 1}`).join('\n');
+    await run(['ref', 'referred-context', paste]);
+    const r = await run(['current', '--repo', '/repos/referred', '--context']);
+
+    assert.match(r.stdout, /^References: 60 lines pasted into the task file, not shown here\.$/m);
+    assert.doesNotMatch(r.stdout, /pasted line/, 'and not one line of it is in the block');
+    assert.ok(r.stdout.trimEnd().split('\n').length <= 40, 'the cap still holds');
+    assert.match(r.stdout, /^Still to do:$/m);
+    assert.match(r.stdout, /^Requirement:$/m);
   });
 
   test('drops the note entirely when the task alone fills the block', async () => {

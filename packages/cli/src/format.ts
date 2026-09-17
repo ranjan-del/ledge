@@ -117,6 +117,7 @@ export function renderTaskMarkdown(task: Task): string {
     lines.push('', '## Checklist', '');
     for (const item of task.checklist) lines.push(`- [${item.done ? 'x' : ' '}] ${item.text}`);
   }
+  if (task.references) lines.push('', '## References', '', task.references);
   if (task.notes.length > 0) {
     lines.push('', '## Notes');
     for (const note of task.notes) lines.push('', `### ${note.date}`, note.body);
@@ -184,11 +185,16 @@ export function latestNote(task: Task, day: string): NoteEntry | undefined {
 }
 
 /**
- * Builds the block the SessionStart hook injects: title, planned date, requirement, plan,
- * unchecked items and the most recent note, capped at CONTEXT_MAX_LINES lines. When it does not
- * fit, the note is shortened from its oldest line first and dropped entirely if that is still
- * not enough, because the requirement and the unchecked items are what the assistant cannot work
- * without, while a note is the part of the record it can go and read in the file.
+ * Builds the block the SessionStart hook injects: title, planned date, requirement, plan, a one
+ * line mention of the references when the task has any, unchecked items and the most recent
+ * note, capped at CONTEXT_MAX_LINES lines. When it does not fit, the note is shortened from its
+ * oldest line first and dropped entirely if that is still not enough, because the requirement
+ * and the unchecked items are what the assistant cannot work without, while a note is the part
+ * of the record it can go and read in the file.
+ *
+ * The references themselves are never in here, only the fact of them and their size. They are
+ * pasted material of no fixed length, and this block is spent every session on the small number
+ * of things the assistant cannot start without.
  */
 export function renderContext(task: Task, day: string, max = CONTEXT_MAX_LINES): string {
   const head: string[] = [`Ledge task: ${task.title} (id: ${task.id})`];
@@ -201,6 +207,16 @@ export function renderContext(task: Task, day: string, max = CONTEXT_MAX_LINES):
   if (task.plan.length > 0) {
     head.push('', 'Plan:');
     task.plan.forEach((step, i) => head.push(`${i + 1}. ${step}`));
+  }
+  // References is named and not quoted. The block is capped at 40 lines and goes into every
+  // session, so a paste of any size would push the requirement and the open items out of it.
+  // Saying it is there, and how much of it there is, is enough for the assistant to go and read
+  // the file when the answer is not in what it was given.
+  const references = (task.references ?? '').trim();
+  if (references !== '') {
+    const count = references.split('\n').length;
+    const plural = count === 1 ? 'line' : 'lines';
+    head.push('', `References: ${count} ${plural} pasted into the task file, not shown here.`);
   }
   head.push('', 'Still to do:');
   const open = task.checklist.filter((item) => !item.done);

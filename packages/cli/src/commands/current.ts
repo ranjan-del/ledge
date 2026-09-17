@@ -8,7 +8,8 @@ import { openStore, resolveRepo } from '../store.ts';
  * `ledge current [--repo path] [--json|--context]`: prints the current task whose repo contains
  * the given folder (default: the working directory). --json prints the task object, --context
  * prints the block the SessionStart hook injects (title, planned day, requirement, plan,
- * unchecked items and the latest note), capped at 40 lines. Exit 2 when nothing matches so hook
+ * unchecked items, the latest note and a line saying how much is in References), capped at 40
+ * lines. Exit 2 when nothing matches so hook
  * scripts can branch on it.
  */
 export async function run(ctx: CommandContext): Promise<number> {

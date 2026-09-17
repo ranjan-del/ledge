@@ -21,6 +21,7 @@ function task(over: Partial<Task> = {}): Task {
       { text: 'Build step writes version.json', done: false },
       { text: 'Banner component', done: false },
     ],
+    references: '',
     extra: '',
     file: '/tmp/ledge/tasks/2026-09-14-release-watch-banner.md',
     ...over,

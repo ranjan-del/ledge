@@ -32,7 +32,15 @@ export { parseTask, serializeTask } from './task-file-node.ts';
 export { formatIso, slugify, taskFileName } from './task-file.ts';
 export { TaskStore, matchRepo } from './store.ts';
 export { parsePorcelainV2, findRepos, scanRepos, isPending } from './git.ts';
-export { isoDay, isIsoDay, shiftDay, plannedFor, appendNote, setPlan } from './planning.ts';
+export {
+  isoDay,
+  isIsoDay,
+  shiftDay,
+  plannedFor,
+  appendNote,
+  appendReference,
+  setPlan,
+} from './planning.ts';
 export { buildResumePrompt } from './prompt.ts';
 export type { AskResult, Provider, AskContext } from './ai.ts';
 export type { Observed, ObservedTask, ObservedRepo } from './ai.ts';

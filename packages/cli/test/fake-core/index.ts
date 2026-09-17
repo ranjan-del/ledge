@@ -38,6 +38,7 @@ export interface Task {
   requirement: string;
   plan: string[];
   checklist: ChecklistItem[];
+  references: string;
   notes: NoteEntry[];
   extra: string;
   file: string;
@@ -223,6 +224,7 @@ export class TaskStore {
       requirement: input.requirement ?? '',
       plan: [],
       checklist: [],
+      references: '',
       notes: [],
       extra: '',
       file: join(this.home, 'tasks', taskFileName({ id, created })),
@@ -312,6 +314,10 @@ export class TaskStore {
     return this.save(setPlan(this.get(id), steps));
   }
 
+  addReference(id: string, text: string): Task {
+    return this.save(appendReference(this.get(id), text));
+  }
+
   reorder(status: TaskStatus, ids: string[]): void {
     ids.forEach((id, i) => {
       const task = this.state.tasks.get(id);
@@ -396,6 +402,14 @@ export function appendNote(task: Task, text: string, day: string = isoDay()): Ta
   if (existing) existing.body = existing.body === '' ? body : `${existing.body}\n\n${body}`;
   else notes.push({ date: day, body });
   return { ...task, notes };
+}
+
+/** Adds text under whatever is already in References, separated by one blank line. */
+export function appendReference(task: Task, text: string): Task {
+  const body = text.replace(/\s+$/, '');
+  if (body.trim() === '') return { ...task };
+  const current = task.references ?? '';
+  return { ...task, references: current === '' ? body : `${current}\n\n${body}` };
 }
 
 /** Replaces the plan steps. */

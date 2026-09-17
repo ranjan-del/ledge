@@ -46,6 +46,17 @@ export interface Task {
   /** Ordered steps under `## Plan`, the intent. Empty when the section is absent. */
   plan: string[];
   checklist: ChecklistItem[];
+  /**
+   * Free-form Markdown under `## References`, byte for byte what was written apart from the
+   * blank lines around it. The file escapes the handful of lines that would otherwise be read
+   * as structure and the parser takes those escapes back off, so this value never carries them
+   * and a caller never has to think about them. Empty when the section is absent, the way
+   * `requirement` is. This is the raw material somebody pasted in while working: a message, an
+   * error, a snippet. Nothing in it is interpreted, so a heading or a list in there is text and
+   * not structure, and it is never shown in the session context block, which has forty lines to
+   * spend on the requirement and the open items.
+   */
+  references: string;
   /** Dated entries under `## Notes`, newest last. Empty when the section is absent. */
   notes: NoteEntry[];
   /** Anything after the known sections, trimmed and preserved verbatim. */

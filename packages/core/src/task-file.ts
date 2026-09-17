@@ -69,6 +69,7 @@ const KNOWN_KEYS = new Set([
 const REQUIREMENT_HEADING = '## Requirement';
 const PLAN_HEADING = '## Plan';
 const CHECKLIST_HEADING = '## Checklist';
+const REFERENCES_HEADING = '## References';
 const NOTES_HEADING = '## Notes';
 const CHECKLIST_ITEM = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
 const PLAN_ITEM = /^\s*(?:\d+[.)]|[-*])\s+(.*)$/;
@@ -76,6 +77,13 @@ const PLAN_ITEM = /^\s*(?:\d+[.)]|[-*])\s+(.*)$/;
 const CONTINUATION = /^\s+\S/;
 const NOTE_HEADING = /^###\s+(.+)$/;
 const SECTION_HEADING = /^##\s+(.+)$/;
+/**
+ * The opening or closing line of a fenced code block: up to three spaces of indent, then three
+ * or more backticks or tildes, then whatever follows. The capture groups are the run of fence
+ * characters and the rest of the line, which is the info string on an opening fence and must be
+ * empty on a closing one.
+ */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /**
  * Reads a `status` value written by a person, an assistant or another tool and returns the
@@ -172,6 +180,7 @@ interface Body {
   requirement: string;
   plan: string[];
   checklist: ChecklistItem[];
+  references: string;
   notes: NoteEntry[];
   extra: string;
 }
@@ -185,19 +194,183 @@ interface Section {
   lines: string[];
 }
 
+/** A fenced code block that is currently open: which character opened it, and how many of it. */
+interface Fence {
+  /** The fence character, a backtick or a tilde. */
+  char: string;
+  /** How many of it opened the fence. A closing fence needs at least as many. */
+  length: number;
+}
+
+/**
+ * Reads a line as the opening of a fenced code block, or returns undefined. CommonMark's rules,
+ * the parts that matter here: up to three spaces of indent, three or more backticks or tildes,
+ * then an optional info string such as `ts` or `md`. A backtick fence may not carry a backtick
+ * in its info string, since that is what tells a fence from an inline code span; a tilde fence
+ * may carry anything, backticks included.
+ */
+function opensFence(line: string): Fence | undefined {
+  const m = FENCE.exec(line);
+  if (!m) return undefined;
+  const marker = m[1]!;
+  if (marker.startsWith('`') && m[2]!.includes('`')) return undefined;
+  return { char: marker[0]!, length: marker.length };
+}
+
+/**
+ * True when `line` closes `fence`: the same fence character, at least as many of it as opened
+ * the block, and nothing after it but whitespace. A fence opened with four backticks is closed
+ * by four or more and not by three, which is how a fence that contains a fence is written.
+ */
+function closesFence(line: string, fence: Fence): boolean {
+  const m = FENCE.exec(line);
+  if (!m) return false;
+  const marker = m[1]!;
+  return marker[0] === fence.char && marker.length >= fence.length && m[2]!.trim() === '';
+}
+
+/**
+ * Marks every line a fenced code block covers, its opening and closing delimiters included, so
+ * that one pass is the single authority on where a fence is for both the splitter and the
+ * References encoding below.
+ *
+ * A delimiter that never finds its closer is NOT a fence. CommonMark says an unterminated fence
+ * runs to the end of the document, and honouring that here would let one stray ``` in a paste
+ * swallow every section under it: the `## Notes` the serializer itself wrote would become part
+ * of the paste and the notes would be gone. A task file is a structured document first, so a
+ * fence has to be closed to count, and an opener with no closer is read as the text it is.
+ */
+function fencedLines(lines: string[]): boolean[] {
+  const fenced: boolean[] = new Array<boolean>(lines.length).fill(false);
+  let i = 0;
+  while (i < lines.length) {
+    const open = opensFence(lines[i]!);
+    if (open === undefined) {
+      i++;
+      continue;
+    }
+    let close = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (closesFence(lines[j]!, open)) {
+        close = j;
+        break;
+      }
+    }
+    if (close === -1) {
+      i++;
+      continue;
+    }
+    for (let k = i; k <= close; k++) fenced[k] = true;
+    i = close + 1;
+  }
+  return fenced;
+}
+
 /**
  * Cuts the body into `## ` sections in file order. Splitting first, then interpreting, is what
- * makes section order in the file irrelevant: the parser can accept Requirement, Plan, Checklist
- * and Notes in any arrangement and the serializer still writes them in the fixed order.
+ * makes section order in the file irrelevant: the parser can accept Requirement, Plan, Checklist,
+ * References and Notes in any arrangement and the serializer still writes them in the fixed
+ * order.
+ *
+ * WHAT IT REFUSES TO TREAT AS A BOUNDARY. A line inside a fenced code block, however exactly it
+ * looks like a heading. `## Plan` written inside a ``` or ~~~ block is content of that block and
+ * nothing else, and the same goes for a fence opened with four or more characters, which only a
+ * run of at least that many closes. This used to be a real loss rather than a nicety: a paste
+ * carrying a fenced `## Plan` was read back as the task's OWN plan and everything after it
+ * moved with it, silently rewriting a file nobody had edited.
+ *
+ * It equally refuses to let an unterminated fence run past the section it sits in: see
+ * fencedLines above for why a fence has to be closed before it counts as one.
+ *
+ * The frontmatter delimiter cannot collide with any of this. A hyphen is not a fence character,
+ * and the frontmatter has already been cut at its closing `---` before these lines are seen, so
+ * a `---` inside a fenced block in the body is only ever content.
  */
 function splitSections(lines: string[]): Section[] {
+  const fenced = fencedLines(lines);
   const sections: Section[] = [{ raw: '', heading: '', lines: [] }];
-  for (const line of lines) {
+  lines.forEach((line, i) => {
     const trimmed = line.trim();
-    if (SECTION_HEADING.test(trimmed)) sections.push({ raw: line, heading: trimmed, lines: [] });
-    else sections[sections.length - 1]!.lines.push(line);
-  }
+    if (!fenced[i] && SECTION_HEADING.test(trimmed)) {
+      sections.push({ raw: line, heading: trimmed, lines: [] });
+    } else {
+      sections[sections.length - 1]!.lines.push(line);
+    }
+  });
   return sections;
+}
+
+/**
+ * Drops blank lines from both ends of a block. Unlike a plain `trim` it never touches the inside
+ * of a line, so the leading spaces of an indented first line survive. That matters for
+ * `## References`, which holds pasted material: a stack trace begins with its indentation, and
+ * eating it would be the parser editing what it was handed.
+ */
+function trimBlankEdges(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start]!.trim() === '') start++;
+  while (end > start && lines[end - 1]!.trim() === '') end--;
+  return lines.slice(start, end);
+}
+
+/**
+ * A line of `## References` carrying an optional run of backslashes before a `## ` heading, and
+ * the same before a fence delimiter. These two families are the only things in a free-form
+ * section that the reader of the file can act on, so they are the only things written with an
+ * escape. The already-escaped forms are in the family on purpose: a line somebody really pasted
+ * as `\## Plan` gains a backslash of its own, which is what keeps the encoding reversible
+ * instead of eating theirs.
+ */
+const ESCAPABLE_HEADING = /^(\s*)(\\*##\s+\S.*)$/;
+const ESCAPABLE_FENCE = /^( {0,3})(\\*(?:`{3,}|~{3,}).*)$/;
+const ESCAPED_HEADING = /^(\s*)\\(\\*##\s+\S.*)$/;
+const ESCAPED_FENCE = /^( {0,3})\\(\\*(?:`{3,}|~{3,}).*)$/;
+
+/**
+ * Writes a References body so that the file gives it back unchanged, and nothing else in the
+ * file is disturbed by it. Two kinds of line are escaped with a leading backslash, and only when
+ * they sit outside a closed fence, so a real code block in a paste is left exactly as it is:
+ *
+ * - a `## ` heading, at any indentation, which the splitter would otherwise read as the end of
+ *   the section. This is the one that bit: a pasted `## Plan` ended References there and the
+ *   rest of the paste turned up in `extra`, with nobody told.
+ * - a fence delimiter with no closer inside the body, which would otherwise reach out of the
+ *   section and pair with a delimiter in a later one, swallowing the headings in between.
+ *
+ * A backslash before a hash is Markdown's own escape and renders as the literal text, so the
+ * file still reads as what was pasted. It touches only the lines that need it, and unlike
+ * quoting the whole block it takes nothing away from a paste that is already quoted.
+ */
+function encodeReferences(lines: string[]): string[] {
+  const fenced = fencedLines(lines);
+  return lines.map((line, i) => {
+    if (fenced[i]) return line;
+    const heading = ESCAPABLE_HEADING.exec(line);
+    if (heading) return `${heading[1]}\\${heading[2]}`;
+    const fence = ESCAPABLE_FENCE.exec(line);
+    if (fence) return `${fence[1]}\\${fence[2]}`;
+    return line;
+  });
+}
+
+/**
+ * Takes one backslash off the lines encodeReferences put one on, so the value a caller sees is
+ * byte for byte what it passed in. It is an exact inverse: escaping never turns a line into a
+ * fence delimiter or stops one from being part of a closed fence, so the fences of the encoded
+ * block and of the original are the same fences, and both passes make the same decision on the
+ * same line.
+ */
+function decodeReferences(lines: string[]): string[] {
+  const fenced = fencedLines(lines);
+  return lines.map((line, i) => {
+    if (fenced[i]) return line;
+    const heading = ESCAPED_HEADING.exec(line);
+    if (heading) return `${heading[1]}${heading[2]}`;
+    const fence = ESCAPED_FENCE.exec(line);
+    if (fence) return `${fence[1]}${fence[2]}`;
+    return line;
+  });
 }
 
 /**
@@ -254,12 +427,15 @@ function parseNotes(lines: string[]): { notes: NoteEntry[]; before: string[] } {
  * Reads the body sections into their fields. A known heading counts only on its first
  * appearance, and a `## Plan` with no ordered list or a `## Notes` with no dated subsection is
  * treated as unknown content and preserved verbatim in `extra`, so a v1 file that happens to use
- * either heading for free prose round trips untouched instead of losing text.
+ * either heading for free prose round trips untouched instead of losing text. `## References`
+ * has no shape to fail, being free-form Markdown, so it is taken exactly as it stands, with
+ * only the escapes the serializer added taken back off.
  */
 function parseBody(lines: string[]): Body {
   let requirement = '';
   let plan: string[] = [];
   let checklist: ChecklistItem[] = [];
+  let references = '';
   let notes: NoteEntry[] = [];
   const extra: string[] = [];
   const seen = new Set<string>();
@@ -278,6 +454,15 @@ function parseBody(lines: string[]): Body {
         seen.add(section.heading);
         continue;
       }
+    }
+    if (known && section.heading === REFERENCES_HEADING) {
+      // Verbatim, deliberately. References is raw material somebody pasted in, so the only
+      // editing done to it is dropping the blank lines that the heading and the next section
+      // put around it, and taking off the escapes the serializer put on. Nothing in it is
+      // interpreted, counted or reformatted.
+      references = decodeReferences(trimBlankEdges(section.lines)).join('\n');
+      seen.add(section.heading);
+      continue;
     }
     if (known && section.heading === CHECKLIST_HEADING) {
       const items: ChecklistItem[] = [];
@@ -310,13 +495,14 @@ function parseBody(lines: string[]): Body {
     if (section.raw !== '') extra.push(section.raw);
     extra.push(...section.lines);
   }
-  return { requirement, plan, checklist, notes, extra: extra.join('\n').trim() };
+  return { requirement, plan, checklist, references, notes, extra: extra.join('\n').trim() };
 }
 
 /**
  * Parses one task file (YAML frontmatter plus Markdown body) into a Task. Validates the fields
  * Ledge depends on, expands `~` in `repo`, keeps unknown frontmatter keys in `meta`, and splits
- * the body into requirement, plan, checklist, notes and extra text, in any order they appear.
+ * the body into requirement, plan, checklist, references, notes and extra text, in any order
+ * they appear.
  * Throws TaskParseError with the file path and line so callers can report exactly where a
  * hand-edited file went wrong. A `planned` value that is not a real `YYYY-MM-DD` day is dropped
  * rather than thrown, because one mistyped date must never make a task unreadable. `paths` says
@@ -380,6 +566,7 @@ export function parseTask(markdown: string, file: string = '', paths: TaskPaths 
     requirement: body.requirement,
     plan: body.plan,
     checklist: body.checklist,
+    references: body.references,
     notes: body.notes,
     extra: body.extra,
     file,
@@ -395,11 +582,17 @@ export function parseTask(markdown: string, file: string = '', paths: TaskPaths 
  * Serializes a Task back to the file format, the exact inverse of parseTask. Known frontmatter
  * keys come first in the documented order, then any `meta` keys in their original order; `repo`
  * is written with `~` for paths under the home folder. Body sections are written in the fixed
- * order Requirement, Plan, Checklist, Notes, then anything else, whatever order they had in the
- * file they came from, so every task file on disk converges on one shape. Requirement and
- * Checklist are always emitted so Claude Code always has a place to write; Plan and Notes appear
- * only when they hold something. Output ends with a single newline. `paths.home` is the folder
- * the `~` stands for; without it an absolute repo path is written as it is.
+ * order Requirement, Plan, Checklist, References, Notes, then anything else, whatever order they
+ * had in the file they came from, so every task file on disk converges on one shape. References
+ * sits after the checklist because it is input to the work rather than a record of it, and
+ * before Notes because Notes stays last and is what the next session reads first. Requirement
+ * and Checklist are always emitted so Claude Code always has a place to write; Plan, References
+ * and Notes appear only when they hold something. References is written so that reading the
+ * file gives back exactly what was handed over: the two kinds of line that the reader would
+ * otherwise act on are escaped with a backslash, and nothing else is touched. See
+ * encodeReferences for which lines those are and why a free-form section has to carry that
+ * guarantee itself. Output ends with a single newline. `paths.home` is the folder the `~` stands
+ * for; without it an absolute repo path is written as it is.
  */
 export function serializeTask(task: Task, paths: TaskPaths = {}): string {
   const front: Record<string, unknown> = {
@@ -432,6 +625,8 @@ export function serializeTask(task: Task, paths: TaskPaths = {}): string {
     parts.push(`- [${item.done ? 'x' : ' '}] ${item.text}`);
   }
   if (task.checklist.length > 0) parts.push('');
+  const references = encodeReferences(trimBlankEdges((task.references ?? '').split('\n')));
+  if (references.length > 0) parts.push(REFERENCES_HEADING, '', ...references, '');
   const notes = task.notes.filter((note) => note.body.trim() !== '');
   if (notes.length > 0) {
     parts.push(NOTES_HEADING, '');

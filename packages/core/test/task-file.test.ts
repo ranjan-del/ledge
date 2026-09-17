@@ -475,3 +475,130 @@ test('a wrapped checklist item keeps its second line instead of stranding it', (
   assert.equal(task.checklist[1]?.done, true);
   assert.equal(task.extra, '', 'the wrapped line is not stranded in extra');
 });
+
+/*
+ * The section splitter and fenced code blocks. The splitter used to trim each line and test it
+ * against the heading pattern, so a line inside a fence that looked like a heading started a
+ * real section: a task carrying a fenced `## Plan` had its own plan replaced on the next read
+ * and everything after the fence moved with it. These prove the fence is honoured for both
+ * fence characters, for an info string, and for a fence opened with more than three characters.
+ */
+
+test('a heading inside a backtick fence is content and not a section boundary', () => {
+  const md = frontmatter() + [
+    '',
+    '## Requirement',
+    '',
+    'Explain the crash.',
+    '',
+    '```md',
+    '## Plan',
+    '',
+    '1. a step that is not ours',
+    '```',
+    '',
+    'Still the requirement.',
+    '',
+  ].join('\n');
+
+  const task = parseTask(md, 'x.md', { home: HOME });
+
+  assert.deepEqual(task.plan, [], 'the fenced plan never became the task plan');
+  assert.match(task.requirement, /## Plan/, 'the fenced heading stayed in the requirement');
+  assert.match(task.requirement, /1\. a step that is not ours/);
+  assert.match(task.requirement, /Still the requirement\./, 'nothing after the fence was lost');
+  assert.equal(task.extra, '');
+});
+
+test('a heading inside a tilde fence is content and not a section boundary', () => {
+  const md = frontmatter() + [
+    '',
+    '## Requirement',
+    '',
+    '~~~',
+    '## Checklist',
+    '',
+    '- [ ] not ours',
+    '~~~',
+    '',
+  ].join('\n');
+
+  const task = parseTask(md, 'x.md', { home: HOME });
+
+  assert.deepEqual(task.checklist, [], 'the fenced checklist never became the task checklist');
+  assert.match(task.requirement, /## Checklist/);
+  assert.match(task.requirement, /- \[ \] not ours/);
+});
+
+test('a fence opened with four backticks is closed only by four or more', () => {
+  const md = frontmatter() + [
+    '',
+    '## Requirement',
+    '',
+    '````',
+    '```ts',
+    'const x = 1;',
+    '```',
+    '## Notes',
+    '````',
+    '',
+    'After the outer fence.',
+    '',
+  ].join('\n');
+
+  const task = parseTask(md, 'x.md', { home: HOME });
+
+  assert.deepEqual(task.notes, [], 'the inner three backticks did not close the outer fence');
+  assert.match(task.requirement, /## Notes/, 'the heading stayed inside the four-tick fence');
+  assert.match(task.requirement, /const x = 1;/);
+  assert.match(task.requirement, /After the outer fence\./);
+});
+
+test('a backtick fence with an info string opens a fence; a backtick in it does not', () => {
+  const opened = parseTask(
+    frontmatter() + ['', '## Requirement', '', '```js title=x', '## Plan', '```', ''].join('\n'),
+    'x.md',
+    { home: HOME },
+  );
+  assert.deepEqual(opened.plan, [], 'an info string does not stop the fence from opening');
+
+  const md = ['', '## Requirement', '', '``` `code` ```', '## Plan', '', '1. real', ''];
+  const inline = parseTask(frontmatter() + md.join('\n'), 'x.md', { home: HOME });
+  assert.deepEqual(inline.plan, ['real'], 'a backtick in the info string is not a fence');
+});
+
+test('a file with fenced headings round trips byte for byte', () => {
+  const md = [
+    frontmatter(),
+    '',
+    '## Requirement',
+    '',
+    'Keep every one of these as written.',
+    '',
+    '```md',
+    '## Plan',
+    '```',
+    '',
+    '~~~',
+    '## Checklist',
+    '~~~',
+    '',
+    '````',
+    '```',
+    '## Notes',
+    '```',
+    '````',
+    '',
+    '---',
+    '',
+    '## Checklist',
+    '',
+    '- [ ] The only real item',
+    '',
+  ].join('\n');
+
+  const once = serializeTask(parseTask(md, 'x.md', { home: HOME }), { home: HOME });
+  assert.equal(once, md, 'the file comes back exactly as it was written');
+  const twice = serializeTask(parseTask(once, 'x.md', { home: HOME }), { home: HOME });
+  assert.equal(twice, once, 'and stays that way on a second pass');
+});

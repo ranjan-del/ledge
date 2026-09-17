@@ -36,6 +36,7 @@ function task(over: Partial<Task> = {}): Task {
       { date: '2026-09-10', body: 'Ruled out a service worker.' },
       { date: '2026-09-14', body: 'Chose polling.\nDecision taken, do not revisit.' },
     ],
+    references: '',
     extra: '',
     file: '/tmp/ledge/tasks/2026-09-14-release-watch-banner.md',
     ...over,
