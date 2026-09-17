@@ -8,6 +8,10 @@
  * folder, platform) are optional here and default to what Node reports, which is why the
  * desktop app, which has no Node, imports the pure entry instead.
  *
+ * The activity layer splits the same way: the ranking is pure and lives in both entries, while
+ * `collectActivity`, which reads the session transcript folder and the repositories, is here
+ * only, because a WebView cannot stat a file.
+ *
  * The one asymmetry is the inference layer. The provider contract and the prompt builders are
  * pure and live in both entries; `claudeCodeProvider`, which starts a child process, is here
  * only, because a WebView has nothing to start.
@@ -25,7 +29,7 @@ export {
 } from './config.ts';
 export type { TaskPaths } from './task-file.ts';
 export { parseTask, serializeTask } from './task-file-node.ts';
-export { slugify, taskFileName } from './task-file.ts';
+export { formatIso, slugify, taskFileName } from './task-file.ts';
 export { TaskStore, matchRepo } from './store.ts';
 export { parsePorcelainV2, findRepos, scanRepos, isPending } from './git.ts';
 export { isoDay, isIsoDay, shiftDay, plannedFor, appendNote, setPlan } from './planning.ts';
@@ -62,3 +66,18 @@ export {
   nextActionFor,
   surfaceCounts,
 } from './surfaces.ts';
+export type { ActivitySignal, TaskActivity, ActivityRank } from './activity.ts';
+export {
+  ACTIVE_WINDOW_MS,
+  ACTIVITY_HALF_LIFE_MS,
+  ACTIVITY_HORIZON_MS,
+  SIGNAL_WEIGHT,
+  activeTask,
+  claudeProjectDirName,
+  explainActivity,
+  formatAge,
+  rankByActivity,
+  rankWithEvidence,
+} from './activity.ts';
+export type { ActivityOptions } from './activity-node.ts';
+export { collectActivity } from './activity-node.ts';

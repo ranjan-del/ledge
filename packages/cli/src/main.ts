@@ -5,6 +5,7 @@ import type { Provider } from '@ledge/core';
 import type { CommandContext, CommandRunner, Flags } from './context.ts';
 import { EXIT, NotFoundError, UsageError } from './context.ts';
 import { renderCommandHelp, renderHelp } from './help.ts';
+import { run as active } from './commands/active.ts';
 import { run as add } from './commands/add.ts';
 import { run as app } from './commands/app.ts';
 import { run as began } from './commands/began.ts';
@@ -47,6 +48,7 @@ export interface MainIo {
 
 const COMMANDS: Record<string, CommandRunner> = {
   list,
+  active,
   add,
   start,
   park,

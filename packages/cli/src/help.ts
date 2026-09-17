@@ -49,6 +49,10 @@ export const COMMANDS: Record<string, HelpEntry> = {
     usage: 'ledge today [--json]',
     summary: 'Tasks planned for today, overdue ones, then current',
   },
+  active: {
+    usage: 'ledge active [--json]',
+    summary: 'Rank current tasks by observed activity, with the evidence',
+  },
   sessions: {
     usage: 'ledge sessions [--json]',
     summary: 'Claude session ids recorded on tasks, newest first',
@@ -103,6 +107,12 @@ export function renderHelp(): string {
     'says under a separate Inference heading, never mixed into the observed rows. They use the',
     'Claude Code command line tool, so they need `claude` on PATH and signed in; without it they',
     'print the observed rows, say why there is no inference, and still exit 0.',
+    '',
+    'active answers "what am I actually on" from three readings rather than from the order you',
+    'typed: the Claude Code session transcript folder for a task repo, the newest tracked file in',
+    "that repo, and the task file's own time, which is all a task with no repo has. It prints",
+    'the evidence next to every row, ignores anything older than 12 hours so a quiet task keeps',
+    'your order, and changes no status: it orders what is shown and nothing more.',
     '',
     'began and settle are the two halves of one loop. A launcher runs `ledge began <id>` before',
     'it opens Claude on a backlog task; `ledge settle` at the end of the session compares the task',

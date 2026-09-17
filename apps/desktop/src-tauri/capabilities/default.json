@@ -229,6 +229,12 @@
         },
         {
           "path": "$HOME/.claude/projects/**"
+        },
+        {
+          "path": "$HOME/*"
+        },
+        {
+          "path": "$HOME/**"
         }
       ]
     },
@@ -287,6 +293,18 @@
             {
               "validator": "[\\s\\S]+"
             }
+          ]
+        },
+        {
+          "name": "git-ls-files",
+          "cmd": "git",
+          "args": [
+            "-C",
+            {
+              "validator": "[^\\r\\n]+"
+            },
+            "ls-files",
+            "-z"
           ]
         }
       ]

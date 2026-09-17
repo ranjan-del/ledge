@@ -1,8 +1,14 @@
 // Plain text rendering. No colour libraries: tables are aligned with spaces so the output reads
 // the same in a terminal, a hook transcript and a test assertion.
 import { homedir } from 'node:os';
-import type { AskResult, MemoryEntry, NoteEntry, Observed, ObservedRepo } from '@ledge/core';
-import type { ObservedTask, RepoStatus, SessionRef, Task } from '@ledge/core';
+import {
+  ACTIVE_WINDOW_MS,
+  ACTIVITY_HALF_LIFE_MS,
+  ACTIVITY_HORIZON_MS,
+  formatAge,
+} from '@ledge/core';
+import type { ActivitySignal, AskResult, MemoryEntry, NoteEntry, Observed } from '@ledge/core';
+import type { ObservedRepo, ObservedTask, RepoStatus, SessionRef, Task } from '@ledge/core';
 
 /** A pending repo plus the task that references it, when one does. */
 export interface PendingRow extends RepoStatus {
@@ -356,4 +362,137 @@ export function renderAssist(view: AssistView): string {
   }
   if (view.saved) blocks.push(`Saved to ${shortPath(view.saved)} under ${view.day}`);
   return blocks.join('\n\n');
+}
+
+/** One signal as `ledge active` prints it: the reading, its age, and whether it counted. */
+export interface ActiveSignalRow {
+  signal: ActivitySignal;
+  /** True when the signal was inside the horizon and so took part in the ranking. */
+  counted: boolean;
+  /** How old the signal is at the moment the command ran, e.g. `3h 10m`. */
+  age: string;
+}
+
+/** One task's place in `ledge active`, with the evidence that put it there. */
+export interface ActiveRow {
+  rank: number;
+  task: Task;
+  score: number;
+  /** The one-line reason, generated from the signal that decided the rank. */
+  reason: string;
+  signals: ActiveSignalRow[];
+}
+
+/** Everything `ledge active` prints: the ranking, the evidence and what is warm right now. */
+export interface ActiveView {
+  /** When the command ran, which is what every age is measured against. */
+  now: string;
+  /** The newest signal in the whole reading, which is what the ranking measured against. */
+  reference?: string;
+  /** The task that looks active at `now`, absent when nothing is recent enough to say. */
+  active?: Task;
+  rows: ActiveRow[];
+  /** Repositories named by more than one of the ranked tasks, with the tasks naming them. */
+  sharedRepos: { repo: string; taskIds: string[] }[];
+}
+
+/** Score to three decimals, so two near-identical scores can still be told apart by eye. */
+function roundScore(score: number): number {
+  return Math.round(score * 1000) / 1000;
+}
+
+/**
+ * Renders `ledge active`: the ranking, then the evidence per task, then the rules the numbers
+ * came from. The evidence is not an appendix. A reordering a person cannot interrogate is one
+ * they stop trusting the first time it is wrong, so every row's reason, every signal behind it
+ * and the signals that were too old to count are all printed, and the last paragraph states the
+ * weights and the horizon so the ordering can be checked by hand.
+ */
+export function renderActive(view: ActiveView): string {
+  const blocks: string[] = [`Active ${view.now}`];
+  blocks[0] += view.active
+    ? `\n  Working on now: ${view.active.id} (${view.active.title})`
+    : '\n  Nothing looks active right now, so nothing is claimed about the present.';
+
+  const ranked = view.rows.map((row) => [
+    String(row.rank),
+    row.task.id,
+    row.task.title,
+    `order ${row.task.order}`,
+    String(roundScore(row.score)),
+    row.reason,
+  ]);
+  blocks.push(section('Ranked by activity', ranked));
+
+  const evidence: string[] = ['Evidence'];
+  if (view.rows.length === 0) evidence.push('  (none)');
+  for (const row of view.rows) {
+    evidence.push(`  ${row.rank}  ${row.task.id}`);
+    if (row.signals.length === 0) {
+      evidence.push('       (nothing observed)');
+      continue;
+    }
+    const rows = row.signals.map((entry) => [
+      entry.signal.kind,
+      entry.signal.at,
+      `${entry.age} ago`,
+      entry.counted ? 'counted' : 'too old',
+      entry.signal.detail,
+    ]);
+    evidence.push(table(rows, '       '));
+  }
+  blocks.push(evidence.join('\n'));
+
+  if (view.sharedRepos.length > 0) {
+    const notes = view.sharedRepos.map((shared) => [
+      `${shortPath(shared.repo)} is named by ${shared.taskIds.length} tasks ` +
+        `(${shared.taskIds.join(', ')}), so its session and worktree signals cannot say which.`,
+    ]);
+    blocks.push(section('Shared repositories', notes));
+  }
+
+  const half = formatAge(ACTIVITY_HALF_LIFE_MS);
+  const horizon = formatAge(ACTIVITY_HORIZON_MS);
+  const window = formatAge(ACTIVE_WINDOW_MS);
+  blocks.push(
+    [
+      `Signals weigh session > worktree > taskfile and halve every ${half}. Anything older than`,
+      `${horizon} is ignored, and a task with no signal keeps the order you gave it. "Working on`,
+      `now" needs a signal from the last ${window}. This orders what is shown and nothing else:`,
+      'no status is read, set or suggested here.',
+    ].join('\n'),
+  );
+  return blocks.join('\n\n');
+}
+
+/** The same view as plain JSON for `--json`, with the thresholds it was computed under. */
+export function activeJson(view: ActiveView): unknown {
+  return {
+    now: view.now,
+    reference: view.reference ?? null,
+    active: view.active ? { id: view.active.id, title: view.active.title } : null,
+    thresholds: {
+      halfLifeMs: ACTIVITY_HALF_LIFE_MS,
+      horizonMs: ACTIVITY_HORIZON_MS,
+      activeWindowMs: ACTIVE_WINDOW_MS,
+    },
+    ranked: view.rows.map((row) => ({
+      rank: row.rank,
+      id: row.task.id,
+      title: row.task.title,
+      status: row.task.status,
+      order: row.task.order,
+      repo: row.task.repo ?? null,
+      score: roundScore(row.score),
+      reason: row.reason,
+      signals: row.signals.map((entry) => ({
+        kind: entry.signal.kind,
+        at: entry.signal.at,
+        age: entry.age,
+        counted: entry.counted,
+        detail: entry.signal.detail,
+      })),
+    })),
+    sharedRepos: view.sharedRepos,
+  };
 }
