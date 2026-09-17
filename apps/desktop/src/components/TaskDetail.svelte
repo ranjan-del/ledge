@@ -591,7 +591,9 @@
               stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           Plan
-          {#if task.plan.length > 0}<span class="count">{task.plan.length} steps</span>{/if}
+          {#if task.plan.length > 0}<span class="count">
+              {task.plan.length} {task.plan.length === 1 ? 'step' : 'steps'}
+            </span>{/if}
         </button>
         <button
           type="button"
@@ -667,7 +669,9 @@
               oncancel={stopEdit}
             />
           {/key}
-        {:else}
+        {:else if editing === null}
+          <!-- One editor at a time, so the other ways in are not offered while one is open:
+               pressing them would commit what is being typed on the way past. -->
           <button
             type="button"
             class="add-line motion"
@@ -718,7 +722,7 @@
           {#each paragraphs(todayNote.body) as para, i (i)}
             <p class="note-text selectable">{para}</p>
           {/each}
-          {#if editing?.kind !== 'note'}
+          {#if editing === null}
             <button
               type="button"
               class="add-line motion"
@@ -747,7 +751,7 @@
               oncancel={stopEdit}
             />
           {/key}
-        {:else if !todayNote}
+        {:else if !todayNote && editing === null}
           <button
             type="button"
             class="add-line motion"
@@ -780,7 +784,9 @@
               stroke-linecap="round" stroke-linejoin="round" />
           </svg>
           References
-          {#if refLines.length > 0}<span class="count">{refLines.length} lines</span>{/if}
+          {#if refLines.length > 0}<span class="count">
+              {refLines.length} {refLines.length === 1 ? 'line' : 'lines'}
+            </span>{/if}
         </button>
         <button
           type="button"
@@ -806,16 +812,20 @@
           <pre class="ref-text selectable">{shownRefs}</pre>
           {#if moreRefLines > 0}
             <button type="button" class="more-items motion" onclick={() => (allRefs = !allRefs)}>
-              {allRefs ? 'Show the first twelve lines only' : `and ${moreRefLines} more lines`}
+              {allRefs
+                ? 'Show the first twelve lines only'
+                : `and ${moreRefLines} more ${moreRefLines === 1 ? 'line' : 'lines'}`}
             </button>
           {/if}
-          <button
-            type="button"
-            class="add-line motion"
-            onclick={() => startEdit({ kind: 'references' })}
-          >
-            Edit all references
-          </button>
+          {#if editing === null}
+            <button
+              type="button"
+              class="add-line motion"
+              onclick={() => startEdit({ kind: 'references' })}
+            >
+              Edit all references
+            </button>
+          {/if}
         {:else if editing?.kind !== 'new-reference'}
           <p class="quiet faint">Nothing pasted here yet.</p>
         {/if}
@@ -836,7 +846,7 @@
               oncancel={stopEdit}
             />
           {/key}
-        {:else}
+        {:else if editing === null}
           <button
             type="button"
             class="add-line motion"
@@ -1009,7 +1019,7 @@
           oncancel={stopEdit}
         />
       {/key}
-    {:else}
+    {:else if editing === null}
       <button
         type="button"
         class="add-line motion"
@@ -1257,15 +1267,25 @@
     margin-top: var(--space-2);
   }
 
-  /* A plan step, and the three things that can be done to it. */
+  /*
+    A plan step, and the three things that can be done to it. The row wraps, and the step keeps
+    a floor under its width, because the tools are not always three small icons: when one of
+    them asks "Remove this step?" the group is suddenly wider than the panel. Without the floor
+    the step is squeezed to one letter per line and the question runs off the glass.
+  */
   .plan-list li {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: var(--space-1);
   }
+  /* Basis zero, floor eight rems. Flexbox decides where a line breaks from the basis, not from
+     the shrunk width, so an `auto` basis here put the three small tools on their own line under
+     every step. Zero keeps them beside the step, and the floor is what makes the row break when
+     the tools become a question wider than the panel. */
   .line-edit {
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 0;
+    min-width: 8rem;
     text-align: left;
     line-height: 1.4;
     border-radius: var(--radius-sm);
@@ -1276,7 +1296,9 @@
   }
   .tools {
     flex: none;
+    max-width: 100%;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 1px;
   }
@@ -1312,13 +1334,15 @@
   }
   .checklist li {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     gap: 1px;
   }
+  /* The same basis and the same floor as a plan step, for the same reasons. */
   .checklist label {
     display: flex;
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 0;
+    min-width: 8rem;
     align-items: flex-start;
     gap: var(--space-2);
     padding: 5px var(--space-2);

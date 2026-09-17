@@ -1,9 +1,26 @@
 <script lang="ts">
   /**
-   * Edits config.json in place: roots, scan interval, terminal, claude command, edge and theme.
-   * Saving hands a complete Config back through `onsave`; nothing is written until then.
+   * Everything in config.json a person should not have to open an editor to change: which
+   * folders are scanned for repositories and how often, which terminal and which `claude`
+   * command to launch, which edge the button lives on, light or dark, and the name the greeting
+   * uses. Saving hands a complete Config back through `onsave`; nothing is written until then.
+   *
+   * Every field here writes the thing it names and is read somewhere real: the roots by the
+   * git scan, the interval by the scan timer, the terminal and the two claude fields by the
+   * launcher, the edge by the floating button, the theme by the document, the name by the
+   * greeting. A cleared field falls back to what the config already has rather than to a
+   * constant, so emptying a box can never quietly set a value nobody typed. The one exception
+   * is the name, where empty is a real answer: it means "use the machine account".
    */
   import type { Config } from '@ledge/core/pure';
+
+  /**
+   * Config as config.json actually is. `ui.name` is a key the file carries and the greeting
+   * reads, and core's `Config` does not model it yet; this is the one place that writes it, so
+   * this is where the difference is stated rather than being spread over casts.
+   */
+  type UiWithName = Config['ui'] & { name?: string };
+  type Named = Omit<Config, 'ui'> & { ui: UiWithName };
 
   interface Props {
     config: Config;
@@ -22,17 +39,30 @@
   let resumeFlag = $derived(config.claude.resumeFlag);
   let edge = $derived(config.ui.edge);
   let theme = $derived(config.ui.theme);
+  let name = $derived((config as Named).ui.name ?? '');
 
   function submit(e: SubmitEvent) {
     e.preventDefault();
+    /* An empty name is not a missing value, it is the answer "greet me by my account name", so
+       the key is dropped rather than written blank. Nothing else in the file works that way. */
+    const called = name.trim();
+    const { name: _old, ...rest } = (config as Named).ui;
+    const ui: UiWithName = { ...rest, edge, theme };
+    if (called !== '') ui.name = called;
     onsave({
       ...config,
       roots: roots.split('\n').map((r) => r.trim()).filter((r) => r !== ''),
-      scan: { ...config.scan, intervalMinutes: Math.max(1, Number(interval) || 5) },
+      scan: {
+        ...config.scan,
+        intervalMinutes: Math.max(1, Math.round(Number(interval)) || config.scan.intervalMinutes),
+      },
       terminal: terminal.trim() || config.terminal,
-      claude: { command: claudeCommand.trim() || 'claude', resumeFlag: resumeFlag.trim() || '--resume' },
-      ui: { ...config.ui, edge, theme },
-    });
+      claude: {
+        command: claudeCommand.trim() || config.claude.command,
+        resumeFlag: resumeFlag.trim() || config.claude.resumeFlag,
+      },
+      ui,
+    } as Config);
   }
 </script>
 
@@ -45,6 +75,17 @@
   </button>
   <h2>Settings</h2>
 
+  <label>
+    <span>Your name, for the greeting</span>
+    <input
+      class="field"
+      type="text"
+      bind:value={name}
+      placeholder="Empty greets you by your account name"
+      autocomplete="off"
+      spellcheck="false"
+    />
+  </label>
   <label>
     <span>Repository roots, one per line</span>
     <textarea class="field" rows="3" bind:value={roots} spellcheck="false"></textarea>
@@ -107,6 +148,13 @@
     font-size: var(--fs-sm);
     color: var(--text-muted);
     flex: 1;
+    /* A text input's default width is twenty characters, which is wider than half the panel at
+       320 px. Without this the two paired rows below push the whole form past the glass. */
+    min-width: 0;
+  }
+  label .field {
+    min-width: 0;
+    width: 100%;
   }
   .two {
     display: flex;

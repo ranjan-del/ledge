@@ -395,3 +395,158 @@ Behind a flag for the first week.
     expect(next.checklist).toEqual([{ text: 'Only item', done: false }]);
   });
 });
+
+/*
+ * The two promises that hold for all six edit paths, checked on each of the six rather than on
+ * the two that happened to be written first. A watcher event is the store handing this view a
+ * freshly parsed task while a field is open; a refused write is the filesystem saying no. In
+ * neither case may a character of what was typed be lost, and a refusal has to be readable
+ * without leaving the field.
+ */
+describe('TaskDetail, a watcher event landing mid-edit', () => {
+  /** The same task re-parsed with someone else's change in it, which is what the store hands back. */
+  function elsewhere(task: Task, change: Partial<Task>): Task {
+    return { ...task, ...change, updated: '2026-09-16T10:00:00+05:30' };
+  }
+
+  it('keeps a half-typed title', async () => {
+    const { onsave, rerender } = open();
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Release watch banner for stale tabs' }),
+    );
+    await type(screen.getByLabelText('Task title'), 'Half a new name');
+    await rerender({ task: elsewhere(taskA(), { title: 'Renamed in another editor' }) });
+    await settle();
+    expect((screen.getByLabelText('Task title') as HTMLInputElement).value).toBe(
+      'Half a new name',
+    );
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('keeps a half-typed plan step', async () => {
+    const { onsave, rerender } = open(taskC());
+    await fireEvent.click(screen.getByRole('button', { name: /^Plan/ }));
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Poll it on an interval and on window focus' }),
+    );
+    await type(screen.getByLabelText('Plan step 2'), 'Poll it on focus and');
+    await rerender({
+      task: elsewhere(taskC(), { plan: ['One', 'Two rewritten elsewhere', 'Three'] }),
+    });
+    await settle();
+    expect((screen.getByLabelText('Plan step 2') as HTMLTextAreaElement).value).toBe(
+      'Poll it on focus and',
+    );
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('keeps a half-typed checklist item', async () => {
+    const { onsave, rerender } = open();
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Edit item: Build step that writes version.json' }),
+    );
+    await type(
+      screen.getByLabelText('Checklist item: Build step that writes version.json'),
+      'Build step, half rewritten',
+    );
+    await rerender({
+      task: elsewhere(taskA(), {
+        checklist: [...taskA().checklist.slice(0, 4), { text: 'Added elsewhere', done: false }],
+      }),
+    });
+    await settle();
+    const field = screen.getByLabelText(
+      'Checklist item: Build step that writes version.json',
+    ) as HTMLInputElement;
+    expect(field.value).toBe('Build step, half rewritten');
+    expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it("keeps a half-typed note for today", async () => {
+    const { onsave, rerender } = open(taskC());
+    await fireEvent.click(screen.getByRole('button', { name: "Add to today's note" }));
+    await type(screen.getByLabelText('New note for today'), 'Found the casing trap and');
+    await rerender({
+      task: elsewhere(taskC(), {
+        notes: [...taskC().notes, { date: DAY, body: 'Written in another editor' }],
+      }),
+    });
+    await settle();
+    expect((screen.getByLabelText('New note for today') as HTMLTextAreaElement).value).toBe(
+      'Found the casing trap and',
+    );
+    expect(onsave).not.toHaveBeenCalled();
+  });
+});
+
+describe('TaskDetail, a write the filesystem refuses', () => {
+  const NO = () => vi.fn().mockRejectedValue('Read-only file system');
+
+  it('keeps the title and says why', async () => {
+    const onsave = NO();
+    open(taskA(), onsave);
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Release watch banner for stale tabs' }),
+    );
+    await type(screen.getByLabelText('Task title'), 'Worth keeping');
+    await fireEvent.keyDown(screen.getByLabelText('Task title'), { key: 'Enter' });
+    await settle();
+    expect(screen.getByRole('alert').textContent).toContain('Read-only file system');
+    expect((screen.getByLabelText('Task title') as HTMLInputElement).value).toBe('Worth keeping');
+  });
+
+  it('keeps the plan step and says why', async () => {
+    const onsave = NO();
+    open(taskC(), onsave);
+    await fireEvent.click(screen.getByRole('button', { name: /^Plan/ }));
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Poll it on an interval and on window focus' }),
+    );
+    await type(screen.getByLabelText('Plan step 2'), 'Worth keeping');
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toContain('Read-only file system');
+    expect((screen.getByLabelText('Plan step 2') as HTMLTextAreaElement).value).toBe(
+      'Worth keeping',
+    );
+  });
+
+  it('keeps the checklist item and says why', async () => {
+    const onsave = NO();
+    open(taskA(), onsave);
+    await fireEvent.click(
+      screen.getByRole('button', { name: 'Edit item: Build step that writes version.json' }),
+    );
+    const label = 'Checklist item: Build step that writes version.json';
+    await type(screen.getByLabelText(label), 'Worth keeping');
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toContain('Read-only file system');
+    expect((screen.getByLabelText(label) as HTMLInputElement).value).toBe('Worth keeping');
+  });
+
+  it("keeps today's note and says why", async () => {
+    const onsave = NO();
+    open(taskC(), onsave);
+    await fireEvent.click(screen.getByRole('button', { name: "Add to today's note" }));
+    await type(screen.getByLabelText('New note for today'), 'Worth keeping');
+    await fireEvent.click(screen.getByRole('button', { name: 'Add to today' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toContain('Read-only file system');
+    expect((screen.getByLabelText('New note for today') as HTMLTextAreaElement).value).toBe(
+      'Worth keeping',
+    );
+  });
+
+  it('says why a removal was refused, against the block it belonged to', async () => {
+    const onsave = NO();
+    open(taskC(), onsave);
+    await fireEvent.click(screen.getByRole('button', { name: /^Plan/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove step 1' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await settle();
+    expect(screen.getByRole('alert').textContent).toContain('Read-only file system');
+    /* Nothing was taken away on screen either: the step is still there to try again on. */
+    expect(screen.getByRole('button', { name: 'Remove step 1' })).toBeTruthy();
+  });
+});

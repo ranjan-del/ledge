@@ -4,10 +4,16 @@
    * question and its two answers, in the same place and at the same size, and nothing is
    * destroyed until the second press. Escape on either answer means no.
    *
-   * It is one component because the panel now has three of these: deleting a task, removing a
-   * plan step and removing a checklist item. It is not a `confirm()` dialog, because a native
-   * modal on a panel that hides when it loses focus is a trap, and because the answer belongs
-   * beside the thing it is about rather than in the middle of the screen.
+   * It is one component because the panel now has four of these: deleting a task, removing a
+   * plan step, removing a checklist item, and marking a task done by dragging it sideways. It
+   * is not a `confirm()` dialog, because a native modal on a panel that hides when it loses
+   * focus is a trap, and because the answer belongs beside the thing it is about rather than in
+   * the middle of the screen.
+   *
+   * `armed` is what the drag uses: the gesture has already been made, so the question is there
+   * to be answered rather than to be asked for. Everything after that first press is the same
+   * question, the same two answers and the same Escape, which is the point of having one
+   * component for all four.
    */
   interface Props {
     /** The resting button's accessible name, and its text unless `icon` is set. */
@@ -22,20 +28,41 @@
     title?: string;
     /** Draw the resting button as a small cross instead of a word. Rows use this. */
     icon?: boolean;
+    /** Open already asking, for a caller whose own gesture was the first press. */
+    armed?: boolean;
     onconfirm: () => void;
+    /** The question was dismissed. A caller that armed it needs to know to put itself back. */
+    oncancel?: () => void;
   }
 
-  let { label, question, confirmLabel, groupLabel, title, icon = false, onconfirm }: Props =
-    $props();
+  let {
+    label,
+    question,
+    confirmLabel,
+    groupLabel,
+    title,
+    icon = false,
+    armed = false,
+    onconfirm,
+    oncancel,
+  }: Props = $props();
 
-  let asking = $state(false);
+  /* Seeded once. A caller that arms this owns whether it exists at all, so re-deriving would
+     put the question back the moment its own state changed. */
+  // svelte-ignore state_referenced_locally
+  let asking = $state(armed);
+
+  function dismiss() {
+    asking = false;
+    oncancel?.();
+  }
 
   /** Cancels the question from the keyboard, so Escape always means "no". */
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
     event.preventDefault();
     event.stopPropagation();
-    asking = false;
+    dismiss();
   }
 </script>
 
@@ -53,7 +80,7 @@
     >
       {confirmLabel}
     </button>
-    <button type="button" class="btn motion" onclick={() => (asking = false)} onkeydown={onkeydown}>
+    <button type="button" class="btn motion" onclick={dismiss} onkeydown={onkeydown}>
       Cancel
     </button>
   </span>
@@ -81,6 +108,10 @@
     display: inline-flex;
     flex-wrap: wrap;
     align-items: center;
+    /* It is asked inside rows narrower than the question, so it must never be the thing that
+       decides how wide its row is. It wraps onto as many lines as the panel gives it. */
+    max-width: 100%;
+    min-width: 0;
     gap: var(--space-2);
     padding: 2px 2px 2px var(--space-2);
     border-radius: var(--radius-sm);

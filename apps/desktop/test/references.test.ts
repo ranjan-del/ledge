@@ -193,3 +193,67 @@ describe('TaskDetail, the References section', () => {
     );
   });
 });
+
+/*
+ * The cases that used to rewrite the file. Core's section splitter trims each line and is not
+ * fence-aware, so anything a paste contains that trims down to `## ` was read back as a
+ * section of the task itself: a pasted `## Plan` became the task's plan and the rest of the
+ * paste disappeared from References. Every one of these is a round trip through the real
+ * parser and the real serializer, because that is the only thing that proves it.
+ */
+describe('references, a paste that looks like structure', () => {
+  function roundTrip(paste: string) {
+    const task = withReferences(taskA(), paste);
+    const back = parseTask(serializeTask(task, { home: HOME }), taskA().file, { home: HOME });
+    return { back, references: referencesOf(back), rest: restOf(back) };
+  }
+
+  it('does not let a pasted ## Plan become the task plan', () => {
+    const paste = 'They sent me this:\n\n## Plan\n\n1. do the thing\n2. do the other';
+    const { back, references, rest } = roundTrip(paste);
+    expect(back.plan).toEqual([]);
+    expect(references).toBe(paste);
+    expect(rest).toBe('');
+  });
+
+  it('does not let a pasted ## Notes become the task notes', () => {
+    const paste = 'log:\n\n## Notes\n\n### 2020-01-01\nsomething from a different file';
+    const { back, references } = roundTrip(paste);
+    expect(back.notes).toEqual([]);
+    expect(references).toBe(paste);
+  });
+
+  it('protects a heading that is inside a code fence, which core does not see', () => {
+    const paste = 'Error output:\n\n```md\n## Plan\n\n1. fenced step\n```';
+    const { back, references } = roundTrip(paste);
+    expect(back.plan).toEqual([]);
+    expect(references).toBe(paste);
+  });
+
+  it('protects an indented heading, since core trims before it matches', () => {
+    const paste = 'the reply said\n   ## Checklist\n\n- [ ] not ours';
+    const { back, references } = roundTrip(paste);
+    expect(back.checklist).toHaveLength(5);
+    expect(references).toBe(paste);
+  });
+
+  it('keeps nested code fences exactly as they were pasted', () => {
+    const paste = '````\n```ts\nconst tabs = config().resourceNames;\n```\n````';
+    expect(roundTrip(paste).references).toBe(paste);
+  });
+
+  it('keeps a pasted blockquote, its own markers included', () => {
+    const paste = 'Sonal wrote:\n\n> the tabs are wrong for FLN\n> it says TnT not TNT';
+    expect(roundTrip(paste).references).toBe(paste);
+  });
+
+  it('keeps blank lines and leading whitespace, which a stack trace is made of', () => {
+    const paste = 'one\n\n\ntwo\n    TypeError: cannot read tabLayout\n        at page.ts:118';
+    expect(roundTrip(paste).references).toBe(paste);
+  });
+
+  it('reads a References block a person wrote by hand, unquoted, as it stands', () => {
+    const hand = { ...taskA(), extra: '## References\n\nJust a line someone typed in.' };
+    expect(referencesOf(hand)).toBe('Just a line someone typed in.');
+  });
+});

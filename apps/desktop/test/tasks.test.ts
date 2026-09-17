@@ -1,6 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Tasks from '../src/components/Tasks.svelte';
+import {
+  SHIFT_PX,
+  ask,
+  beginDrag,
+  clearAsk,
+  endDrag,
+  trackDrag,
+} from '../src/lib/drag.svelte.ts';
 import { archived, repoStatus, taskA, taskB } from './fixtures.ts';
 
 const base = {
@@ -95,5 +103,89 @@ describe('Tasks, the four views', () => {
 
     render(Tasks, { props: { ...empty, view: 'pending', scanning: true } });
     expect(screen.getByText('Scanning repositories')).toBeTruthy();
+  });
+});
+
+/*
+ * The four lists are not four of the same kind of thing, and this is where that shows. Live,
+ * Done and Backlog are a task's `status`, so a card can be dropped on them. Pending is computed
+ * from the git scan and has no field behind it, so it refuses and says why. The refusal is the
+ * test that matters most: the failure it replaces was a pill that took the gesture and silently
+ * did nothing, which reads as a broken app rather than as a rule.
+ */
+describe('Tasks, a card dropped on one of the lists', () => {
+  /** A drag in flight, as the card would have started it. */
+  function dragging(file: string) {
+    beginDrag(file, 0);
+    trackDrag(SHIFT_PX * 2, 0);
+  }
+
+  function dropOn(el: HTMLElement) {
+    const dt = { setData: () => {}, getData: () => '0', effectAllowed: 'move', dropEffect: 'move' };
+    const over = new MouseEvent('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(over, 'dataTransfer', { value: dt });
+    const drop = new MouseEvent('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, 'dataTransfer', { value: dt });
+    return fireEvent(el, over).then(() => fireEvent(el, drop));
+  }
+
+  beforeEach(() => {
+    endDrag();
+    clearAsk();
+  });
+
+  it('refuses Pending, and says why, rather than accepting and doing nothing', async () => {
+    const onshift = vi.fn();
+    render(Tasks, { props: { ...base, view: 'live', onshift } });
+    dragging(taskA().file);
+    await dropOn(screen.getByRole('button', { name: /Pending/ }));
+    expect(onshift).not.toHaveBeenCalled();
+    const said = screen.getByRole('alert').textContent ?? '';
+    expect(said).toContain('read from git');
+    expect(said).toContain('Nothing can be moved into it');
+  });
+
+  it('moves a live task into the backlog when it is dropped on that pill', async () => {
+    const onshift = vi.fn();
+    render(Tasks, { props: { ...base, view: 'live', onshift } });
+    dragging(taskA().file);
+    await dropOn(screen.getByRole('button', { name: /Backlog/ }));
+    expect(onshift).toHaveBeenCalledTimes(1);
+    expect(onshift.mock.calls[0]?.[1]).toBe('backlog');
+  });
+
+  it('moves a parked task into live when it is dropped on that pill', async () => {
+    const onshift = vi.fn();
+    render(Tasks, { props: { ...base, view: 'backlog', onshift } });
+    dragging(taskB().file);
+    await dropOn(screen.getByRole('button', { name: /Live/ }));
+    expect(onshift.mock.calls[0]?.[1]).toBe('current');
+  });
+
+  it('asks about Done on the card rather than archiving because a pill was the target', async () => {
+    const onshift = vi.fn();
+    render(Tasks, { props: { ...base, view: 'live', onshift } });
+    dragging(taskA().file);
+    await dropOn(screen.getByRole('button', { name: /Done/ }));
+    expect(onshift).not.toHaveBeenCalled();
+    expect(ask.file).toBe(taskA().file);
+    expect(ask.to).toBe('done');
+    expect(screen.getByText('Mark done and archive the file?')).toBeTruthy();
+  });
+
+  it('says a task is already in the list it was dropped on', async () => {
+    const onshift = vi.fn();
+    render(Tasks, { props: { ...base, view: 'live', onshift } });
+    dragging(taskA().file);
+    await dropOn(screen.getByRole('button', { name: /Live/ }));
+    expect(onshift).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Already live');
+  });
+
+  it('takes no drops at all when nothing can change a status', async () => {
+    render(Tasks, { props: { ...base, view: 'live' } });
+    dragging(taskA().file);
+    await dropOn(screen.getByRole('button', { name: /Pending/ }));
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });

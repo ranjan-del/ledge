@@ -12,8 +12,21 @@
    * Nothing was dropped in the fold: the Live and Done switch is the one that already existed,
    * Backlog keeps its add row and its Start and Open actions, and Pending is still computed from
    * the git scan and typed by nobody.
+   *
+   * It is also what decides where a dragged task may go. Live and Backlog are both a task's
+   * `status`, so a card can move between them. Done is a status too, but marking it archives the
+   * file, so the card asks before it happens rather than doing it on release. Pending is not a
+   * status at all and cannot be dropped into, and this is where that refusal is worded, because
+   * this is the component that knows which list is which.
    */
   import type { RepoStatus, Task } from '@ledge/core/pure';
+  import {
+    askShift,
+    drag,
+    viewRefusal,
+    viewStatus,
+    type ShiftTo,
+  } from '../lib/drag.svelte.ts';
   import type { NewTask, TaskView } from '../lib/store.svelte.ts';
   import { todayIso } from '../lib/time.ts';
   import AddTask from './AddTask.svelte';
@@ -52,6 +65,11 @@
      * and carry no grip.
      */
     onreorder?: (from: number, to: number) => void;
+    /**
+     * Moves a task into another list by writing `status` through the store. Without it the
+     * sideways half of the drag is inert and the pills take no drops.
+     */
+    onshift?: (task: Task, to: ShiftTo) => void;
   }
 
   let {
@@ -71,6 +89,7 @@
     onselect,
     onadd,
     onreorder,
+    onshift,
   }: Props = $props();
 
   const options = $derived<ViewOption[]>([
@@ -79,10 +98,39 @@
     { id: 'backlog', label: 'Backlog', count: backlog.length },
     { id: 'pending', label: 'Pending', count: pending.length },
   ]);
+
+  /** The task currently under the pointer's drag, looked up in the two lists that hold one. */
+  const dragged = $derived([...live, ...backlog].find((t) => t.file === drag.file));
+
+  /** Why a pill would turn this task away. Undefined means it takes it. */
+  function refusalFor(id: string): string | undefined {
+    if (!dragged) return 'Nothing is being dragged.';
+    return viewRefusal(id, dragged.status);
+  }
+
+  /**
+   * A drop on a pill. It goes through the same two routes the gesture does, so dropping on Done
+   * asks on the card exactly as dragging right does, rather than archiving because a pill was
+   * the target instead of the air.
+   */
+  function dropOnView(id: string) {
+    const task = dragged;
+    const to = viewStatus(id);
+    if (!task || to === undefined) return;
+    if (to === 'done') askShift(task.file, to);
+    else onshift?.(task, to);
+  }
 </script>
 
 <div class="views">
-  <ViewSwitch {options} active={view} onchange={(id) => onview(id as TaskView)} />
+  <ViewSwitch
+    {options}
+    active={view}
+    onchange={(id) => onview(id as TaskView)}
+    dragFile={drag.file}
+    refusalFor={onshift ? refusalFor : undefined}
+    ondropview={dropOnView}
+  />
 </div>
 
 {#if view === 'done'}
@@ -105,11 +153,14 @@
   <div class="pane">
     <div class="pane-scroll">
       {#each backlog as task (task.file)}
+        <!-- No order of its own, so no reorder and no up and down. The sideways move is all
+             this list's grip does, which is why it still has one. -->
         <TaskCard
           {task}
           {day}
           status={statusFor?.(task.repo)}
           actions={actionsFor?.(task) ?? []}
+          {onshift}
           {onselect}
         />
       {:else}
@@ -136,6 +187,7 @@
               index={i}
               total={live.length}
               onmove={onreorder}
+              {onshift}
               {onselect}
             />
           {/each}

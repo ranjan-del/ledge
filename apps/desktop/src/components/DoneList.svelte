@@ -1,9 +1,14 @@
 <script lang="ts">
   /**
-   * Finished work, read from `~/.ledge/archive`, newest first. It shows the title, the day it
-   * was finished and the checklist as it stood when it was, because a task marked done with
-   * two of five items ticked is a different memory from one that was finished to the letter,
-   * and the archive is the only place that record survives.
+   * Finished work, newest first. It shows the title, the day it was finished and the checklist
+   * as it stood when it was, because a task marked done with two of five items ticked is a
+   * different memory from one that was finished to the letter, and this is the only place that
+   * record survives.
+   *
+   * "Finished" means a task whose status is done, not a file that happens to live in
+   * `~/.ledge/archive`. Most of them are in the archive, because marking one done moves it
+   * there; the store hands over any whose move has not happened as well, so a task can never be
+   * finished and invisible at the same time.
    *
    * These are records, not a workbench: hairlines rather than cards, nothing to hover, nothing
    * to click. The rows say what happened and then get out of the way.

@@ -138,18 +138,42 @@ export function backlogTasks(): Task[] {
     .sort((a, b) => b.updated.localeCompare(a.updated));
 }
 
-/** Finished tasks from `archive/`, newest first. Empty until the archive has been read. */
-export function doneTasks(): Task[] {
-  return desk.archive;
+/**
+ * A finished task that is still sitting in `tasks/`. Archiving is two steps, writing the status
+ * and moving the file, and the second one can fail; when it does, the task used to belong to no
+ * list at all. Current and Backlog filter it out by status and Done only read the archive
+ * folder, so a task marked done went invisible and the person had lost it.
+ *
+ * Status is the truth. The folder is an optimisation that keeps `tasks/` short, and an
+ * optimisation that has not happened yet must never hide the thing it was optimising.
+ */
+function strandedDone(): Task[] {
+  return desk.tasks.filter((t) => t.status === 'done');
 }
 
 /**
- * How many finished tasks the Done button should claim. The count from `listDir` is right
- * from boot and costs nothing; once the files have actually been parsed the parsed number
- * is the honest one, since a file the parser refused is not a row anybody can see.
+ * Finished tasks, newest first, wherever their file physically is: the archive folder for the
+ * ones that were moved, `tasks/` for any whose move has not happened or did not work. A task
+ * appears once, by id, because during the moment between the move and the watcher confirming it
+ * the same task exists in both places.
+ */
+export function doneTasks(): Task[] {
+  const seen = new Set(desk.archive.map((t) => t.id));
+  const extra = strandedDone().filter((t) => !seen.has(t.id));
+  return [...desk.archive, ...extra].sort((a, b) => b.updated.localeCompare(a.updated));
+}
+
+/**
+ * How many finished tasks the Done button should claim, and it has to be the same number the
+ * view shows or one of the two is lying. The count from `listDir` is right from boot and costs
+ * nothing; once the files have actually been parsed the parsed number is the honest one, since
+ * a file the parser refused is not a row anybody can see. Either way the tasks still waiting to
+ * be moved are added, on the same by-id rule the list uses.
  */
 export function doneCount(): number {
-  return desk.archiveReady ? desk.archive.length : desk.archivedCount;
+  const archived = desk.archiveReady ? desk.archive.length : desk.archivedCount;
+  const seen = new Set(desk.archive.map((t) => t.id));
+  return archived + strandedDone().filter((t) => !seen.has(t.id)).length;
 }
 
 /** The task currently open in the detail view, if any. */
@@ -249,13 +273,15 @@ export function counts(): SurfaceCounts {
 }
 
 /**
- * Tasks finished today, from the archive. Undefined until the archive has been read, so the
- * footer can say what it knows instead of claiming zero before it has looked. A task's `updated`
- * stamp is when it was last written, and `ledge done` writes it on the way to the archive.
+ * Tasks finished today. Undefined until the archive has been read, so the footer can say what
+ * it knows instead of claiming zero before it has looked. A task's `updated` stamp is when it
+ * was last written, and `ledge done` writes it on the way to the archive. Counted from status
+ * rather than from the folder, for the same reason the Done list is: a task finished today
+ * whose file has not moved yet was still finished today.
  */
 export function doneToday(day: string = todayIso()): number | undefined {
   if (!desk.archiveReady) return undefined;
-  return desk.archive.filter((t) => t.updated.slice(0, 10) === day).length;
+  return doneTasks().filter((t) => t.updated.slice(0, 10) === day).length;
 }
 
 /**
@@ -606,11 +632,64 @@ export async function parkTask(task: Task, reason: string): Promise<void> {
   await saveTask({ ...task, status: 'backlog', parked: reason });
 }
 
-/** Marks a task done and moves its file to archive/. */
+/** The reason a task parked by the sideways gesture carries, since nobody was asked for one. */
+export const DRAGGED_TO_BACKLOG = 'Moved to the backlog from the panel';
+
+/**
+ * Moves a task into another list, which is the one thing the sideways drag and the grip's left
+ * and right arrows do. It routes to the three functions that already own each move rather than
+ * writing `status` itself, so a task dragged into Live is renumbered to the top exactly as
+ * `Start` puts it there, one dragged into the backlog gets a reason on it like every other
+ * parked task, and one dragged into Done is archived by the same code path as the button.
+ *
+ * Nothing here touches frontmatter directly: `status` is written through `saveTask`, which
+ * serializes the whole task, so the keys and sections Ledge does not model survive the move.
+ */
+export async function shiftStatus(task: Task, to: 'current' | 'backlog' | 'done'): Promise<void> {
+  if (task.status === to) return;
+  if (to === 'current') return startTask(task);
+  if (to === 'backlog') return parkTask(task, DRAGGED_TO_BACKLOG);
+  return markDone(task);
+}
+
+/**
+ * Marks a task done: writes `status: done`, then moves the file into `archive/`.
+ *
+ * The two steps are not one transaction and cannot be made into one, so the question is what
+ * happens when the second fails after the first has already landed. This keeps the status and
+ * says so, rather than rolling the status back:
+ *
+ * - The person's instruction was "this is finished". That is what the status records, and the
+ *   file on disk now says it too. Undoing it would mean writing the file a second time to
+ *   contradict what they asked for, and that write can fail in exactly the same way, which
+ *   leaves the same mess one step further from anybody's intention.
+ * - `doneTasks` reads status rather than the folder, so the task is in Done either way. The
+ *   move is an optimisation that can be retried; nothing about the work is lost by it waiting.
+ *
+ * What is never acceptable is the silence this replaces. The failure is put on the panel, with
+ * both paths and whatever the filesystem actually said, because the old code threw the one
+ * piece of evidence away and left nobody able to say why the file had not moved.
+ */
 export async function markDone(task: Task): Promise<void> {
   const saved = await saveTask({ ...task, status: 'done' });
-  await ensureDir(desk.archiveDir);
-  await moveFile(saved.file, join(desk.archiveDir, basename(saved.file)));
+  /* An empty archive folder means boot has not finished. `join` drops empty segments, so
+     going ahead would hand `rename` a bare filename with no folder in front of it. */
+  if (desk.archiveDir === '') {
+    desk.error = 'Marked done, but the archive folder is not known yet, so the file has not moved.';
+    report('error', desk.error);
+    return;
+  }
+  const to = join(desk.archiveDir, basename(saved.file));
+  try {
+    await ensureDir(desk.archiveDir);
+    await moveFile(saved.file, to);
+  } catch (e) {
+    desk.error =
+      `Marked done, but ${saved.file} could not be moved to ${to}: ${errorText(e)}. ` +
+      'It is in Done, and still in your tasks folder.';
+    report('error', desk.error);
+    return;
+  }
   forgetTask(saved.file);
   desk.archivedCount += 1;
   invalidateArchive();

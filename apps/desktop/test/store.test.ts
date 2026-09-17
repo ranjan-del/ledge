@@ -95,6 +95,9 @@ import {
   desk,
   doneCount,
   doneTasks,
+  doneToday,
+  invalidateArchive,
+  loadArchive,
   markDone,
   mergeConfig,
   removeTask,
@@ -102,6 +105,7 @@ import {
   select,
   setSurface,
   setView,
+  shiftStatus,
   shutdown,
   todayPlan,
   toggleChecklist,
@@ -117,6 +121,13 @@ function fire(paths: string[]) {
 
 async function settle() {
   await vi.advanceTimersByTimeAsync(WATCH_DEBOUNCE_MS);
+}
+
+/* The parsed archive is module state and `boot` does not clear it, so a test that cares what
+   is in the archive has to ask for it to be read again rather than trusting the last test. */
+async function readArchive(): Promise<void> {
+  invalidateArchive();
+  await loadArchive();
 }
 
 describe('store', () => {
@@ -480,5 +491,120 @@ describe('store', () => {
     setSurface('memory');
     expect(desk.view).toBe('done');
     expect(desk.selectedFile).toBeNull();
+  });
+
+  /*
+   * A task marked done disappeared in live use: the status write landed and the move into
+   * archive/ did not, so the file sat in tasks/ saying `status: done` while Current and Backlog
+   * filtered it out by status and Done only ever read the archive folder. It belonged to no
+   * list at all, and the owner had to be told where their work went.
+   *
+   * These hold the two halves of the fix together: the move can fail without anything becoming
+   * invisible, and the number on the Done button is the number of rows behind it.
+   */
+  it('keeps a task visible in Done when the move into the archive fails', async () => {
+    const task = currentTasks()[0];
+    (rename as unknown as { mockRejectedValueOnce: (v: unknown) => void }).mockRejectedValueOnce(
+      'Operation not permitted (os error 1)',
+    );
+    await markDone(task);
+    await readArchive();
+    /* The status landed, and the file is still where it was. */
+    expect(disk.files.get(TASK_A_FILE)).toContain('status: done');
+    expect(doneTasks().map((t) => t.id)).toContain('release-watch-banner');
+    /* And it is out of the lists it is no longer in. */
+    expect(currentTasks().map((t) => t.id)).not.toContain('release-watch-banner');
+    expect(backlogTasks().map((t) => t.id)).not.toContain('release-watch-banner');
+  });
+
+  it('says out loud that the file did not move, naming both paths and the reason', async () => {
+    (rename as unknown as { mockRejectedValueOnce: (v: unknown) => void }).mockRejectedValueOnce(
+      'Operation not permitted (os error 1)',
+    );
+    await markDone(currentTasks()[0]);
+    expect(desk.error).toContain(TASK_A_FILE);
+    expect(desk.error).toContain(`${LEDGE_HOME}/archive/`);
+    expect(desk.error).toContain('Operation not permitted');
+  });
+
+  it('shows a done task that is still in the tasks folder, whatever put it there', async () => {
+    /* A file somebody else marked done, or a move that failed in an earlier session. */
+    disk.files.set(TASK_B_FILE, TASK_B.replace('status: backlog', 'status: done'));
+    fire([TASK_B_FILE]);
+    await settle();
+    await readArchive();
+    expect(doneTasks().map((t) => t.id)).toContain('optimistic-crud');
+    expect(backlogTasks()).toHaveLength(0);
+  });
+
+  it('counts on the Done button exactly what the Done view lists', async () => {
+    await readArchive();
+    expect(doneCount()).toBe(doneTasks().length);
+    (rename as unknown as { mockRejectedValueOnce: (v: unknown) => void }).mockRejectedValueOnce(
+      'Operation not permitted (os error 1)',
+    );
+    await markDone(currentTasks()[0]);
+    expect(doneCount()).toBe(doneTasks().length);
+    /* And after one that works, still exactly. */
+    await markDone(backlogTasks()[0]);
+    await readArchive();
+    expect(doneCount()).toBe(doneTasks().length);
+  });
+
+  it('counts a task finished today whose file has not moved yet', async () => {
+    (rename as unknown as { mockRejectedValueOnce: (v: unknown) => void }).mockRejectedValueOnce(
+      'Operation not permitted (os error 1)',
+    );
+    await markDone(currentTasks()[0]);
+    await readArchive();
+    const today = new Date().toISOString().slice(0, 10);
+    expect(doneToday(today)).toBe(1);
+  });
+
+  it('counts an archived task once, not twice, while both copies are known', async () => {
+    await readArchive();
+    const before = doneCount();
+    await markDone(currentTasks()[0]);
+    await readArchive();
+    expect(doneCount()).toBe(before + 1);
+    expect(doneTasks().filter((t) => t.id === 'release-watch-banner')).toHaveLength(1);
+  });
+
+  /*
+   * The status move behind the sideways drag. It writes through the same three functions the
+   * buttons use rather than editing frontmatter, which is the whole reason it exists: a task
+   * moved by a gesture has to end up in exactly the state the button would have left it in.
+   */
+  it('parks a live task dragged into the backlog, with a reason on it', async () => {
+    await shiftStatus(currentTasks()[0], 'backlog');
+    const written = disk.files.get(TASK_A_FILE) as string;
+    expect(written).toContain('status: backlog');
+    expect(written).toContain('parked: Moved to the backlog from the panel');
+    /* Nothing else in the file moved: the unknown-free parts are all still there. */
+    expect(written).toContain('repo: ~/code/app');
+    expect(written).toContain('- [x] Design agreed: version.json polling, banner, idle reload');
+    expect(backlogTasks().map((t) => t.id)).toContain('release-watch-banner');
+  });
+
+  it('starts a parked task dragged into live at the top, and clears the reason', async () => {
+    await shiftStatus(backlogTasks()[0], 'current');
+    const written = disk.files.get(TASK_B_FILE) as string;
+    expect(written).toContain('status: current');
+    expect(written).not.toContain('parked:');
+    expect(currentTasks().map((t) => t.id)).toEqual(['optimistic-crud', 'release-watch-banner']);
+  });
+
+  it('archives a task dragged into done, the same as the button does', async () => {
+    await shiftStatus(currentTasks()[0], 'done');
+    const archived = `${LEDGE_HOME}/archive/2026-09-14-release-watch-banner.md`;
+    expect(rename).toHaveBeenCalledWith(TASK_A_FILE, archived);
+    expect(disk.files.get(archived)).toContain('status: done');
+    expect(desk.tasks.map((t) => t.id)).not.toContain('release-watch-banner');
+  });
+
+  it('writes nothing when the task is dropped on the list it is already in', async () => {
+    const before = disk.files.get(TASK_A_FILE);
+    await shiftStatus(currentTasks()[0], 'current');
+    expect(disk.files.get(TASK_A_FILE)).toBe(before);
   });
 });

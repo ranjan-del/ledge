@@ -28,6 +28,15 @@
    * made with the arrow keys. Both routes report the same "from index, to index" and leave the
    * writing of `order` to whoever owns the list.
    *
+   * A drag also goes sideways, and that means something else: left and right move the task to
+   * another list, which writes `status`. The two readings of one gesture are kept apart by
+   * lib/drag.svelte.ts, which will not call a drag horizontal until it has travelled a
+   * deliberate distance sideways and is clearly more sideways than vertical, and the card shows
+   * the destination on itself before the person lets go. Dropping into Done does not archive on
+   * release: it asks, in place, with the same control the Delete action uses, because archiving
+   * a file is a bigger act than a flick of the wrist. The grip's left and right arrows do the
+   * same move and ask the same question, so nothing here needs a pointer.
+   *
    * No claim here is invented. The state pill, CURRENT and NEXT are derived in lib/derive.ts,
    * the git chips come from the last scan, and the agent chip appears only for a task that
    * genuinely has Claude Code session ids recorded against it.
@@ -35,9 +44,24 @@
   import type { RepoStatus } from '@ledge/core/pure';
   import { progressOf, taskState, workLines } from '../lib/derive.ts';
   import { untrack } from 'svelte';
+  import {
+    ask,
+    askShift,
+    beginDrag,
+    clearAsk,
+    drag,
+    endDrag,
+    releaseDrag,
+    shiftAim,
+    shiftTargets,
+    trackDrag,
+    type ShiftTarget,
+  } from '../lib/drag.svelte.ts';
+  import type { ShiftTo } from '../lib/drag.svelte.ts';
   import { basename } from '../lib/paths.ts';
   import { lateLabel, relativeTime, todayIso } from '../lib/time.ts';
   import CardDetail from './CardDetail.svelte';
+  import ConfirmButton from './ConfirmButton.svelte';
   import GitChips from './GitChips.svelte';
   import Progress from './Progress.svelte';
 
@@ -60,6 +84,12 @@
      * draggable and gives it a grip; a list that has no order of its own passes nothing.
      */
     onmove?: (from: number, to: number) => void;
+    /**
+     * Moves this task into another list, writing `status` through the store. Its presence is
+     * what makes the sideways half of the gesture live and gives the grip its left and right
+     * arrows; a list whose tasks cannot change status passes nothing.
+     */
+    onshift?: (task: Task, to: ShiftTo) => void;
     /** Opens the full task view. */
     onselect: (task: Task) => void;
   }
@@ -73,6 +103,7 @@
     index = 0,
     total = 0,
     onmove,
+    onshift,
     onselect,
   }: Props = $props();
 
@@ -84,6 +115,10 @@
   let moreEl = $state<HTMLButtonElement | null>(null);
   let dragging = $state(false);
   let over = $state<'' | 'before' | 'after'>('');
+  /* Where the pointer was when the drag started, so the travel since can be measured. */
+  let origin = { x: 0, y: 0 };
+  /** Why the last sideways gesture went nowhere. Said on the card, cleared by the next drag. */
+  let refused = $state('');
 
   const pill = $derived(taskState(task, day));
   /* Only two states get a colour of their own, and both are chips ui.css already defines:
@@ -98,6 +133,23 @@
   const late = $derived(task.planned !== undefined ? lateLabel(task.planned, day) : '');
   const sessions = $derived(task.sessions.length);
   const movable = $derived(onmove !== undefined && total > 1);
+  /** This card can change list, which is the other half of what a drag can mean. */
+  const shiftable = $derived(onshift !== undefined);
+  const draggable = $derived(movable || shiftable);
+  /** What a release would do right now, while this card is the one being dragged sideways. */
+  const aim = $derived(
+    dragging && drag.axis === 'x' ? shiftAim(task.status, drag.direction) : undefined,
+  );
+  /** The move waiting on this card's answer, whether the drag or the view switch asked it. */
+  const asking = $derived(ask.file === task.file ? ask.to : null);
+  let askEl = $state<HTMLElement | null>(null);
+
+  /* A question asked at the bottom of a short list is a question nobody can read. The list is
+     what scrolls, so the question asks it to, once, when it appears. */
+  $effect(() => {
+    if (asking === null || !askEl) return;
+    askEl.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  });
 
   function sourceWord(source: 'checklist' | 'plan'): string {
     return source === 'checklist' ? 'checklist' : 'plan';
@@ -218,16 +270,42 @@
     items[to]?.focus();
   }
 
-  /* ---------------------------------------------------------------- reordering */
+  /* ---------------------------------------------------------------- dragging */
 
   function onDragStart(event: DragEvent) {
-    if (!movable) return;
+    if (!draggable) return;
     dragging = true;
+    refused = '';
+    clearAsk();
+    origin = { x: event.clientX, y: event.clientY };
+    beginDrag(task.file, index);
     event.dataTransfer?.setData('text/plain', String(index));
     if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
   }
 
+  /**
+   * Reads the gesture as it happens. Chromium sends a last `drag` at the origin with zeroed
+   * coordinates, which would read as a gesture that never left the start; ignoring it keeps the
+   * destination on screen right up to the release.
+   */
+  function onDrag(event: DragEvent) {
+    if (!dragging) return;
+    if (event.clientX === 0 && event.clientY === 0) return;
+    trackDrag(event.clientX - origin.x, event.clientY - origin.y);
+  }
+
   function onDragOver(event: DragEvent) {
+    /* A gesture that has turned sideways is not asking for a position in this list, so no card
+       offers itself as one. Taking the drop is still necessary: it is how the source learns the
+       person let go here rather than pressing Escape. Everything else is the reorder, unchanged
+       and not conditional on a session, so a drop arriving from outside this list still lands. */
+    if (drag.axis === 'x') {
+      over = '';
+      if (!shiftable) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      return;
+    }
     if (!movable || dragging) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
@@ -240,6 +318,13 @@
   }
 
   function onDrop(event: DragEvent) {
+    if (drag.axis === 'x') {
+      /* The card the pointer happens to be over is not the card being moved, so all this drop
+         does is say the gesture was released. The source acts on it in `dragend`. */
+      event.preventDefault();
+      releaseDrag();
+      return;
+    }
     if (!movable) return;
     event.preventDefault();
     const half = over;
@@ -254,13 +339,45 @@
     if (to !== from) onmove?.(from, to);
   }
 
+  /**
+   * The end of the gesture, and where a sideways one is acted on. It has to be here rather than
+   * in the drop, because the card being dropped on is not the card being moved. A release that
+   * no target took, which is what Escape and a release over the panel's own padding both look
+   * like, changes nothing.
+   */
   function onDragEnd() {
+    const sideways = dragging && drag.axis === 'x' && drag.released;
+    const target = sideways ? shiftAim(task.status, drag.direction) : undefined;
     dragging = false;
     over = '';
+    endDrag();
+    if (target) requestShift(target);
   }
 
-  /** The same move from the keyboard, since every other control on this panel is reachable. */
+  /** One route for both the drag and the arrow keys: go, or ask first, or say why not. */
+  function requestShift(target: ShiftTarget) {
+    refused = '';
+    clearAsk();
+    if (target.to === undefined) {
+      refused = target.refuse ?? 'There is nowhere to move this.';
+      return;
+    }
+    if (target.confirm) {
+      askShift(task.file, target.to);
+      return;
+    }
+    onshift?.(task, target.to);
+  }
+
+  /** The same moves from the keyboard, since every other control on this panel is reachable. */
   function onGripKeydown(event: KeyboardEvent) {
+    if (shiftable && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      event.preventDefault();
+      event.stopPropagation();
+      const targets = shiftTargets(task.status);
+      requestShift(event.key === 'ArrowLeft' ? targets.left : targets.right);
+      return;
+    }
     if (!movable) return;
     let to = index;
     if (event.key === 'ArrowUp') to = index - 1;
@@ -273,6 +390,20 @@
     if (to === index || to < 0 || to > total - 1) return;
     onmove?.(index, to);
   }
+
+  /** What the grip's tooltip and name can honestly promise, which depends on the list. */
+  const gripHint = $derived(
+    movable && shiftable
+      ? 'Drag up or down to reorder, left or right to move it to another list, or use the arrow keys'
+      : movable
+        ? 'Drag to reorder, or use the arrow keys'
+        : 'Drag left or right to move it to another list, or use the arrow keys',
+  );
+  const gripName = $derived(
+    movable
+      ? `Reorder ${task.title}, ${index + 1} of ${total}`
+      : `Move ${task.title} to another list`,
+  );
 </script>
 
 <!--
@@ -285,9 +416,11 @@
   class:dragging
   class:over-before={over === 'before'}
   class:over-after={over === 'after'}
-  draggable={movable}
+  class:shifting={aim !== undefined}
+  draggable={draggable}
   role={movable ? 'listitem' : undefined}
   ondragstart={onDragStart}
+  ondrag={onDrag}
   ondragover={onDragOver}
   ondragleave={onDragLeave}
   ondrop={onDrop}
@@ -296,12 +429,12 @@
 <article class="card task" class:late={late !== ''} data-id={task.id}>
   <div class="face">
   <div class="top">
-    {#if movable}
+    {#if draggable}
       <button
         type="button"
         class="grip motion"
-        aria-label="Reorder {task.title}, {index + 1} of {total}"
-        title="Drag to reorder, or use the arrow keys"
+        aria-label={gripName}
+        title={gripHint}
         onkeydown={onGripKeydown}
       >
         <svg width="8" height="12" viewBox="0 0 8 12" aria-hidden="true">
@@ -341,6 +474,45 @@
       </button>
     {/if}
   </div>
+
+  <!--
+    What the gesture is about to do, said on the card before the person lets go. A destination
+    that has nowhere to write it says so here as well, in the same place, so a refusal reads as
+    an answer to the gesture rather than as nothing happening.
+  -->
+  {#if aim}
+    <p class="shift-aim" class:no={aim.to === undefined} aria-live="polite">
+      {#if aim.to === undefined}
+        {aim.refuse}
+      {:else}
+        {drag.direction === -1 ? '←' : '→'} {aim.label}
+      {/if}
+    </p>
+  {:else if refused}
+    <p class="shift-aim no" role="alert">{refused}</p>
+  {/if}
+
+  <!--
+    A drop into Done asks rather than archives. The gesture was the first press; this is the
+    second, in the same control the Delete action uses and in the row it was asked about.
+  -->
+  {#if asking !== null}
+    <div class="shift-ask" bind:this={askEl}>
+      <ConfirmButton
+        armed
+        label="Mark done"
+        question="Mark done and archive the file?"
+        confirmLabel="Mark done"
+        groupLabel={`Confirm marking ${task.title} done`}
+        onconfirm={() => {
+          const to = asking;
+          clearAsk();
+          if (to) onshift?.(task, to);
+        }}
+        oncancel={clearAsk}
+      />
+    </div>
+  {/if}
 
   {#if repoName || status || late !== ''}
     <div class="meta">
@@ -460,6 +632,39 @@
   }
   .slot.over-after::after {
     bottom: -5px;
+  }
+  /* A sideways drag is a different act from a reorder, so it does not look like one: the card
+     stays legible rather than fading, and the accent outlines the whole of it. The person is
+     choosing a list, not a slot, so there is no edge for the marker to sit on. */
+  .slot.shifting {
+    opacity: 1;
+  }
+  .slot.shifting .task {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  /* The destination, or the reason there is not one. It sits inside the card because that is
+     what the gesture is about, and it is a line of words rather than an arrow alone because
+     "Done" and "nothing can go here" are not the same news. */
+  .shift-aim {
+    margin: 0;
+    padding: 0 var(--space-3) var(--space-1);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    color: var(--accent);
+    overflow-wrap: anywhere;
+  }
+  .shift-aim.no {
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--danger);
+  }
+  .shift-ask {
+    padding: 0 var(--space-3) var(--space-2);
   }
 
   .task {

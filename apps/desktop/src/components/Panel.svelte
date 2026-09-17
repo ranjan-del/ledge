@@ -64,6 +64,7 @@
     saveConfigFile,
     saveMarkdown,
     scanNow,
+    shiftStatus,
     select,
     selectedTask,
     setPanelVisible,
@@ -179,6 +180,26 @@
    * the move displaced, in one pass. The list the person is looking at is the list that is
    * renumbered, so what they dragged and what is written are the same thing.
    */
+  /**
+   * Marks a task done. `markDone` reports a failed move itself, because a task whose status
+   * landed is still finished; this catches the writes before that, so no part of finishing a
+   * task can fail without the person being told. A `void` with no catch here is what turned a
+   * failed archive move into an unhandled rejection and a task nobody could find.
+   */
+  function finish(task: CoreTask) {
+    void markDone(task).catch((e: unknown) => (desk.error = errorText(e)));
+  }
+
+  /**
+   * Moves a task into another list, which is what a sideways drag and the grip's left and right
+   * arrows both ask for. The store owns what each destination means: Live renumbers to the top
+   * the way Start does, the backlog gets a reason on the task, and Done archives the file. The
+   * card has already asked the person about Done by the time this is called.
+   */
+  function shift(task: CoreTask, to: 'current' | 'backlog' | 'done') {
+    void shiftStatus(task, to).catch((e: unknown) => (desk.error = errorText(e)));
+  }
+
   function moveCurrent(from: number, to: number) {
     const files = currentTasks().map((t) => t.file);
     const [moved] = files.splice(from, 1);
@@ -203,7 +224,7 @@
     } else {
       actions.push({ label: 'Park', run: (t) => void parkTask(t, 'Parked from the panel') });
     }
-    actions.push({ label: 'Mark done', run: (t) => void markDone(t) });
+    actions.push({ label: 'Mark done', run: (t) => finish(t) });
     return actions;
   }
 
@@ -354,7 +375,13 @@
         config={desk.config}
         onback={() => (showSettings = false)}
         onsave={(c) => {
-          void saveConfigFile(c);
+          /* Changing which folders are scanned used to do nothing visible until the interval
+             timer next fired, which on a five minute interval reads as a setting that was not
+             saved. The one control whose effect is a list on another surface gets a scan. */
+          const rescan = c.roots.join('\n') !== desk.config.roots.join('\n');
+          void saveConfigFile(c)
+            .then(() => (rescan ? scanNow() : undefined))
+            .catch((e: unknown) => (desk.error = errorText(e)));
           showSettings = false;
         }}
       />
@@ -372,7 +399,7 @@
           select(null);
         }}
         ondone={(t) => {
-          void markDone(t);
+          finish(t);
           select(null);
         }}
         onresume={resume}
@@ -448,6 +475,7 @@
         onselect={(t) => select(t.file)}
         onadd={addTask}
         onreorder={moveCurrent}
+        onshift={shift}
       />
     {:else}
       <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />
@@ -486,13 +514,15 @@
     <span>
       {#if desk.surface === 'now'}
         {@const today = doneToday()}
-        {today === undefined ? `${desk.archivedCount} done and archived` : `${today} done today`}
+        <!-- "Finished", not "archived": the count is of tasks whose status is done, and one of
+             them may still be waiting for its file to be moved. -->
+        {today === undefined ? `${doneCount()} finished` : `${today} done today`}
       {:else if desk.surface === 'sessions'}
         {count.sessions} linked {count.sessions === 1 ? 'session' : 'sessions'}
       {:else if desk.surface === 'memory'}
         {count.memory} {count.memory === 1 ? 'note' : 'notes'}
       {:else}
-        {desk.archivedCount} done and archived
+        {doneCount()} finished
       {/if}
     </span>
     {#if desk.scanning}
