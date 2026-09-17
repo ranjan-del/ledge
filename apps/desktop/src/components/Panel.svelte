@@ -36,7 +36,6 @@
     unread,
   } from '../lib/news.svelte.ts';
   import type { Notification } from '../lib/observed.ts';
-  import { writeText } from '../lib/io.ts';
   import { PANEL_MS, reducedMotion } from '../lib/motion.svelte.ts';
   import type { PaletteCommand } from '../lib/palette.ts';
   import {
@@ -63,6 +62,7 @@
     removeTask,
     reorderTasks,
     saveConfigFile,
+    saveMarkdown,
     scanNow,
     select,
     selectedTask,
@@ -366,7 +366,7 @@
         status={statusForRepo(selected.repo)}
         home={desk.home}
         onback={() => select(null)}
-        onsave={(file, markdown) => void writeText(file, markdown)}
+        onsave={saveMarkdown}
         onpark={(t, reason) => {
           void parkTask(t, reason);
           select(null);

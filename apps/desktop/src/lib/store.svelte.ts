@@ -477,6 +477,25 @@ export async function saveTask(task: Task): Promise<Task> {
   return next;
 }
 
+/**
+ * Writes Markdown a view has already serialized, and parses the same text straight back onto
+ * the desk. The task detail edits one field at a time and hands over the whole file it wants
+ * on disk; this is the one door that text goes through, so the panel shows an edit the moment
+ * it lands rather than when the watcher gets round to it, and a rejected write reaches the
+ * caller instead of vanishing into a floating promise.
+ *
+ * The write comes first on purpose: a file that could not be saved must never leave a changed
+ * task sitting on the desk claiming otherwise.
+ */
+export async function saveMarkdown(file: string, markdown: string): Promise<void> {
+  await writeText(file, markdown);
+  try {
+    upsertTask(parseTask(markdown, file, { home: desk.home }));
+  } catch (e) {
+    markBroken(file, e);
+  }
+}
+
 /** Flips one checklist item and writes the file. */
 export async function toggleChecklist(task: Task, index: number, done: boolean): Promise<void> {
   const checklist = task.checklist.map((item, i) => (i === index ? { ...item, done } : item));

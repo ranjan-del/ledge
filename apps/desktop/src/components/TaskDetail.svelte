@@ -8,32 +8,57 @@
    * quoted from the scan or from the frontmatter; a row whose source is silent is left out
    * rather than filled in.
    *
-   * Under the facts sit the three bodies of text, each behind its own disclosure and all of
-   * them closed: Requirement, what has to be true; Plan, what was decided about it; Today's
-   * work, the note written today. They are closed because the owner reads them when the owner
-   * wants to, and because the thing this view is opened for is the checklist under them.
+   * Under the facts sit the bodies of text, each behind its own disclosure and all of them
+   * closed: Requirement, what has to be true; Plan, what was decided about it; Today's work,
+   * the note written today; References, the raw material pasted in while the work happens.
+   * They are closed because the owner reads them when the owner wants to, and because the
+   * thing this view is opened for is the checklist under them.
    *
    * The checklist is grouped into remaining and done with a count on each, and shows the next
    * three outstanding items with the rest one press away, so a task with thirty open items is
-   * still a screen you can use. Ticking an item serializes the whole task with that item
-   * flipped and hands the Markdown to `onsave(file, markdown)`; the store writes it and the
-   * watcher confirms; the item strikes through and settles so the change is felt rather than
-   * merely reported. `home` is what a `~` in `repo` stands for, so the file keeps the short
-   * form it was written with.
+   * still a screen you can use.
    *
-   * Actions: Resume or Open in Claude, Park, Mark done, Open folder, and Delete. Delete is the
-   * only one that cannot be undone, so it asks in place: the button becomes the question and
-   * two answers, and nothing is destroyed until the second press. There is no `confirm()`
-   * dialog, because a native modal on a panel that hides when it loses focus is a trap.
+   * EDITING. Every one of those is editable here, because the alternative was opening the
+   * Markdown file in another program to fix a word. The title, the requirement, each plan step,
+   * each checklist item, today's note and the references can all be changed in place, and
+   * steps and items can be added, removed and, for the plan, reordered. Four rules hold
+   * throughout:
+   *
+   * - One write, one changed field. Every save is `{ ...task, <the one field> }` handed to
+   *   `serializeTask`, so the frontmatter keys Ledge does not model, the sections it does not
+   *   parse and every other section of the file are written back exactly as they were read. A
+   *   value that has not actually changed is not written at all.
+   * - An edit in progress survives a file watcher event. The store re-reads the file when the
+   *   watcher fires and hands this component a new `task`; what is being typed lives inside the
+   *   open `FieldEdit`, seeded once when the editor opened and never re-derived from the task,
+   *   so a re-render cannot overwrite it. The editor is never keyed on task content, which is
+   *   the other half of the same guarantee.
+   * - Nothing destructive happens without a second press. Removing a plan step or a checklist
+   *   item asks in place, the same way Delete does, and for the same reason: a native
+   *   `confirm()` on a panel that hides when it loses focus is a trap.
+   * - A refused write is said out loud, where it happened, with the typed text still in the
+   *   field. Nothing typed is ever discarded to report a failure.
+   *
+   * Ticking an item serializes the whole task with that item flipped and hands the Markdown to
+   * `onsave(file, markdown)`; the store writes it and the watcher confirms; the item strikes
+   * through and settles so the change is felt rather than merely reported. `home` is what a `~`
+   * in `repo` stands for, so the file keeps the short form it was written with.
+   *
+   * Actions: Resume or Open in Claude, Park, Mark done, Open folder, and Delete.
    */
-  import { serializeTask, type RepoStatus, type Task } from '@ledge/core/pure';
+  import { appendNote, serializeTask, setPlan, type RepoStatus, type Task } from '@ledge/core/pure';
   import { reducedMotion } from '../lib/motion.svelte.ts';
   import { paragraphs } from '../lib/prose.ts';
+  import { appendReference, referencesOf, restOf, withReferences } from '../lib/references.ts';
   import { dayLabel, daysBetween, lateLabel, relativeTime, todayIso } from '../lib/time.ts';
+  import ConfirmButton from './ConfirmButton.svelte';
+  import FieldEdit from './FieldEdit.svelte';
   import Progress from './Progress.svelte';
 
   /** Outstanding items shown before the rest are folded behind one line. */
   const OPEN_SHOWN = 3;
+  /** Lines of pasted references shown before the rest are folded behind one line. */
+  const REF_LINES = 12;
 
   interface Props {
     task: Task;
@@ -43,7 +68,11 @@
     /** Today as YYYY-MM-DD. A prop so this is testable without touching the clock. */
     day?: string;
     onback: () => void;
-    onsave: (file: string, markdown: string) => void;
+    /**
+     * Writes the task file. May return a promise, and may reject: a rejection is shown in
+     * place and the editor that caused it stays open with what was typed still in it.
+     */
+    onsave: (file: string, markdown: string) => void | Promise<void>;
     onpark?: (task: Task, reason: string) => void;
     ondone?: (task: Task) => void;
     onresume?: (task: Task, resume: boolean) => void;
@@ -66,13 +95,42 @@
     ondelete,
   }: Props = $props();
 
+  /** Which single piece of text is open for editing. At most one at a time, deliberately. */
+  type Editing =
+    | { kind: 'title' }
+    | { kind: 'requirement' }
+    | { kind: 'note' }
+    | { kind: 'note-edit' }
+    | { kind: 'step'; index: number }
+    | { kind: 'new-step' }
+    | { kind: 'item'; index: number }
+    | { kind: 'new-item' }
+    | { kind: 'references' }
+    | { kind: 'new-reference' };
+
   let parking = $state(false);
   let reason = $state('');
-  let confirmingDelete = $state(false);
   /* Every body of text starts closed. The owner's rule for this view: if I want I will read it. */
-  let open = $state({ requirement: false, plan: false, today: false, earlier: false });
+  let open = $state({
+    requirement: false,
+    plan: false,
+    today: false,
+    references: false,
+    earlier: false,
+  });
   /* The rest of the outstanding items, once they have been asked for. */
   let allItems = $state(false);
+  /* The rest of the pasted references, once they have been asked for. */
+  let allRefs = $state(false);
+  let editing = $state<Editing | null>(null);
+  /** Why the open editor's last attempt was refused. Shown inside that editor. */
+  let editError = $state<string | null>(null);
+  /** Why a write with no editor open was refused, and which block it belonged to. */
+  let saveError = $state<{ where: string; text: string } | null>(null);
+  /* Bumped after a successful add, so the next add starts from an empty field rather than
+     from the text just saved. Nothing else re-creates an editor, which is what keeps a draft
+     safe from the watcher. */
+  let addKey = $state(0);
   /* The index the person just clicked, so the strike-through animation plays exactly once,
      where they clicked it, and never again when the file comes back from the watcher. */
   let ticked = $state<number | null>(null);
@@ -94,8 +152,15 @@
   const todayNote = $derived(task.notes.find((n) => n.date === day));
   /** Every other dated note, newest first. On screen the newest is the one you need first. */
   const earlier = $derived([...task.notes].reverse().filter((n) => n.date !== day));
-  /* Whatever the file holds that is not a section Ledge knows about, kept and shown. */
-  const rest = $derived(task.extra);
+  /** The pasted raw material, exactly as it sits in the file. */
+  const references = $derived(referencesOf(task));
+  const refLines = $derived(references === '' ? [] : references.split('\n'));
+  const shownRefs = $derived(
+    allRefs ? references : refLines.slice(0, REF_LINES).join('\n'),
+  );
+  const moreRefLines = $derived(Math.max(0, refLines.length - REF_LINES));
+  /* Whatever the file holds that is not a section Ledge knows about, the references aside. */
+  const rest = $derived(restOf(task));
   const behind = $derived(task.planned ? daysBetween(task.planned, day) : undefined);
 
   /**
@@ -111,6 +176,51 @@
     return `out of step with ${status.upstream}`;
   });
 
+  /**
+   * Turns anything thrown into readable text. The filesystem plugin rejects with a plain
+   * string rather than an Error, so reading `.message` blindly renders "undefined" and hides
+   * the only clue about what actually failed.
+   */
+  function message(e: unknown): string {
+    if (e instanceof Error && e.message) return e.message;
+    if (typeof e === 'string' && e !== '') return e;
+    if (e && typeof e === 'object') {
+      const m = (e as { message?: unknown }).message;
+      if (typeof m === 'string' && m !== '') return m;
+    }
+    return String(e);
+  }
+
+  function startEdit(next: Editing) {
+    editing = next;
+    editError = null;
+    saveError = null;
+  }
+
+  function stopEdit() {
+    editing = null;
+    editError = null;
+  }
+
+  /**
+   * Serializes one changed task and hands it to the store. True when it landed. A refusal is
+   * reported where it happened: inside the open editor, or against `where` when the write came
+   * from a button rather than a field.
+   */
+  async function write(next: Task, where: string | null = null): Promise<boolean> {
+    editError = null;
+    saveError = null;
+    try {
+      await onsave(task.file, serializeTask(next, { home }));
+      return true;
+    } catch (e) {
+      const text = `Could not save: ${message(e)}`;
+      if (where === null) editError = text;
+      else saveError = { where, text };
+      return false;
+    }
+  }
+
   function toggle(index: number, done: boolean) {
     if (done && !reducedMotion()) {
       ticked = index;
@@ -121,15 +231,182 @@
       }, 320);
     }
     const checklist = task.checklist.map((item, i) => (i === index ? { ...item, done } : item));
-    onsave(task.file, serializeTask({ ...task, checklist }, { home }));
+    void write({ ...task, checklist }, 'checklist');
   }
 
-  /** Cancels the delete question from the keyboard, so Escape always means "no". */
-  function onConfirmKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    confirmingDelete = false;
+  /* ---------------------------------------------------------------- title */
+
+  async function commitTitle(text: string) {
+    const title = text.trim();
+    if (title === '') {
+      editError = 'A task needs a title, so this one was not saved.';
+      return;
+    }
+    if (title === task.title) {
+      stopEdit();
+      return;
+    }
+    if (await write({ ...task, title })) stopEdit();
+  }
+
+  /* ---------------------------------------------------------------- requirement */
+
+  async function commitRequirement(text: string) {
+    const requirement = text.trim();
+    if (requirement === task.requirement) {
+      stopEdit();
+      return;
+    }
+    if (await write({ ...task, requirement })) stopEdit();
+  }
+
+  /* ---------------------------------------------------------------- plan */
+
+  async function commitStep(index: number, text: string) {
+    const step = text.trim();
+    if (step === '') {
+      editError = 'A step needs some words. Remove it instead.';
+      return;
+    }
+    if (step === task.plan[index]) {
+      stopEdit();
+      return;
+    }
+    const steps = task.plan.map((s, i) => (i === index ? step : s));
+    if (await write(setPlan(task, steps))) stopEdit();
+  }
+
+  async function commitNewStep(text: string) {
+    const step = text.trim();
+    if (step === '') {
+      stopEdit();
+      return;
+    }
+    if (await write(setPlan(task, [...task.plan, step]))) {
+      addKey += 1;
+      stopEdit();
+    }
+  }
+
+  function removeStep(index: number) {
+    void write(
+      setPlan(
+        task,
+        task.plan.filter((_, i) => i !== index),
+      ),
+      'plan',
+    );
+  }
+
+  /** Moves one step by one place. The bounds are checked here so the buttons can be simple. */
+  function moveStep(index: number, delta: number) {
+    const to = index + delta;
+    if (to < 0 || to >= task.plan.length) return;
+    const steps = [...task.plan];
+    const [moved] = steps.splice(index, 1);
+    if (moved === undefined) return;
+    steps.splice(to, 0, moved);
+    void write(setPlan(task, steps), 'plan');
+  }
+
+  /* ---------------------------------------------------------------- checklist */
+
+  async function commitItem(index: number, text: string) {
+    const next = text.trim();
+    if (next === '') {
+      editError = 'An item needs some words. Remove it instead.';
+      return;
+    }
+    if (next === task.checklist[index]?.text) {
+      stopEdit();
+      return;
+    }
+    const checklist = task.checklist.map((item, i) =>
+      i === index ? { ...item, text: next } : item,
+    );
+    if (await write({ ...task, checklist })) stopEdit();
+  }
+
+  async function commitNewItem(text: string) {
+    const next = text.trim();
+    if (next === '') {
+      stopEdit();
+      return;
+    }
+    const checklist = [...task.checklist, { text: next, done: false }];
+    if (await write({ ...task, checklist })) {
+      addKey += 1;
+      stopEdit();
+    }
+  }
+
+  function removeItem(index: number) {
+    void write(
+      { ...task, checklist: task.checklist.filter((_, i) => i !== index) },
+      'checklist',
+    );
+  }
+
+  /* ---------------------------------------------------------------- today's note */
+
+  async function commitNote(text: string) {
+    const body = text.trim();
+    if (body === '') {
+      stopEdit();
+      return;
+    }
+    /* `appendNote` is what keeps the dated structure the file format defines: it finds today's
+       subsection or makes one at the end, and copies every other entry through untouched. */
+    if (await write(appendNote(task, body, day))) {
+      addKey += 1;
+      stopEdit();
+    }
+  }
+
+  /**
+   * Rewrites today's entry and only today's. Every other dated note is copied through by
+   * identity, so correcting a word written this morning cannot reach last week's reasoning.
+   */
+  async function commitNoteEdit(text: string) {
+    const body = text.trim();
+    if (body === (todayNote?.body ?? '')) {
+      stopEdit();
+      return;
+    }
+    const notes = task.notes
+      .map((note) => (note.date === day ? { ...note, body } : note))
+      .filter((note) => note.body.trim() !== '');
+    if (await write({ ...task, notes })) stopEdit();
+  }
+
+  /* ---------------------------------------------------------------- references */
+
+  async function commitReference(text: string) {
+    if (text.trim() === '') {
+      stopEdit();
+      return;
+    }
+    /* Appended exactly as pasted: no trimming of what is inside it, no reformatting. */
+    if (await write(appendReference(task, text))) {
+      addKey += 1;
+      stopEdit();
+    }
+  }
+
+  async function commitReferences(text: string) {
+    if (text === references) {
+      stopEdit();
+      return;
+    }
+    if (await write(withReferences(task, text))) stopEdit();
+  }
+
+  /* ---------------------------------------------------------------- chrome */
+
+  /** Opens a fold and starts the editor that belongs to it, in one press. */
+  function openAndEdit(fold: keyof typeof open, next: Editing) {
+    open[fold] = true;
+    startEdit(next);
   }
 
   function submitPark() {
@@ -141,6 +418,7 @@
 </script>
 
 <section class="detail" aria-labelledby="detail-title">
+  <span id="edit-hint" class="visually-hidden">Press to edit this text</span>
   <button type="button" class="back" onclick={onback}>
     <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
       <path d="M8 1 3 6l5 5" fill="none" stroke="currentColor" stroke-width="1.6"
@@ -150,7 +428,30 @@
   </button>
 
   <header>
-    <h2 id="detail-title" class="title selectable">{task.title}</h2>
+    {#if editing?.kind === 'title'}
+      <!-- The heading stays in the tree while the field replaces it on screen: it is what
+           names this whole region, and a region that loses its name mid-edit is worse than
+           one whose name is briefly invisible. -->
+      <h2 id="detail-title" class="title visually-hidden">{task.title}</h2>
+      <FieldEdit
+        value={task.title}
+        label="Task title"
+        saveLabel="Rename"
+        hint="Enter saves, Escape cancels"
+        error={editError}
+        oncommit={commitTitle}
+        oncancel={stopEdit}
+      />
+    {:else}
+      <h2 id="detail-title" class="title">
+        <button
+          type="button"
+          class="title-edit motion"
+          aria-describedby="edit-hint"
+          onclick={() => startEdit({ kind: 'title' })}
+        >{task.title}</button>
+      </h2>
+    {/if}
     <div class="meta">
       <span class="chip neutral">{task.status}</span>
       {#if task.planned && behind !== undefined && behind > 0}
@@ -161,6 +462,9 @@
     </div>
     {#if task.parked}
       <p class="quiet parked">Parked: {task.parked}</p>
+    {/if}
+    {#if saveError?.where === 'top'}
+      <p class="edit-error" role="alert">{saveError.text}</p>
     {/if}
   </header>
 
@@ -226,7 +530,7 @@
 
   <div class="folds">
     <section class="fold">
-      <h3>
+      <h3 class="fold-row">
         <button
           type="button"
           class="fold-head motion"
@@ -241,9 +545,29 @@
           </svg>
           Requirement
         </button>
+        <button
+          type="button"
+          class="fold-tool motion"
+          aria-label="Edit the requirement"
+          onclick={() => openAndEdit('requirement', { kind: 'requirement' })}
+        >
+          Edit
+        </button>
       </h3>
       <div class="fold-body" id="fold-requirement" hidden={!open.requirement}>
-        {#if task.requirement}
+        {#if editing?.kind === 'requirement'}
+          <FieldEdit
+            value={task.requirement}
+            label="Requirement"
+            placeholder="What has to be true when this is finished?"
+            multiline
+            rows={6}
+            hint="Leaving the field saves it"
+            error={editError}
+            oncommit={commitRequirement}
+            oncancel={stopEdit}
+          />
+        {:else if task.requirement}
           {#each paragraphs(task.requirement) as para, i (i)}
             <p class="prose selectable">{para}</p>
           {/each}
@@ -254,7 +578,7 @@
     </section>
 
     <section class="fold">
-      <h3>
+      <h3 class="fold-row">
         <button
           type="button"
           class="fold-head motion"
@@ -269,22 +593,94 @@
           Plan
           {#if task.plan.length > 0}<span class="count">{task.plan.length} steps</span>{/if}
         </button>
+        <button
+          type="button"
+          class="fold-tool motion"
+          aria-label="Add a plan step"
+          onclick={() => openAndEdit('plan', { kind: 'new-step' })}
+        >
+          Add
+        </button>
       </h3>
       <div class="fold-body" id="fold-plan" hidden={!open.plan}>
         {#if task.plan.length > 0}
           <ol class="plan-list selectable">
             {#each task.plan as step, i (i)}
-              <li>{step}</li>
+              <li>{#if editing?.kind === 'step' && editing.index === i}<FieldEdit
+                    value={step}
+                    label={`Plan step ${i + 1}`}
+                    multiline
+                    rows={2}
+                    error={editError}
+                    oncommit={(text) => commitStep(i, text)}
+                    oncancel={stopEdit}
+                  />{:else}<button
+                    type="button"
+                    class="line-edit"
+                    aria-describedby="edit-hint"
+                    onclick={() => startEdit({ kind: 'step', index: i })}
+                  >{step}</button><span class="tools"><button
+                      type="button"
+                      class="drop tool motion"
+                      aria-label={`Move step ${i + 1} up`}
+                      disabled={i === 0}
+                      onclick={() => moveStep(i, -1)}
+                    ><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="M2.5 7.5 6 4l3.5 3.5" fill="none" stroke="currentColor"
+                          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg></button><button
+                      type="button"
+                      class="drop tool motion"
+                      aria-label={`Move step ${i + 1} down`}
+                      disabled={i === task.plan.length - 1}
+                      onclick={() => moveStep(i, 1)}
+                    ><svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                        <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor"
+                          stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                      </svg></button><ConfirmButton
+                      icon
+                      label={`Remove step ${i + 1}`}
+                      question="Remove this step?"
+                      confirmLabel="Remove"
+                      groupLabel={`Confirm removing step ${i + 1}`}
+                      onconfirm={() => removeStep(i)}
+                    /></span>{/if}</li>
             {/each}
           </ol>
-        {:else}
+        {:else if editing?.kind !== 'new-step'}
           <p class="quiet faint">No plan written.</p>
+        {/if}
+        {#if saveError?.where === 'plan'}
+          <p class="edit-error" role="alert">{saveError.text}</p>
+        {/if}
+        {#if editing?.kind === 'new-step'}
+          {#key addKey}
+            <FieldEdit
+              value=""
+              label="New plan step"
+              placeholder="What happens next?"
+              multiline
+              rows={2}
+              saveLabel="Add step"
+              error={editError}
+              oncommit={commitNewStep}
+              oncancel={stopEdit}
+            />
+          {/key}
+        {:else}
+          <button
+            type="button"
+            class="add-line motion"
+            onclick={() => startEdit({ kind: 'new-step' })}
+          >
+            Add a step
+          </button>
         {/if}
       </div>
     </section>
 
     <section class="fold">
-      <h3>
+      <h3 class="fold-row">
         <button
           type="button"
           class="fold-head motion"
@@ -298,21 +694,163 @@
           </svg>
           Today's work
         </button>
+        <button
+          type="button"
+          class="fold-tool motion"
+          aria-label="Add to today's note"
+          onclick={() => openAndEdit('today', { kind: 'note' })}
+        >
+          Add
+        </button>
       </h3>
       <div class="fold-body" id="fold-today" hidden={!open.today}>
-        {#if todayNote}
+        {#if editing?.kind === 'note-edit'}
+          <FieldEdit
+            value={todayNote?.body ?? ''}
+            label="Today's note"
+            multiline
+            rows={6}
+            error={editError}
+            oncommit={commitNoteEdit}
+            oncancel={stopEdit}
+          />
+        {:else if todayNote}
           {#each paragraphs(todayNote.body) as para, i (i)}
             <p class="note-text selectable">{para}</p>
           {/each}
-        {:else}
+          {#if editing?.kind !== 'note'}
+            <button
+              type="button"
+              class="add-line motion"
+              onclick={() => startEdit({ kind: 'note-edit' })}
+            >
+              Edit today's note
+            </button>
+          {/if}
+        {:else if editing?.kind !== 'note'}
           <p class="quiet faint">No note written today.</p>
+        {/if}
+        {#if saveError?.where === 'today'}
+          <p class="edit-error" role="alert">{saveError.text}</p>
+        {/if}
+        {#if editing?.kind === 'note'}
+          {#key addKey}
+            <FieldEdit
+              value=""
+              label="New note for today"
+              placeholder="What happened, and what was decided?"
+              multiline
+              rows={5}
+              saveLabel="Add to today"
+              error={editError}
+              oncommit={commitNote}
+              oncancel={stopEdit}
+            />
+          {/key}
+        {:else if !todayNote}
+          <button
+            type="button"
+            class="add-line motion"
+            onclick={() => startEdit({ kind: 'note' })}
+          >
+            Write today's note
+          </button>
+        {/if}
+      </div>
+    </section>
+
+    <!--
+      References: the raw material of the work. A message somebody sent, a link, an error, a
+      snippet. It is shown exactly as it was pasted, never interpreted as Markdown, because the
+      things people paste here are the things Markdown would eat: hashes, backticks, brackets.
+      Adding another is the easy path; rewriting the whole block is the deliberate one.
+    -->
+    <section class="fold">
+      <h3 class="fold-row">
+        <button
+          type="button"
+          class="fold-head motion"
+          aria-expanded={open.references}
+          aria-controls="fold-references"
+          onclick={() => (open.references = !open.references)}
+        >
+          <svg width="9" height="9" viewBox="0 0 10 10" class:turn={open.references}
+            aria-hidden="true">
+            <path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          References
+          {#if refLines.length > 0}<span class="count">{refLines.length} lines</span>{/if}
+        </button>
+        <button
+          type="button"
+          class="fold-tool motion"
+          aria-label="Add a reference"
+          onclick={() => openAndEdit('references', { kind: 'new-reference' })}
+        >
+          Add
+        </button>
+      </h3>
+      <div class="fold-body" id="fold-references" hidden={!open.references}>
+        {#if editing?.kind === 'references'}
+          <FieldEdit
+            value={references}
+            label="All references"
+            multiline
+            rows={10}
+            error={editError}
+            oncommit={commitReferences}
+            oncancel={stopEdit}
+          />
+        {:else if references}
+          <pre class="ref-text selectable">{shownRefs}</pre>
+          {#if moreRefLines > 0}
+            <button type="button" class="more-items motion" onclick={() => (allRefs = !allRefs)}>
+              {allRefs ? 'Show the first twelve lines only' : `and ${moreRefLines} more lines`}
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="add-line motion"
+            onclick={() => startEdit({ kind: 'references' })}
+          >
+            Edit all references
+          </button>
+        {:else if editing?.kind !== 'new-reference'}
+          <p class="quiet faint">Nothing pasted here yet.</p>
+        {/if}
+        {#if saveError?.where === 'references'}
+          <p class="edit-error" role="alert">{saveError.text}</p>
+        {/if}
+        {#if editing?.kind === 'new-reference'}
+          {#key addKey}
+            <FieldEdit
+              value=""
+              label="New reference"
+              placeholder="Paste a message, a link, an error, a snippet"
+              multiline
+              rows={6}
+              saveLabel="Add reference"
+              error={editError}
+              oncommit={commitReference}
+              oncancel={stopEdit}
+            />
+          {/key}
+        {:else}
+          <button
+            type="button"
+            class="add-line motion"
+            onclick={() => startEdit({ kind: 'new-reference' })}
+          >
+            Paste a reference
+          </button>
         {/if}
       </div>
     </section>
 
     {#if earlier.length > 0}
       <section class="fold">
-        <h3>
+        <h3 class="fold-row">
           <button
             type="button"
             class="fold-head motion"
@@ -346,15 +884,28 @@
     {/if}
   </div>
 
-  {#if task.checklist.length > 0}
-    <section>
-      <h3 class="block-head">Checklist</h3>
+  <section>
+    <h3 class="block-head">Checklist</h3>
+    {#if task.checklist.length > 0}
       <Progress done={finished.length} total={task.checklist.length} />
-      {#if remaining.length > 0}
-        <p class="group">Remaining <span>{remaining.length}</span></p>
-        <ul class="checklist">
-          {#each shownRemaining as entry (entry.index)}
-            <li class:settling={ticked === entry.index}>
+    {/if}
+    {#if saveError?.where === 'checklist'}
+      <p class="edit-error" role="alert">{saveError.text}</p>
+    {/if}
+    {#if remaining.length > 0}
+      <p class="group">Remaining <span>{remaining.length}</span></p>
+      <ul class="checklist">
+        {#each shownRemaining as entry (entry.index)}
+          <li class:settling={ticked === entry.index}>
+            {#if editing?.kind === 'item' && editing.index === entry.index}
+              <FieldEdit
+                value={entry.item.text}
+                label={`Checklist item: ${entry.item.text}`}
+                error={editError}
+                oncommit={(text) => commitItem(entry.index, text)}
+                oncancel={stopEdit}
+              />
+            {:else}
               <label class="motion">
                 <input
                   type="checkbox"
@@ -363,24 +914,55 @@
                 />
                 <span>{entry.item.text}</span>
               </label>
-            </li>
-          {/each}
-        </ul>
-        {#if moreRemaining > 0 || allItems}
-          <!-- The quiet line that says how many more there are is also the way to them, so
-               nothing is hidden behind a number you cannot act on. -->
-          <button type="button" class="more-items motion" onclick={() => (allItems = !allItems)}>
-            {allItems ? 'Show the next three only' : `and ${moreRemaining} more outstanding`}
-          </button>
-        {/if}
-      {:else}
-        <p class="quiet ticked-all">Everything is ticked.</p>
+              <span class="tools">
+                <button
+                  type="button"
+                  class="drop tool motion"
+                  aria-label={`Edit item: ${entry.item.text}`}
+                  onclick={() => startEdit({ kind: 'item', index: entry.index })}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M8.3 1.7 10.3 3.7 4 10H2V8z" fill="none" stroke="currentColor"
+                      stroke-width="1.3" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                <ConfirmButton
+                  icon
+                  label={`Remove item: ${entry.item.text}`}
+                  question="Remove this item?"
+                  confirmLabel="Remove"
+                  groupLabel={`Confirm removing: ${entry.item.text}`}
+                  onconfirm={() => removeItem(entry.index)}
+                />
+              </span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+      {#if moreRemaining > 0 || allItems}
+        <!-- The quiet line that says how many more there are is also the way to them, so
+             nothing is hidden behind a number you cannot act on. -->
+        <button type="button" class="more-items motion" onclick={() => (allItems = !allItems)}>
+          {allItems ? 'Show the next three only' : `and ${moreRemaining} more outstanding`}
+        </button>
       {/if}
-      {#if finished.length > 0}
-        <p class="group">Done <span>{finished.length}</span></p>
-        <ul class="checklist">
-          {#each finished as entry (entry.index)}
-            <li class="ticked" class:settling={ticked === entry.index}>
+    {:else if task.checklist.length > 0}
+      <p class="quiet ticked-all">Everything is ticked.</p>
+    {/if}
+    {#if finished.length > 0}
+      <p class="group">Done <span>{finished.length}</span></p>
+      <ul class="checklist">
+        {#each finished as entry (entry.index)}
+          <li class="ticked" class:settling={ticked === entry.index}>
+            {#if editing?.kind === 'item' && editing.index === entry.index}
+              <FieldEdit
+                value={entry.item.text}
+                label={`Checklist item: ${entry.item.text}`}
+                error={editError}
+                oncommit={(text) => commitItem(entry.index, text)}
+                oncancel={stopEdit}
+              />
+            {:else}
               <label class="motion">
                 <input
                   type="checkbox"
@@ -389,12 +971,54 @@
                 />
                 <span>{entry.item.text}</span>
               </label>
-            </li>
-          {/each}
-        </ul>
-      {/if}
-    </section>
-  {/if}
+              <span class="tools">
+                <button
+                  type="button"
+                  class="drop tool motion"
+                  aria-label={`Edit item: ${entry.item.text}`}
+                  onclick={() => startEdit({ kind: 'item', index: entry.index })}
+                >
+                  <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M8.3 1.7 10.3 3.7 4 10H2V8z" fill="none" stroke="currentColor"
+                      stroke-width="1.3" stroke-linejoin="round" />
+                  </svg>
+                </button>
+                <ConfirmButton
+                  icon
+                  label={`Remove item: ${entry.item.text}`}
+                  question="Remove this item?"
+                  confirmLabel="Remove"
+                  groupLabel={`Confirm removing: ${entry.item.text}`}
+                  onconfirm={() => removeItem(entry.index)}
+                />
+              </span>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    {/if}
+    {#if editing?.kind === 'new-item'}
+      {#key addKey}
+        <FieldEdit
+          value=""
+          label="New checklist item"
+          placeholder="What has to be done?"
+          saveLabel="Add item"
+          error={editError}
+          oncommit={commitNewItem}
+          oncancel={stopEdit}
+        />
+      {/key}
+    {:else}
+      <button
+        type="button"
+        class="add-line motion"
+        onclick={() => startEdit({ kind: 'new-item' })}
+      >
+        Add an item
+      </button>
+    {/if}
+  </section>
 
   {#if rest}
     <section>
@@ -430,39 +1054,14 @@
       </button>
     {/if}
     {#if ondelete}
-      {#if confirmingDelete}
-        <span class="confirm" role="group" aria-label="Confirm deleting this task">
-          <span class="ask">Delete this task?</span>
-          <button
-            type="button"
-            class="btn danger motion"
-            onclick={() => {
-              confirmingDelete = false;
-              ondelete?.(task);
-            }}
-            onkeydown={onConfirmKeydown}
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            class="btn motion"
-            onclick={() => (confirmingDelete = false)}
-            onkeydown={onConfirmKeydown}
-          >
-            Cancel
-          </button>
-        </span>
-      {:else}
-        <button
-          type="button"
-          class="btn motion"
-          title="Delete the task and its file"
-          onclick={() => (confirmingDelete = true)}
-        >
-          Delete
-        </button>
-      {/if}
+      <ConfirmButton
+        label="Delete"
+        question="Delete this task?"
+        confirmLabel="Delete"
+        groupLabel="Confirm deleting this task"
+        title="Delete the task and its file"
+        onconfirm={() => ondelete?.(task)}
+      />
     {/if}
   </div>
 
@@ -491,6 +1090,21 @@
     line-height: 1.25;
     letter-spacing: -0.01em;
     overflow-wrap: anywhere;
+  }
+  /* The title is the control that edits the title, so it has to look like the title and
+     answer to the pointer. A rule under it on hover, and nothing else. */
+  .title-edit {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
+  }
+  .title-edit:hover {
+    box-shadow: inset 0 -1px 0 var(--text-faint);
   }
   .meta {
     display: flex;
@@ -559,20 +1173,24 @@
     font-weight: 600;
   }
 
-  /* The three bodies of text, each closed until it is asked for. */
+  /* The bodies of text, each closed until it is asked for. */
   .folds {
     display: flex;
     flex-direction: column;
     gap: 2px;
   }
-  .fold h3 {
+  .fold-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
     margin: 0;
   }
   .fold-head {
     display: flex;
+    flex: 1;
+    min-width: 0;
     align-items: center;
     gap: var(--space-2);
-    width: 100%;
     padding: 5px var(--space-2);
     border-radius: var(--radius-sm);
     text-align: left;
@@ -601,6 +1219,21 @@
     font-variant-numeric: tabular-nums;
     color: var(--text-faint);
   }
+  /* The way into a section without reading it first. Quiet until it is wanted. */
+  .fold-tool {
+    flex: none;
+    padding: 4px var(--space-2);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+  }
+  .fold-tool:hover {
+    background: var(--surface);
+    color: var(--accent);
+  }
   .fold-body {
     padding: var(--space-1) var(--space-2) var(--space-2) 25px;
   }
@@ -624,6 +1257,38 @@
     margin-top: var(--space-2);
   }
 
+  /* A plan step, and the three things that can be done to it. */
+  .plan-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+  .line-edit {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    line-height: 1.4;
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
+  }
+  .line-edit:hover {
+    color: var(--accent);
+  }
+  .tools {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+  }
+  .tools :global(.tool) {
+    width: 20px;
+    height: 20px;
+  }
+  .tools :global(.tool:disabled) {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
   .group {
     display: flex;
     align-items: baseline;
@@ -645,8 +1310,15 @@
     flex-direction: column;
     gap: 2px;
   }
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: 1px;
+  }
   .checklist label {
     display: flex;
+    flex: 1;
+    min-width: 0;
     align-items: flex-start;
     gap: var(--space-2);
     padding: 5px var(--space-2);
@@ -702,6 +1374,26 @@
     text-transform: none;
     color: var(--text-faint);
   }
+  /*
+    Pasted material, shown as it was pasted. Monospace and pre-wrap say "this is quoted, not
+    written", which is the whole promise of the section: a stack trace keeps its indentation
+    and a line of Markdown stays a line of Markdown instead of becoming a heading. It wraps
+    rather than scrolling sideways, because a panel 320 px wide has no room for two axes.
+  */
+  .ref-text {
+    margin: 0;
+    padding: var(--space-2);
+    max-width: 100%;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
+  }
   .rest {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -709,23 +1401,6 @@
   .park .field {
     flex: 1;
     min-width: 140px;
-  }
-  /* The question and its two answers travel together, so the row cannot wrap the word
-     "Delete" away from what it is asking about. */
-  .confirm {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: 2px 2px 2px var(--space-2);
-    border-radius: var(--radius-sm);
-    /* Outlined rather than filled, so the one button that destroys something is the
-       reddest thing in the row and cannot be mistaken for the question or for Cancel. */
-    border: 1px solid var(--late-edge);
-  }
-  .ask {
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--danger);
   }
 
   @media (prefers-reduced-motion: no-preference) {
