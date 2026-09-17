@@ -69,6 +69,16 @@ a {
   background: transparent;
 }
 
+/*
+  The `hidden` attribute is a statement about the element, not a style suggestion, so it wins
+  outright. The user agent's own rule is `[hidden] { display: none }`, which any class that
+  sets `display` outranks: a collapsed section with a flex layout of its own would otherwise
+  stay on screen while claiming to be shut.
+*/
+[hidden] {
+  display: none !important;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

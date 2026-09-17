@@ -61,6 +61,7 @@
     markDone,
     parkTask,
     removeTask,
+    reorderTasks,
     saveConfigFile,
     scanNow,
     select,
@@ -171,6 +172,19 @@
   async function destroy(task: CoreTask) {
     await removeTask(task.id);
     select(null);
+  }
+
+  /**
+   * Moves a live task to a new place in the priority order and writes `order` for everything
+   * the move displaced, in one pass. The list the person is looking at is the list that is
+   * renumbered, so what they dragged and what is written are the same thing.
+   */
+  function moveCurrent(from: number, to: number) {
+    const files = currentTasks().map((t) => t.file);
+    const [moved] = files.splice(from, 1);
+    if (moved === undefined) return;
+    files.splice(to, 0, moved);
+    void reorderTasks(files).catch((e: unknown) => (desk.error = errorText(e)));
   }
 
   /**
@@ -433,6 +447,7 @@
         onview={(v) => setView(v as TaskView)}
         onselect={(t) => select(t.file)}
         onadd={addTask}
+        onreorder={moveCurrent}
       />
     {:else}
       <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />

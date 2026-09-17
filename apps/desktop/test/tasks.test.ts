@@ -55,6 +55,30 @@ describe('Tasks, the four views', () => {
     expect(container.querySelector('.pane-foot')).toBeNull();
   });
 
+  it('makes Live a real list whose rows can be moved, and no other view', async () => {
+    const onreorder = vi.fn();
+    const live = [taskA(), { ...taskA(), file: 'second.md', id: 'second', order: 2 }];
+    const { container, unmount } = render(Tasks, {
+      props: { ...base, live, view: 'live', onreorder },
+    });
+    expect(container.querySelector('[role="list"]')).toBeTruthy();
+    expect(container.querySelectorAll('.slot[draggable="true"]')).toHaveLength(2);
+    await fireEvent.keyDown(screen.getAllByRole('button', { name: /Reorder/ })[1], {
+      key: 'ArrowUp',
+    });
+    expect(onreorder).toHaveBeenCalledWith(1, 0);
+    unmount();
+
+    const parked = render(Tasks, { props: { ...base, view: 'backlog', onreorder } });
+    expect(parked.container.querySelector('.grip')).toBeNull();
+  });
+
+  it('leaves a list of one alone, since there is nowhere for its row to go', () => {
+    const { container } = render(Tasks, { props: { ...base, view: 'live', onreorder: () => {} } });
+    expect(container.querySelector('.grip')).toBeNull();
+    expect(container.querySelector('.slot[draggable="true"]')).toBeNull();
+  });
+
   it('explains an empty list in the words that view needs', () => {
     const empty = { ...base, live: [], backlog: [], done: [], pending: [], doneCount: 0 };
     const live = render(Tasks, { props: { ...empty, view: 'live' } });

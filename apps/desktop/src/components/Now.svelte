@@ -226,6 +226,17 @@
     font-size: var(--fs-sm);
     color: var(--text-faint);
   }
+  /*
+    The panel can now be dragged down to 300 px, where the greeting and its caption would be
+    more than half of everything on screen and the list under them would be one squeezed row.
+    Below the height at which a list can be a list, the greeting steps aside: it is the one
+    block on this surface that says nothing about the work.
+  */
+  @media (max-height: 420px) {
+    .greet {
+      display: none;
+    }
+  }
 
   /* Up next is a list of things not started, so it is drawn as unchecked items rather than as
      cards: a card claims state, and these have none yet. */

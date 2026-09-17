@@ -16,6 +16,13 @@
 
   /** Ticked items shown in full before the rest are counted instead. */
   const DONE_SHOWN = 5;
+  /**
+   * Outstanding items shown before the rest are counted instead. Three, because the open card
+   * is a glance at where a project stands and a checklist of thirty unticked items answers
+   * that question no better than three do while costing the whole panel to scroll past. The
+   * full list is one click further on, in the task itself.
+   */
+  const OPEN_SHOWN = 3;
 
   interface Props {
     task: Task;
@@ -33,6 +40,9 @@
   const finished = $derived(task.checklist.filter((i) => i.done));
   const shownDone = $derived(finished.slice(-DONE_SHOWN).reverse());
   const moreDone = $derived(Math.max(0, finished.length - shownDone.length));
+  /* The next few, in the file's own order, so the three shown are the three that come next. */
+  const shownOpen = $derived(remaining.slice(0, OPEN_SHOWN));
+  const moreOpen = $derived(Math.max(0, remaining.length - shownOpen.length));
 </script>
 
 <div class="detail">
@@ -60,12 +70,15 @@
         {/each}
       </ol>
     {:else if remaining.length > 0}
-      <p class="quiet faint">No plan written. What is left, from the checklist:</p>
+      <p class="quiet faint">No plan written. What is next, from the checklist:</p>
       <ul class="item-list">
-        {#each remaining as item, i (i)}
+        {#each shownOpen as item, i (i)}
           <li><span class="box" aria-hidden="true"></span><span>{item.text}</span></li>
         {/each}
       </ul>
+      {#if moreOpen > 0}
+        <p class="quiet faint">and {moreOpen} more still to do</p>
+      {/if}
     {:else}
       <p class="quiet faint">No plan written.</p>
     {/if}

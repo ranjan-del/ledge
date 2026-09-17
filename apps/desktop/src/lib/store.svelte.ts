@@ -544,6 +544,34 @@ export async function addTask(input: NewTask): Promise<Task> {
   return task;
 }
 
+/**
+ * Writes a new priority order across a list in one pass. The caller hands over the files in
+ * the order they are to end up in; this numbers them from 1, rewrites only the files whose
+ * `order` actually changed, and updates the desk before the first write so the list settles
+ * into its new order immediately rather than after the watcher catches up.
+ *
+ * One pass is the point. Moving a row and letting each save re-derive everyone else's number,
+ * which is what `startTask` does for its one insertion, rewrites the same file several times
+ * for a single drag and can leave the list in an order nobody asked for if a write fails part
+ * way through. Here the whole ordering is decided first and then written.
+ */
+export async function reorderTasks(files: string[]): Promise<void> {
+  const place = new Map(files.map((file, i) => [file, i + 1]));
+  const stamp = nowIso();
+  const moved = desk.tasks
+    .filter((t) => {
+      const order = place.get(t.file);
+      return order !== undefined && order !== t.order;
+    })
+    .map((t) => ({ ...t, order: place.get(t.file) as number, updated: stamp }));
+  if (moved.length === 0) return;
+  const byFile = new Map(moved.map((t) => [t.file, t]));
+  desk.tasks = desk.tasks.map((t) => byFile.get(t.file) ?? t);
+  await Promise.all(
+    moved.map((t) => writeText(t.file, serializeTask(t, { home: desk.home }))),
+  );
+}
+
 /** Moves a task to Current at position 1 and shifts the other current tasks down. */
 export async function startTask(task: Task): Promise<void> {
   const others = currentTasks().filter((t) => t.file !== task.file);

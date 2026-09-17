@@ -9,7 +9,7 @@ function boxNamed(name: string): HTMLInputElement {
 }
 
 describe('TaskDetail', () => {
-  it('renders requirement, checklist, sessions and git state', () => {
+  it('renders requirement, checklist and sessions', () => {
     render(TaskDetail, {
       props: { task: taskA(), status: repoStatus(), onback: () => {}, onsave: () => {} },
     });
@@ -19,8 +19,159 @@ describe('TaskDetail', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(5);
     expect(screen.getByText(/2 sessions/)).toBeTruthy();
     expect(screen.getByText(/last 071729a1/)).toBeTruthy();
-    expect(screen.getByText('2 unpushed')).toBeTruthy();
   });
+});
+
+describe('TaskDetail, the facts block', () => {
+  function facts(container: HTMLElement): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const row of container.querySelectorAll('.fact')) {
+      const key = row.querySelector('dt')?.textContent?.trim() ?? '';
+      out[key] = row.querySelector('dd')?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    }
+    return out;
+  }
+
+  it('leads with the facts, above every word of prose', () => {
+    const { container } = render(TaskDetail, {
+      props: { task: taskC(), status: repoStatus(), day: DAY, onback: () => {}, onsave: () => {} },
+    });
+    const block = container.querySelector('.facts') as HTMLElement;
+    const folds = container.querySelector('.folds') as HTMLElement;
+    expect(block.compareDocumentPosition(folds) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('states the repository in full, the branch, the remote and the counts', () => {
+    const { container } = render(TaskDetail, {
+      props: { task: taskA(), status: repoStatus(), day: DAY, onback: () => {}, onsave: () => {} },
+    });
+    expect(facts(container)).toEqual({
+      Repository: '/home/t/code/app',
+      Branch: 'feature/banner',
+      Remote: 'out of step with origin/feature/banner',
+      Ahead: '2 commits not pushed',
+      Behind: '0 commits to pull',
+      Uncommitted: '2 changes',
+      Created: 'yesterday',
+    });
+  });
+
+  it('says a branch is up to date only when it really is', () => {
+    const clean = repoStatus({ ahead: 0, behind: 0, dirty: [] });
+    const { container } = render(TaskDetail, {
+      props: { task: taskA(), status: clean, day: DAY, onback: () => {}, onsave: () => {} },
+    });
+    expect(facts(container).Remote).toBe('up to date with origin/feature/banner');
+  });
+
+  it('will not call a branch with no upstream behind anything', () => {
+    const local = repoStatus({ upstream: undefined, ahead: 0, behind: 0, dirty: [] });
+    const { container } = render(TaskDetail, {
+      props: { task: taskA(), status: local, day: DAY, onback: () => {}, onsave: () => {} },
+    });
+    expect(facts(container).Remote).toBe('no remote branch');
+  });
+
+  it('shows nothing it cannot source, and says so where the scan has not run', () => {
+    const { container } = render(TaskDetail, {
+      props: { task: taskA(), day: DAY, onback: () => {}, onsave: () => {} },
+    });
+    const rows = facts(container);
+    expect(rows.Branch).toBeUndefined();
+    expect(rows.Ahead).toBeUndefined();
+    expect(rows.Uncommitted).toBeUndefined();
+    expect(rows.Git).toBe('not scanned yet');
+    /* taskA names no planned day, so there is no planned row to show. */
+    expect(rows.Planned).toBeUndefined();
+    expect(rows.Repository).toBe('/home/t/code/app');
+  });
+
+  it('gives the planned day and how late it is, when the file names one', () => {
+    const { container } = render(TaskDetail, {
+      props: { task: taskC(), day: DAY, onback: () => {}, onsave: () => {} },
+    });
+    /* The month name comes from the host locale, so match loosely on purpose. */
+    expect(facts(container).Planned).toMatch(/11 Sept? \(4 days late\)/);
+  });
+});
+
+describe('TaskDetail, the three collapsed sections', () => {
+  const props = { task: taskC(), day: DAY, onback: () => {}, onsave: () => {} };
+
+  it('offers Requirement, Plan and Today’s work, every one of them closed', () => {
+    const { container } = render(TaskDetail, { props });
+    const heads = [...container.querySelectorAll('.fold-head')].map((b) =>
+      b.textContent?.replace(/\s+/g, ' ').trim(),
+    );
+    expect(heads[0]).toBe('Requirement');
+    expect(heads[1]).toBe('Plan 3 steps');
+    expect(heads[2]).toBe("Today's work");
+    for (const head of container.querySelectorAll('.fold-head')) {
+      expect(head.getAttribute('aria-expanded')).toBe('false');
+    }
+    for (const body of container.querySelectorAll('.fold-body')) {
+      expect((body as HTMLElement).hidden).toBe(true);
+    }
+  });
+
+  it('opens one without opening the others', async () => {
+    const { container } = render(TaskDetail, { props });
+    await fireEvent.click(screen.getByRole('button', { name: /Requirement/ }));
+    const bodies = [...container.querySelectorAll('.fold-body')] as HTMLElement[];
+    expect(bodies[0].hidden).toBe(false);
+    expect(bodies[1].hidden).toBe(true);
+    expect(bodies[2].hidden).toBe(true);
+    expect(screen.getByText(/Every app writes version.json at build/)).toBeTruthy();
+  });
+
+  it('puts today’s note under Today’s work, and says so when there is none', async () => {
+    const withNote = { ...taskC(), notes: [{ date: DAY, body: 'Wrote the poll today.' }] };
+    const { container, unmount } = render(TaskDetail, { props: { ...props, task: withNote } });
+    await fireEvent.click(screen.getByRole('button', { name: /Today's work/ }));
+    expect(container.querySelector('#fold-today')?.textContent).toContain('Wrote the poll today.');
+    unmount();
+
+    /* taskC's newest note is yesterday's, so today's section has nothing to show. */
+    const quiet = render(TaskDetail, { props });
+    await fireEvent.click(screen.getByRole('button', { name: /Today's work/ }));
+    expect(quiet.container.querySelector('#fold-today')?.textContent).toContain(
+      'No note written today',
+    );
+  });
+});
+
+describe('TaskDetail, the outstanding list', () => {
+  /** taskA with eight items open, which is the shape that made the view too long. */
+  function longTask() {
+    const task = taskA();
+    const extra = Array.from({ length: 6 }, (_, i) => ({ text: `Extra item ${i + 1}`, done: false }));
+    return { ...task, checklist: [...task.checklist, ...extra] };
+  }
+
+  it('shows the next three and counts the rest', () => {
+    render(TaskDetail, { props: { task: longTask(), onback: () => {}, onsave: () => {} } });
+    /* Nine open items: three drawn, six counted, plus the two that are already ticked. */
+    expect(screen.getAllByRole('checkbox')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: 'and 6 more outstanding' })).toBeTruthy();
+    expect(screen.queryByText('Extra item 6')).toBeNull();
+  });
+
+  it('shows the rest when the count is pressed, and folds them away again', async () => {
+    render(TaskDetail, { props: { task: longTask(), onback: () => {}, onsave: () => {} } });
+    await fireEvent.click(screen.getByRole('button', { name: 'and 6 more outstanding' }));
+    expect(screen.getByText('Extra item 6')).toBeTruthy();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(11);
+    await fireEvent.click(screen.getByRole('button', { name: 'Show the next three only' }));
+    expect(screen.queryByText('Extra item 6')).toBeNull();
+  });
+
+  it('counts nothing when three is the whole of what is left', () => {
+    render(TaskDetail, { props: { task: taskA(), onback: () => {}, onsave: () => {} } });
+    expect(screen.queryByRole('button', { name: /more outstanding/ })).toBeNull();
+  });
+});
+
+describe('TaskDetail, actions', () => {
 
   it('groups the checklist into remaining and done with counts', () => {
     const { container } = render(TaskDetail, {

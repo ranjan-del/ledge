@@ -10,7 +10,7 @@
  * Nothing in this file invents anything. Each function either returns something derived from
  * data that is in the file, or returns nothing so the caller can show nothing at all.
  */
-import type { Config, Task } from '@ledge/core/pure';
+import { nextActionFor, type Config, type NextAction, type Task } from '@ledge/core/pure';
 import { basename } from './paths.ts';
 
 /** How a task is described in a word. Every one of these is derived, never stored. */
@@ -43,6 +43,39 @@ export function taskState(task: Task, day: string): TaskState {
     return { id: 'progress', label: 'In Progress', glyph: '✦' };
   }
   return { id: 'fresh', label: 'Not started', glyph: '○' };
+}
+
+/**
+ * The two lines a card shows about the work itself: what is being worked on now, and what
+ * follows it. Both are quoted, never composed.
+ */
+export interface WorkLines {
+  /** The first unticked checklist item, or the first plan step when there is no checklist. */
+  current?: NextAction;
+  /** The item after that one. Absent when the current item is the last one left. */
+  next?: NextAction;
+}
+
+/**
+ * Splits a task's outstanding work into CURRENT and NEXT. `current` is exactly what
+ * `nextActionFor` in core returns, so the card and the CLI cannot disagree about which item is
+ * in hand; `next` is the one that follows it in the same source, so the two lines are never
+ * drawn from two different places.
+ *
+ * Nothing here invents a second line. When the current item is the last one left, `next` is
+ * absent and the card shows CURRENT alone rather than reaching into the plan for something to
+ * put under it. When every checklist item is ticked, core returns nothing and so does this.
+ */
+export function workLines(task: Task): WorkLines {
+  const current = nextActionFor(task);
+  if (!current) return {};
+  if (current.source === 'checklist') {
+    const first = task.checklist.findIndex((item) => !item.done);
+    const after = task.checklist.slice(first + 1).find((item) => !item.done);
+    return after ? { current, next: { text: after.text, source: 'checklist' } } : { current };
+  }
+  const second = task.plan[1];
+  return second ? { current, next: { text: second, source: 'plan' } } : { current };
 }
 
 /** Ticked and total checklist items, which is what the progress bar and "20 of 31" show. */

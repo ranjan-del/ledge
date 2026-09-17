@@ -1,6 +1,13 @@
 import { defaultConfig } from '@ledge/core/pure';
 import { describe, expect, it } from 'vitest';
-import { greeting, personName, progressOf, summaryParts, taskState } from '../src/lib/derive.ts';
+import {
+  greeting,
+  personName,
+  progressOf,
+  summaryParts,
+  taskState,
+  workLines,
+} from '../src/lib/derive.ts';
 import { DAY, DAY_PAST, plannedTask, taskA, taskB, taskC } from './fixtures.ts';
 
 describe('taskState', () => {
@@ -37,6 +44,53 @@ describe('progressOf', () => {
   it('counts ticked against total', () => {
     expect(progressOf(taskA())).toEqual({ done: 2, total: 5 });
     expect(progressOf({ ...taskA(), checklist: [] })).toEqual({ done: 0, total: 0 });
+  });
+});
+
+describe('workLines', () => {
+  it('takes the first two unticked checklist items, in the order the file has them', () => {
+    const { current, next } = workLines(taskA());
+    expect(current).toEqual({ text: 'Build step that writes version.json', source: 'checklist' });
+    expect(next).toEqual({
+      text: 'ReleaseWatchService with polling and focus listener',
+      source: 'checklist',
+    });
+  });
+
+  it('steps over ticked items when it looks for the one after', () => {
+    const task = taskA();
+    const checklist = task.checklist.map((item, i) => ({ ...item, done: i !== 1 && i !== 4 }));
+    const { current, next } = workLines({ ...task, checklist });
+    expect(current?.text).toBe('Design agreed: version.json polling, banner, idle reload');
+    expect(next?.text).toBe('Banner component in the shell');
+  });
+
+  it('leaves next out when the current item is the last one left', () => {
+    const task = taskA();
+    const checklist = task.checklist.map((item, i) => ({ ...item, done: i !== 4 }));
+    const { current, next } = workLines({ ...task, checklist });
+    expect(current?.text).toBe('Banner component in the shell');
+    expect(next).toBeUndefined();
+  });
+
+  it('uses the first two plan steps only where there is no checklist at all', () => {
+    const { current, next } = workLines({ ...taskC(), checklist: [] });
+    expect(current).toEqual({ text: 'Write version.json in the build step', source: 'plan' });
+    expect(next).toEqual({ text: 'Poll it on an interval and on window focus', source: 'plan' });
+  });
+
+  it('never reaches into the plan to fill a second line under a checklist', () => {
+    const task = taskC();
+    const checklist = task.checklist.map((item, i) => ({ ...item, done: i !== 2 }));
+    const { current, next } = workLines({ ...task, checklist });
+    expect(current?.source).toBe('checklist');
+    expect(next).toBeUndefined();
+  });
+
+  it('says nothing at all when everything is ticked, and when the file is bare', () => {
+    const done = { ...taskA(), checklist: taskA().checklist.map((i) => ({ ...i, done: true })) };
+    expect(workLines(done)).toEqual({});
+    expect(workLines({ ...taskA(), checklist: [], plan: [] })).toEqual({});
   });
 });
 

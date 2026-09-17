@@ -58,13 +58,21 @@
     background: var(--control);
     border-radius: var(--radius-sm);
   }
+  /*
+   * The strip has to hold four words and four counts at the panel's narrowest, 320 px, where
+   * four tabs get about 68 px each. The padding is the part that can go: a tab is already
+   * full width, so the inset only ever decided how narrow the strip could be asked to get.
+   * `min-width: 0` and the ellipsis below are the net under that, so the strip can never grow
+   * wider than the panel and push the whole row sideways.
+   */
   .tab {
     flex: 1;
+    min-width: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-1);
-    padding: 5px var(--space-2);
+    padding: 5px var(--space-1);
     border-radius: calc(var(--radius-sm) - 1px);
     color: var(--text-muted);
     font-size: var(--fs-sm);
@@ -76,7 +84,14 @@
     color: var(--text);
     box-shadow: var(--shadow-card);
   }
+  .label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .count {
+    flex: none;
     font-variant-numeric: tabular-nums;
     font-weight: 500;
     color: var(--text-faint);

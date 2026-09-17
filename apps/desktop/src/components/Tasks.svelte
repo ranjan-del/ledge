@@ -46,6 +46,12 @@
     onview: (view: TaskView) => void;
     onselect: (task: Task) => void;
     onadd: (input: NewTask) => unknown;
+    /**
+     * Moves a live task from one place in the list to another. Only Live has an order a person
+     * chose, so it is the only view that is given one; without this the rows are not draggable
+     * and carry no grip.
+     */
+    onreorder?: (from: number, to: number) => void;
   }
 
   let {
@@ -64,6 +70,7 @@
     onview,
     onselect,
     onadd,
+    onreorder,
   }: Props = $props();
 
   const options = $derived<ViewOption[]>([
@@ -116,17 +123,26 @@
 {:else}
   <div class="pane">
     <div class="pane-scroll">
-      {#each live as task (task.file)}
-        <TaskCard
-          {task}
-          {day}
-          status={statusFor?.(task.repo)}
-          actions={actionsFor?.(task) ?? []}
-          {onselect}
-        />
+      {#if live.length > 0}
+        <!-- A real list, because the rows in it can be moved and a screen reader has to be
+             told that this one has an order the person owns. -->
+        <div class="rows" role="list" aria-label="Live tasks in priority order">
+          {#each live as task, i (task.file)}
+            <TaskCard
+              {task}
+              {day}
+              status={statusFor?.(task.repo)}
+              actions={actionsFor?.(task) ?? []}
+              index={i}
+              total={live.length}
+              onmove={onreorder}
+              {onselect}
+            />
+          {/each}
+        </div>
       {:else}
         <p class="quiet">Nothing live. Everything you have is parked or finished.</p>
-      {/each}
+      {/if}
     </div>
     <div class="pane-foot">
       <AddTask {onadd} />

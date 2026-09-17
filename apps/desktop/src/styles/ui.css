@@ -179,6 +179,20 @@
   gap: var(--space-2);
   padding: 0 var(--space-3) var(--space-3);
 }
+/*
+  Nothing inside a scrolling column may shrink, and this is the single line that makes the
+  lists scroll at all. A flex item's default is `flex: 0 1 auto`, so it gives up height before
+  its container overflows; the floor that normally stops it at its own content height,
+  `min-height: auto`, is switched off for any item that hides its own overflow, which every
+  card here does. Without this the rows silently compress to whatever height the panel has,
+  `scrollHeight` never exceeds `clientHeight`, no scrollbar appears, and the bottom of the
+  list is clipped inside the squashed rows rather than being reachable. Stating it on the
+  children keeps the rule independent of how tall the panel is dragged.
+*/
+.pane-scroll > *,
+.rows > * {
+  flex: none;
+}
 .pane-foot {
   flex: none;
   padding: var(--space-2) var(--space-3);

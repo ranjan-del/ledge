@@ -84,7 +84,7 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   },
 }));
 
-import { readTextFile, rename } from '@tauri-apps/plugin-fs';
+import { readTextFile, rename, writeTextFile } from '@tauri-apps/plugin-fs';
 import {
   WATCH_DEBOUNCE_MS,
   addTask,
@@ -98,6 +98,7 @@ import {
   markDone,
   mergeConfig,
   removeTask,
+  reorderTasks,
   select,
   setSurface,
   setView,
@@ -270,6 +271,39 @@ describe('store', () => {
     await addTask({ title: 'Third thing' });
     expect(currentTasks().map((t) => t.order)).toEqual([1, 2, 3]);
     expect(currentTasks()[0].id).toBe('release-watch-banner');
+  });
+
+  it('renumbers a reordered list in one pass, writing only the files that moved', async () => {
+    await addTask({ title: 'Second thing' });
+    await addTask({ title: 'Third thing' });
+    const files = currentTasks().map((t) => t.file);
+    expect(currentTasks().map((t) => t.order)).toEqual([1, 2, 3]);
+
+    const writes = (writeTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+    /* The top two swap: those two files are rewritten and the third, which has not moved, is
+       left alone. */
+    await reorderTasks([files[1], files[0], files[2]]);
+    expect(currentTasks().map((t) => t.file)).toEqual([files[1], files[0], files[2]]);
+    expect(currentTasks().map((t) => t.order)).toEqual([1, 2, 3]);
+    const after = (writeTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+    expect(after - writes).toBe(2);
+  });
+
+  it('writes the new order into the files, so it survives a restart', async () => {
+    await addTask({ title: 'Second thing' });
+    const files = currentTasks().map((t) => t.file);
+    await reorderTasks([files[1], files[0]]);
+    expect(disk.files.get(files[1]) as string).toContain('order: 1');
+    expect(disk.files.get(files[0]) as string).toContain('order: 2');
+  });
+
+  it('touches nothing at all when the order it was handed is the order already on disk', async () => {
+    const files = currentTasks().map((t) => t.file);
+    const writes = (writeTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.length;
+    await reorderTasks(files);
+    expect((writeTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.length).toBe(
+      writes,
+    );
   });
 
   it('writes the repo and the planned day when the more fields are used', async () => {
