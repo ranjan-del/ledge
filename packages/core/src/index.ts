@@ -7,6 +7,10 @@
  * same parameters. The only difference is that the environment arguments (home folder, base
  * folder, platform) are optional here and default to what Node reports, which is why the
  * desktop app, which has no Node, imports the pure entry instead.
+ *
+ * The one asymmetry is the inference layer. The provider contract and the prompt builders are
+ * pure and live in both entries; `claudeCodeProvider`, which starts a child process, is here
+ * only, because a WebView has nothing to start.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
@@ -26,6 +30,19 @@ export { TaskStore, matchRepo } from './store.ts';
 export { parsePorcelainV2, findRepos, scanRepos, isPending } from './git.ts';
 export { isoDay, isIsoDay, shiftDay, plannedFor, appendNote, setPlan } from './planning.ts';
 export { buildResumePrompt } from './prompt.ts';
+export type { AskResult, Provider, AskContext } from './ai.ts';
+export type { Observed, ObservedTask, ObservedRepo } from './ai.ts';
+export {
+  DEFAULT_NOTES_PER_TASK,
+  buildAskPrompt,
+  buildHandoffPrompt,
+  buildStandupPrompt,
+  observedFacts,
+  renderAskContext,
+  sanitizeForNote,
+} from './ai.ts';
+export { claudeCodeProvider } from './ai-node.ts';
+export type { ClaudeCodeOptions } from './ai-node.ts';
 export {
   sessionsFor,
   memoryFor,

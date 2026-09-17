@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { useFakeCore } from './fake-core/register.ts';
+import type { Provider } from '@ledge/core';
 
 /** Which @ledge/core these tests run against. */
 export const coreKind = useFakeCore();
@@ -30,11 +31,64 @@ export function removeHome(home: string): void {
   rmSync(home, { recursive: true, force: true });
 }
 
+/** A provider stand-in that also keeps every prompt it was handed, for tests to assert on. */
+export interface RecordingProvider extends Provider {
+  prompts: string[];
+}
+
+/**
+ * A provider that is never available. It is the default for every test in this suite, which is
+ * the point: no test can reach a model or the network by forgetting to inject one, and the
+ * machine running the tests may not even have Claude Code installed.
+ */
+export function noProvider(reason?: string): RecordingProvider {
+  return {
+    name: 'test-none',
+    prompts: [],
+    available: async () => false,
+    unavailableReason: () => reason ?? 'No provider is configured in this test.',
+    ask: async () => {
+      throw new Error('noProvider was asked, which a test should never do');
+    },
+  };
+}
+
+/** A provider that answers every prompt with `text` and records what it was asked. */
+export function fakeProvider(text: string): RecordingProvider {
+  const provider: RecordingProvider = {
+    name: 'test-fake',
+    prompts: [],
+    available: async () => true,
+    ask: async (prompt: string) => {
+      provider.prompts.push(prompt);
+      return { text, provider: 'test-fake' };
+    },
+  };
+  return provider;
+}
+
+/** A provider that is available but fails when asked, for the "asked and could not answer" path. */
+export function failingProvider(message: string): RecordingProvider {
+  return {
+    name: 'test-broken',
+    prompts: [],
+    available: async () => true,
+    ask: async () => {
+      throw new Error(message);
+    },
+  };
+}
+
 /**
  * Runs main() with the given argv, capturing stdout, stderr and the exit code. The working
- * directory defaults to the current LEDGE_HOME so `current` without --repo has a stable cwd.
+ * directory defaults to the current LEDGE_HOME so `current` without --repo has a stable cwd, and
+ * the provider defaults to one that is never available so no test reaches a model by accident.
  */
-export async function run(argv: string[], cwd = process.env.LEDGE_HOME ?? '/'): Promise<RunResult> {
+export async function run(
+  argv: string[],
+  cwd = process.env.LEDGE_HOME ?? '/',
+  provider: Provider = noProvider(),
+): Promise<RunResult> {
   let stdout = '';
   let stderr = '';
   const code = await main(argv, {
@@ -45,6 +99,7 @@ export async function run(argv: string[], cwd = process.env.LEDGE_HOME ?? '/'): 
       stderr += text + '\n';
     },
     cwd,
+    provider,
   });
   return { code, stdout, stderr };
 }

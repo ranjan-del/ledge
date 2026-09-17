@@ -1,7 +1,8 @@
 // Plain text rendering. No colour libraries: tables are aligned with spaces so the output reads
 // the same in a terminal, a hook transcript and a test assertion.
 import { homedir } from 'node:os';
-import type { MemoryEntry, NoteEntry, RepoStatus, SessionRef, Task } from '@ledge/core';
+import type { AskResult, MemoryEntry, NoteEntry, Observed, ObservedRepo } from '@ledge/core';
+import type { ObservedTask, RepoStatus, SessionRef, Task } from '@ledge/core';
 
 /** A pending repo plus the task that references it, when one does. */
 export interface PendingRow extends RepoStatus {
@@ -274,4 +275,85 @@ export function memoryBlock(entry: MemoryEntry): string {
 export function renderMemory(entries: MemoryEntry[]): string {
   if (entries.length === 0) return 'Memory\n  (none)';
   return ['Memory', '', entries.map(memoryBlock).join('\n\n')].join('\n');
+}
+
+/** What one assistant command produced: the facts it read, and the inference or its absence. */
+export interface AssistView {
+  kind: 'ask' | 'standup' | 'handoff';
+  /** The calendar day the command ran on, `YYYY-MM-DD`. */
+  day: string;
+  /** The question, on `ask` only, exactly as it was typed. */
+  question?: string;
+  /** The task the handoff is about, on `handoff` only. */
+  task?: { id: string; title: string };
+  /** The facts read from the task files and from git. Printed whether or not a model answered. */
+  observed: Observed;
+  /** The model's answer and the provider that produced it. Absent when there is none. */
+  inference?: AskResult;
+  /** Why there is no inference: a missing provider, a failed call, or nothing to ask about. */
+  noInference?: string;
+  /** Absolute path of the task file a handoff was appended to, on `handoff --save` only. */
+  saved?: string;
+}
+
+/**
+ * Row for the Observed section: id, title, repo, status, progress and the next step the files
+ * themselves name. The next step is quoted from the task, never composed, so this row stays a
+ * reading of the file even on a line that sits directly above a model's answer.
+ */
+export function observedRow(task: ObservedTask): string[] {
+  const progress = task.total === 0 ? '' : `${task.done}/${task.total}`;
+  const next = task.nextAction ? `next (${task.nextAction.source}): ${task.nextAction.text}` : '';
+  const repo = task.repo ? shortPath(task.repo) : '';
+  return [task.id, task.title, repo, task.status, progress, next];
+}
+
+/** Row for the Observed git section: repo, branch, how far it has drifted and how dirty it is. */
+export function observedRepoRow(repo: ObservedRepo): string[] {
+  const branch = repo.upstream ? repo.branch : `${repo.branch} (no upstream)`;
+  const drift = [
+    repo.ahead > 0 ? `ahead ${repo.ahead}` : '',
+    repo.behind > 0 ? `behind ${repo.behind}` : '',
+  ].filter((part) => part !== '').join(' ');
+  return [shortPath(repo.repo), branch, drift, repo.dirty > 0 ? `${repo.dirty} dirty` : 'clean'];
+}
+
+/** Indents a block of model text by two spaces so it sits under its heading like every section. */
+function indent(text: string): string {
+  return text
+    .split('\n')
+    .map((line) => (line.trim() === '' ? '' : `  ${line}`))
+    .join('\n');
+}
+
+/**
+ * Renders an assistant command's output: the observed facts first, then the inference under a
+ * heading that names the provider and says it did not come from the person's files.
+ *
+ * The two are never merged and never printed under one heading, because they are not the same
+ * kind of thing: the rows above are what Ledge read, and the block below is a model's reading of
+ * those rows. When there is no inference the heading still appears, carrying the reason instead
+ * of an answer, so a reader can always tell the difference between "the model said nothing
+ * useful" and "no model was asked".
+ */
+export function renderAssist(view: AssistView): string {
+  const blocks: string[] = [];
+  if (view.kind === 'ask') blocks.push(section('Question', [[view.question ?? '']]));
+  if (view.kind === 'handoff' && view.task) {
+    blocks.push(`Handoff for ${view.task.id}: ${view.task.title}`);
+  }
+  blocks.push(section(`Observed ${view.day}`, view.observed.tasks.map(observedRow)));
+  blocks.push(section('Observed git', view.observed.repos.map(observedRepoRow)));
+  if (view.inference) {
+    const head = `Inference (from ${view.inference.provider}, not from your files)`;
+    blocks.push(`${head}\n${indent(view.inference.text)}`);
+  } else {
+    const why = view.noInference ?? 'No reason was given.';
+    blocks.push(
+      `Inference (none)\n${indent(why)}\n` +
+        '  The rows above were read from your files and are unaffected.',
+    );
+  }
+  if (view.saved) blocks.push(`Saved to ${shortPath(view.saved)} under ${view.day}`);
+  return blocks.join('\n\n');
 }

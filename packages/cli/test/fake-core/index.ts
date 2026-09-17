@@ -511,3 +511,30 @@ export function surfaceCounts(tasks: Task[]): SurfaceCounts {
   }
   return { now, sessions: latest.size, tasks: tasks.length, memory };
 }
+
+// The inference layer's pure half has no state to stand in for: a prompt builder is a string
+// function over tasks the caller already has. Re-exporting the real one keeps the fake honest
+// about what the CLI will actually send, and leaves this file responsible only for the parts
+// that touch the world.
+export * from '../../../core/src/ai.ts';
+
+/**
+ * Stand-in for the Claude Code provider. It never starts a program and never reports itself
+ * available, so a suite running against the fake core exercises exactly the path a machine
+ * without Claude Code takes. Tests that want an answer inject their own provider through
+ * main()'s io argument.
+ */
+export function claudeCodeProvider(): import('../../../core/src/ai.ts').Provider {
+  return {
+    name: 'claude-code',
+    async available() {
+      return false;
+    },
+    unavailableReason() {
+      return 'The fake core has no provider, so nothing was asked.';
+    },
+    async ask() {
+      throw new Error('the fake core cannot ask a model');
+    },
+  };
+}

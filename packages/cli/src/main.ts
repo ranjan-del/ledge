@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
-import { TaskParseError } from '@ledge/core';
+import { TaskParseError, claudeCodeProvider } from '@ledge/core';
+import type { Provider } from '@ledge/core';
 import type { CommandContext, CommandRunner, Flags } from './context.ts';
 import { EXIT, NotFoundError, UsageError } from './context.ts';
 import { renderCommandHelp, renderHelp } from './help.ts';
 import { run as add } from './commands/add.ts';
 import { run as app } from './commands/app.ts';
+import { run as ask } from './commands/ask.ts';
 import { run as current } from './commands/current.ts';
 import { run as deleteTask } from './commands/delete.ts';
 import { run as done } from './commands/done.ts';
@@ -19,6 +21,8 @@ import { run as park } from './commands/park.ts';
 import { run as plan } from './commands/plan.ts';
 import { run as scan } from './commands/scan.ts';
 import { run as sessions } from './commands/sessions.ts';
+import { run as handoff } from './commands/handoff.ts';
+import { run as standup } from './commands/standup.ts';
 import { run as start } from './commands/start.ts';
 import { run as tick } from './commands/tick.ts';
 import { run as today } from './commands/today.ts';
@@ -26,11 +30,17 @@ import { run as todo } from './commands/todo.ts';
 import { run as untick } from './commands/untick.ts';
 import { run as when } from './commands/when.ts';
 
-/** Output sinks and working directory; tests inject these to capture output. */
+/**
+ * Output sinks, working directory and the inference backend; tests inject these to capture
+ * output and to keep the suite away from any model. The provider is built here rather than
+ * inside a command because building one is free: nothing runs until a command asks it whether
+ * it is available.
+ */
 export interface MainIo {
   out: (text: string) => void;
   err: (text: string) => void;
   cwd: string;
+  provider: Provider;
 }
 
 const COMMANDS: Record<string, CommandRunner> = {
@@ -51,6 +61,9 @@ const COMMANDS: Record<string, CommandRunner> = {
   today,
   sessions,
   memory,
+  ask,
+  standup,
+  handoff,
   open,
   scan,
   app,
@@ -62,6 +75,7 @@ function defaultIo(): MainIo {
     out: (text) => process.stdout.write(text + '\n'),
     err: (text) => process.stderr.write(text + '\n'),
     cwd: process.cwd(),
+    provider: claudeCodeProvider(),
   };
 }
 
@@ -76,10 +90,10 @@ function version(): string {
  * and never calls process.exit, so tests can call it directly with a fake io.
  */
 export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<number> {
-  const { out, err, cwd } = { ...defaultIo(), ...io };
+  const { out, err, cwd, provider } = { ...defaultIo(), ...io };
 
   let values: { json?: boolean; context?: boolean; backlog?: boolean; yes?: boolean;
-    repo?: string; help?: boolean; version?: boolean };
+    save?: boolean; repo?: string; help?: boolean; version?: boolean };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -89,6 +103,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
         context: { type: 'boolean' },
         backlog: { type: 'boolean' },
         yes: { type: 'boolean' },
+        save: { type: 'boolean' },
         repo: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -125,9 +140,10 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
     context: values.context ?? false,
     backlog: values.backlog ?? false,
     yes: values.yes ?? false,
+    save: values.save ?? false,
     repo: values.repo,
   };
-  const ctx: CommandContext = { args: positionals.slice(1), flags, cwd, out, err };
+  const ctx: CommandContext = { args: positionals.slice(1), flags, cwd, out, err, provider };
 
   try {
     return await runner(ctx);

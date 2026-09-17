@@ -49,6 +49,18 @@ export const COMMANDS: Record<string, HelpEntry> = {
     usage: 'ledge memory [query] [--json]',
     summary: 'Dated notes across every task, newest first, filtered by query',
   },
+  ask: {
+    usage: 'ledge ask "question" [--json]',
+    summary: 'Answer a question about your tasks, notes and git state',
+  },
+  standup: {
+    usage: 'ledge standup [--json]',
+    summary: 'Where each current task stands and what to do next',
+  },
+  handoff: {
+    usage: 'ledge handoff <id> [--save] [--json]',
+    summary: "Write a session handoff; --save appends it to the task's notes",
+  },
   open: { usage: 'ledge open <id>', summary: 'Print the task file path' },
   scan: { usage: 'ledge scan', summary: 'Run the git scan once and print Pending as JSON' },
   app: { usage: 'ledge app', summary: 'Start the desktop panel' },
@@ -75,10 +87,16 @@ export function renderHelp(): string {
     '               title, planned day, requirement, plan, unchecked items and the latest note',
     '  --repo path  With add or current: the repo the task belongs to',
     '  --backlog    With add: create the task in the backlog instead of current',
+    "  --save       With handoff: append the handoff to the task's notes under today",
     '  -h, --help   Show help; -v, --version prints the version',
     '',
+    'ask, standup and handoff send your task files and git state to a model and print what it',
+    'says under a separate Inference heading, never mixed into the observed rows. They use the',
+    'Claude Code command line tool, so they need `claude` on PATH and signed in; without it they',
+    'print the observed rows, say why there is no inference, and still exit 0.',
+    '',
     'Exit codes: 0 ok, 1 usage error, 2 not found, 3 task file parse error.',
-    'Store: $LEDGE_HOME, default ~/.ledge.',
+    'Store: $LEDGE_HOME, default ~/.ledge.'
   ];
   return lines.join('\n');
 }
