@@ -43,6 +43,18 @@ export {
 } from './ai.ts';
 export { claudeCodeProvider } from './ai-node.ts';
 export type { ClaudeCodeOptions } from './ai-node.ts';
+export type { GitSnapshot, Snapshot, WorkEvidence } from './evidence.ts';
+export { evidenceOfWork, snapshotOfTask } from './evidence.ts';
+export { gitSnapshot, takeSnapshot } from './evidence-node.ts';
+export type { IntentRecord, IntentOptions } from './intent.ts';
+export {
+  INTENT_TTL_MS,
+  clearIntent,
+  intentFor,
+  readIntents,
+  recordIntent,
+  updateIntent,
+} from './intent.ts';
 export {
   sessionsFor,
   memoryFor,

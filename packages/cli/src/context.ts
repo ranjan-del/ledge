@@ -15,6 +15,8 @@ export interface Flags {
   /** Writes the result into the task file. Only `handoff` reads it. */
   save: boolean;
   repo?: string;
+  /** The Claude Code session id. Only `began` reads it, to tie a record to one session. */
+  session?: string;
 }
 
 /**

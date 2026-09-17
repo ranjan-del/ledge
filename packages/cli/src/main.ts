@@ -7,6 +7,7 @@ import { EXIT, NotFoundError, UsageError } from './context.ts';
 import { renderCommandHelp, renderHelp } from './help.ts';
 import { run as add } from './commands/add.ts';
 import { run as app } from './commands/app.ts';
+import { run as began } from './commands/began.ts';
 import { run as ask } from './commands/ask.ts';
 import { run as current } from './commands/current.ts';
 import { run as deleteTask } from './commands/delete.ts';
@@ -20,6 +21,7 @@ import { run as open } from './commands/open.ts';
 import { run as park } from './commands/park.ts';
 import { run as plan } from './commands/plan.ts';
 import { run as scan } from './commands/scan.ts';
+import { run as settle } from './commands/settle.ts';
 import { run as sessions } from './commands/sessions.ts';
 import { run as handoff } from './commands/handoff.ts';
 import { run as standup } from './commands/standup.ts';
@@ -52,6 +54,8 @@ const COMMANDS: Record<string, CommandRunner> = {
   done,
   current,
   link,
+  began,
+  settle,
   todo,
   tick,
   untick,
@@ -93,7 +97,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
   const { out, err, cwd, provider } = { ...defaultIo(), ...io };
 
   let values: { json?: boolean; context?: boolean; backlog?: boolean; yes?: boolean;
-    save?: boolean; repo?: string; help?: boolean; version?: boolean };
+    save?: boolean; repo?: string; session?: string; help?: boolean; version?: boolean };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -105,6 +109,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
         yes: { type: 'boolean' },
         save: { type: 'boolean' },
         repo: { type: 'string' },
+        session: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -142,6 +147,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
     yes: values.yes ?? false,
     save: values.save ?? false,
     repo: values.repo,
+    session: values.session,
   };
   const ctx: CommandContext = { args: positionals.slice(1), flags, cwd, out, err, provider };
 

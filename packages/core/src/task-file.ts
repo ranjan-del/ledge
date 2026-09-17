@@ -21,6 +21,39 @@ export interface TaskPaths {
 }
 
 const STATUSES: readonly TaskStatus[] = ['current', 'backlog', 'done'];
+
+/**
+ * Words people and assistants actually write in `status:`, mapped to the three values that
+ * exist. The keys are already normalised: lower case, surrounding quotes gone, and every run of
+ * spaces, hyphens or underscores collapsed to one space, so `In-Progress`, `in_progress` and
+ * `"in progress"` all arrive here as `in progress`.
+ *
+ * This table exists because of what a rejection costs. A task whose status cannot be read
+ * disappears from every view, and the person is left with a parse banner instead of the work
+ * they did. Where the intent is unambiguous, honouring it and writing the canonical value back
+ * on the next save is kinder than being right.
+ *
+ * The table is deliberately short. Words that name a state Ledge does not have (`review`,
+ * `ready`, `todo`, `next`, `on hold`) or that could mean either of two lists (`cancelled`,
+ * `abandoned`, `archived`, `pending`, `open`) are not here and still raise, because guessing
+ * silently is worse than an error a person can see and fix.
+ */
+const STATUS_ALIASES: Record<string, TaskStatus> = {
+  'in progress': 'current',
+  inprogress: 'current',
+  active: 'current',
+  doing: 'current',
+  started: 'current',
+  wip: 'current',
+  parked: 'backlog',
+  waiting: 'backlog',
+  blocked: 'backlog',
+  later: 'backlog',
+  complete: 'done',
+  completed: 'done',
+  finished: 'done',
+  closed: 'done',
+};
 const KNOWN_KEYS = new Set([
   'id',
   'title',
@@ -43,6 +76,28 @@ const PLAN_ITEM = /^\s*(?:\d+[.)]|[-*])\s+(.*)$/;
 const CONTINUATION = /^\s+\S/;
 const NOTE_HEADING = /^###\s+(.+)$/;
 const SECTION_HEADING = /^##\s+(.+)$/;
+
+/**
+ * Reads a `status` value written by a person, an assistant or another tool and returns the
+ * canonical `current`, `backlog` or `done`, or undefined when the value names nothing Ledge
+ * knows. Surrounding whitespace and quotes are dropped, case is ignored, and spaces, hyphens and
+ * underscores are treated alike, so `"In-Progress"` is the same as `in progress`.
+ *
+ * It is exported because the alias table is a contract of its own: the CLI, the plugin text and
+ * the desktop app all need to be able to say what will be accepted, and a table nobody can read
+ * is a table nobody can trust. What it refuses is listed on STATUS_ALIASES above.
+ */
+export function normalizeStatus(value: unknown): TaskStatus | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const cleaned = String(value)
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, ' ');
+  if ((STATUSES as readonly string[]).includes(cleaned)) return cleaned as TaskStatus;
+  return STATUS_ALIASES[cleaned];
+}
 
 function pad(n: number): string {
   return String(n).padStart(2, '0');
@@ -274,10 +329,12 @@ export function parseTask(markdown: string, file: string = '', paths: TaskPaths 
 
   const id = requireString(data, 'id', file);
   const title = requireString(data, 'title', file);
-  const status = requireString(data, 'status', file) as TaskStatus;
-  if (!STATUSES.includes(status)) {
+  const statusRaw = requireString(data, 'status', file);
+  const status = normalizeStatus(statusRaw);
+  if (status === undefined) {
     throw new TaskParseError(
-      `Frontmatter key "status" must be one of ${STATUSES.join(', ')}, got "${status}"`,
+      `Frontmatter key "status" must be one of ${STATUSES.join(', ')}, got "${statusRaw}". ` +
+        `Known aliases: ${Object.keys(STATUS_ALIASES).join(', ')}`,
       file,
       2,
     );

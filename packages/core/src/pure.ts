@@ -30,6 +30,8 @@ export {
 export { defaultConfig } from './defaults.ts';
 export { isoDay, isIsoDay, shiftDay, plannedFor, appendNote, setPlan } from './planning.ts';
 export { expandTilde, collapseTilde } from './tilde.ts';
+export type { GitSnapshot, Snapshot, WorkEvidence } from './evidence.ts';
+export { evidenceOfWork, snapshotOfTask } from './evidence.ts';
 export {
   sessionsFor,
   memoryFor,

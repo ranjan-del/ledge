@@ -518,6 +518,13 @@ export function surfaceCounts(tasks: Task[]): SurfaceCounts {
 // that touch the world.
 export * from '../../../core/src/ai.ts';
 
+// The same goes for the promotion loop. `evidenceOfWork` is pure, and the intent record and the
+// snapshot reader work against whatever LEDGE_HOME the test points at, so faking them would only
+// create a second rule to keep in step with the first.
+export * from '../../../core/src/evidence.ts';
+export * from '../../../core/src/evidence-node.ts';
+export * from '../../../core/src/intent.ts';
+
 /**
  * Stand-in for the Claude Code provider. It never starts a program and never reports itself
  * available, so a suite running against the fake core exercises exactly the path a machine

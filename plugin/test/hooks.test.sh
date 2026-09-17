@@ -84,8 +84,9 @@ run_hook session-start.sh session-start.json task "$bin"
 assert_eq "task: exit 0" 0 "$rc"
 assert_contains "task: prints title" "Release watch banner for stale tabs" "$out"
 assert_contains "task: prints unchecked items" "- [ ] Banner component in the shell" "$out"
-assert_eq "task: calls ledge current --context with cwd" \
-  "current --repo /home/user/code/demo-app --context" "$logged"
+assert_eq "task: arms the intent record, then calls ledge current --context with cwd" \
+  "began --repo /home/user/code/demo-app --session b13e8b5e-4c2a-4f1e-9d3b-7a1c2e5f8a90
+current --repo /home/user/code/demo-app --context" "$logged"
 
 assert_contains "task: prints the planned day" "Planned: 2026-09-18" "$out"
 assert_contains "task: prints the plan" "1. Write version.json at build time" "$out"
@@ -109,34 +110,63 @@ assert_empty "missing ledge: ledge never called" "$logged"
 run_hook session-start.sh windows-path.json task "$bin"
 assert_eq "windows path: exit 0" 0 "$rc"
 assert_eq "windows path: backslashes unescaped" \
-  'current --repo C:\Users\me\code\demo-app --context' "$logged"
+  'began --repo C:\Users\me\code\demo-app --session c9d8e7f6-1a2b-4c3d-8e9f-0a1b2c3d4e5f
+current --repo C:\Users\me\code\demo-app --context' "$logged"
 
 run_hook session-start.sh malformed.json task "$bin"
 assert_eq "malformed payload: exit 0" 0 "$rc"
-assert_eq "malformed payload: falls back to PWD" "current --repo $tmp/pwd --context" "$logged"
+assert_eq "malformed payload: falls back to PWD, with no session id to pass" \
+  "began --repo $tmp/pwd
+current --repo $tmp/pwd --context" "$logged"
 assert_contains "malformed payload: still prints context" "Release watch banner" "$out"
 
 run_hook session-start.sh - task "$bin"
 assert_eq "empty stdin: exit 0" 0 "$rc"
-assert_eq "empty stdin: falls back to PWD" "current --repo $tmp/pwd --context" "$logged"
+assert_eq "empty stdin: falls back to PWD" \
+  "began --repo $tmp/pwd
+current --repo $tmp/pwd --context" "$logged"
+
+run_hook session-start.sh session-start.json intent "$bin"
+assert_eq "intent: exit 0" 0 "$rc"
+assert_contains "intent: prints the backlog nudge" \
+  "Run \`ledge start release-watch-banner\`" "$out"
+assert_contains "intent: says the task is in the backlog" "is in the backlog" "$out"
+case "$out" in
+  *"No Ledge task for this repo"*) ko "intent: no contradictory no-task line" "found it" ;;
+  *) ok "intent: no contradictory no-task line" ;;
+esac
+assert_eq "intent: exactly one line" 1 "$(line_count "$out")"
+
+run_hook session-start.sh session-start.json both "$bin"
+assert_eq "both: exit 0" 0 "$rc"
+assert_contains "both: prints the current task context first" \
+  "Ledge task: Release watch banner" "$out"
+assert_contains "both: prints the nudge as well" "ledge start release-watch-banner" "$out"
+last=$(printf '%s\n' "$out" | awk 'END { print }')
+assert_contains "both: the nudge is the last line" "ledge start" "$last"
 
 echo "# stop.sh"
 run_hook stop.sh stop.json task "$bin"
 assert_eq "task: exit 0" 0 "$rc"
 assert_empty "task: prints nothing" "$out"
-assert_eq "task: resolves the task then links the session" \
+assert_eq "task: resolves the task, links the session, then settles" \
   "current --repo /home/user/code/demo-app --json
-link release-watch-banner 071729a1-9f0c-4d7e-8b2a-3c4d5e6f7a81" "$logged"
+link release-watch-banner 071729a1-9f0c-4d7e-8b2a-3c4d5e6f7a81
+settle --repo /home/user/code/demo-app --json" "$logged"
 
 run_hook stop.sh stop.json none "$bin"
 assert_eq "none: exit 0" 0 "$rc"
 assert_empty "none: prints nothing" "$out"
-assert_eq "none: no link call" "current --repo /home/user/code/demo-app --json" "$logged"
+assert_eq "none: no link call, but it still settles" \
+  "current --repo /home/user/code/demo-app --json
+settle --repo /home/user/code/demo-app --json" "$logged"
 
 run_hook stop.sh stop.json error "$bin"
 assert_eq "error: exit 0" 0 "$rc"
 assert_empty "error: prints nothing" "$out"
-assert_eq "error: no link call" "current --repo /home/user/code/demo-app --json" "$logged"
+assert_eq "error: no link call, and a failed settle says nothing" \
+  "current --repo /home/user/code/demo-app --json
+settle --repo /home/user/code/demo-app --json" "$logged"
 
 run_hook stop.sh stop.json task "$nobin"
 assert_eq "missing ledge: exit 0" 0 "$rc"
@@ -145,12 +175,26 @@ assert_empty "missing ledge: prints nothing" "$out"
 run_hook stop.sh - task "$bin"
 assert_eq "empty stdin: exit 0" 0 "$rc"
 assert_empty "empty stdin: prints nothing" "$out"
-assert_empty "empty stdin: ledge never called without a session id" "$logged"
+assert_eq "empty stdin: no link without a session id, but it still settles" \
+  "settle --repo $tmp/pwd --json" "$logged"
 
 run_hook stop.sh malformed.json task "$bin"
 assert_eq "malformed payload: exit 0" 0 "$rc"
 assert_empty "malformed payload: prints nothing" "$out"
-assert_empty "malformed payload: ledge never called" "$logged"
+assert_eq "malformed payload: no link, and settle falls back to PWD" \
+  "settle --repo $tmp/pwd --json" "$logged"
+
+run_hook stop.sh stop.json intent "$bin"
+assert_eq "promoted: exit 0" 0 "$rc"
+assert_contains "promoted: says what moved and why" \
+  "moved release-watch-banner from the backlog" "$out"
+assert_contains "promoted: names the evidence" "a checklist item was ticked" "$out"
+assert_eq "promoted: exactly one line" 1 "$(line_count "$out")"
+
+run_hook stop.sh stop.json kept "$bin"
+assert_eq "kept: exit 0" 0 "$rc"
+assert_empty "kept: says nothing when nothing was promoted" "$out"
+assert_contains "kept: settle still ran" "settle --repo" "$logged"
 
 echo "# pre-compact.sh"
 run_hook pre-compact.sh pre-compact.json task "$bin"
