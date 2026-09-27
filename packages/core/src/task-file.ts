@@ -186,7 +186,7 @@ interface Body {
 }
 
 /** One `## ` section of the body: its heading line verbatim, and the lines under it. */
-interface Section {
+export interface Section {
   /** The heading line exactly as written, or '' for the text before the first heading. */
   raw: string;
   /** The trimmed heading text, or '' for the preamble. */
@@ -286,7 +286,7 @@ function fencedLines(lines: string[]): boolean[] {
  * and the frontmatter has already been cut at its closing `---` before these lines are seen, so
  * a `---` inside a fenced block in the body is only ever content.
  */
-function splitSections(lines: string[]): Section[] {
+export function splitSections(lines: string[]): Section[] {
   const fenced = fencedLines(lines);
   const sections: Section[] = [{ raw: '', heading: '', lines: [] }];
   lines.forEach((line, i) => {

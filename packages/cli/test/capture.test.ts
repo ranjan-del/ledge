@@ -54,6 +54,8 @@ describe('capture, track, sessions and brief', { skip: coreKind === 'fake' }, ()
     assert.ok(existsSync(join(home, 'sessions', `${SESSION}.json`)));
     assert.ok(existsSync(join(home, 'insights', `${id}.json`)));
     assert.match(readFileSync(join(home, 'capture.log'), 'utf8'), / captured session=/);
+    // The weekly to-do list is only ever written when someone asks: a capture never adds to it.
+    assert.equal(existsSync(join(home, 'weeks')), false, 'the capture wrote no week file');
 
     const again = await run(
       ['capture', '--session', SESSION, '--transcript', transcript, '--cwd', home, '--json'],
