@@ -44,36 +44,43 @@ function props(over: Record<string, unknown> = {}) {
 }
 
 describe('To-do, the week', () => {
-  it('names the week and lists Anytime then Monday to Sunday', () => {
+  it('names the week and shows one list with no day sections', () => {
     const { container } = render(WeekView, { props: props() });
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Week 39, 21 to 27 Sep');
-    const titles = [...container.querySelectorAll('.day-title')].map((h) => h.textContent);
-    expect(titles).toEqual([
-      'Anytime this week',
-      'Mon 21 Sep',
-      'Tue 22 Sep',
-      'Wed 23 Sep',
-      'Thu 24 Sep',
-      'Fri 25 Sep',
-      'Sat 26 Sep',
-      'Sun 27 Sep',
-    ]);
+    expect(container.querySelector('section.day')).toBeNull();
+    expect(container.textContent).not.toMatch(/Mon 21 Sep|Anytime this week/);
+    const open = screen.getByRole('list', { name: 'To do this week' });
+    expect(within(open).getAllByRole('listitem')).toHaveLength(3);
+    expect(open.textContent).toContain('Renew the domain');
+    expect(open.textContent).toContain('Review Teacher Corner PR');
+    expect(open.textContent).toContain('Sprint demo prep');
   });
 
-  it('highlights today and mutes the days of this week that have passed', () => {
-    const { container } = render(WeekView, { props: props() });
-    const sections = [...container.querySelectorAll('section.day')];
-    expect(sections[4]!.classList.contains('today')).toBe(true);
-    expect(sections[4]!.textContent).toContain('Today');
-    expect(sections.filter((s) => s.classList.contains('past'))).toHaveLength(3);
-    expect(sections[5]!.classList.contains('past')).toBe(false);
-    expect(sections[0]!.classList.contains('past')).toBe(false);
+  it('moves ticked items down into a Completed list that folds', async () => {
+    render(WeekView, { props: props() });
+    const done = screen.getByRole('region', { name: 'Completed' });
+    expect(done.textContent).toContain('Call the vendor about invoices');
+    expect(screen.getByRole('list', { name: 'To do this week' }).textContent).not.toContain('Call the vendor');
+    const head = within(done).getByRole('button', { name: /Completed/ });
+    expect(head.getAttribute('aria-expanded')).toBe('true');
+    await fireEvent.click(head);
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(done.textContent).not.toContain('Call the vendor');
   });
 
-  it('mutes nothing and highlights nothing in another week', () => {
-    const { container } = render(WeekView, { props: props({ day: '2026-10-07' }) });
-    expect(container.querySelector('.today')).toBeNull();
-    expect(container.querySelector('.past')).toBeNull();
+  it('says so when the week is empty, or all done', () => {
+    const empty = parseWeek('---\nweek: 2026-W39\n---\n', '2026-W39');
+    const { unmount } = render(WeekView, { props: props({ week: empty }) });
+    expect(screen.getByText('Nothing planned for this week yet.')).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Completed' })).toBeNull();
+    unmount();
+    const allDone = parseWeek('---\nweek: 2026-W39\n---\n\n## Anytime\n\n- [x] Done thing\n', '2026-W39');
+    render(WeekView, { props: props({ week: allDone }) });
+    expect(screen.getByText('Everything for this week is done.')).toBeTruthy();
+  });
+
+  it('keeps This week enabled only away from this week', () => {
+    render(WeekView, { props: props({ day: '2026-10-07' }) });
     expect(screen.getByRole('button', { name: 'This week' }).hasAttribute('disabled')).toBe(false);
   });
 
@@ -86,56 +93,40 @@ describe('To-do, the week', () => {
     expect(p.onbrowse.mock.calls).toEqual([['2026-W38'], ['2026-W40'], ['2026-W41']]);
   });
 
-  it('draws an empty day as one line with a quiet add', () => {
-    const { container } = render(WeekView, { props: props() });
-    const tue = container.querySelectorAll('section.day')[2] as HTMLElement;
-    expect(tue.classList.contains('empty')).toBe(true);
-    expect(tue.querySelector('ul')).toBeNull();
-    expect(within(tue).getByRole('button', { name: 'Add to Tuesday' })).toBeTruthy();
-  });
-
-  it('adds by typing and Enter, to the day it was opened on, with an optional task', async () => {
+  it('adds to the week by typing and Enter, with an optional task, and stays open', async () => {
     const p = props();
     render(WeekView, { props: p });
-    await fireEvent.click(screen.getByRole('button', { name: 'Add to Friday' }));
-    const field = screen.getByLabelText('Add to Friday');
-    expect(document.activeElement).toBe(field);
+    const field = screen.getByLabelText('Add something for this week');
+    expect(document.activeElement).not.toBe(field);
     await fireEvent.input(field, { target: { value: 'Pay rent' } });
     await fireEvent.change(screen.getByLabelText('Link a task'), { target: { value: 'release-watch' } });
     await fireEvent.submit(field.closest('form') as HTMLFormElement);
-    expect(p.onadd).toHaveBeenCalledWith('2026-09-25', 'Pay rent', 'release-watch');
+    expect(p.onadd).toHaveBeenCalledWith('anytime', 'Pay rent', 'release-watch');
     await waitFor(() => expect((field as HTMLInputElement).value).toBe(''));
 
     await fireEvent.input(field, { target: { value: 'Buy stamps' } });
     await fireEvent.submit(field.closest('form') as HTMLFormElement);
-    expect(p.onadd).toHaveBeenLastCalledWith('2026-09-25', 'Buy stamps', undefined);
+    expect(p.onadd).toHaveBeenLastCalledWith('anytime', 'Buy stamps', undefined);
     await fireEvent.keyDown(field, { key: 'Escape' });
-    expect(screen.queryByRole('textbox', { name: 'Add to Friday' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Add to Friday' })).toBeTruthy();
+    expect(screen.getByLabelText('Add something for this week')).toBeTruthy();
   });
 
-  it('adds to Anytime from its own row', async () => {
-    const p = props();
-    render(WeekView, { props: p });
-    await fireEvent.click(screen.getByRole('button', { name: 'Add for anytime this week' }));
-    const field = screen.getByLabelText('Add for anytime this week');
-    await fireEvent.input(field, { target: { value: 'Water the plants' } });
-    await fireEvent.submit(field.closest('form') as HTMLFormElement);
-    expect(p.onadd).toHaveBeenCalledWith('anytime', 'Water the plants', undefined);
+  it('names another week in the add row', () => {
+    render(WeekView, { props: props({ day: '2026-10-07' }) });
+    expect(screen.getByLabelText('Add to Week 39, 21 to 27 Sep')).toBeTruthy();
   });
 
   it('shows why an add was refused and keeps the text', async () => {
     const p = props({ onadd: vi.fn(async () => Promise.reject(new Error('disk full'))) });
     render(WeekView, { props: p });
-    await fireEvent.click(screen.getByRole('button', { name: 'Add to Friday' }));
-    const field = screen.getByLabelText('Add to Friday') as HTMLInputElement;
+    const field = screen.getByLabelText('Add something for this week') as HTMLInputElement;
     await fireEvent.input(field, { target: { value: 'Pay rent' } });
     await fireEvent.submit(field.closest('form') as HTMLFormElement);
     await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('disk full'));
     expect(field.value).toBe('Pay rent');
   });
 
-  it('ticks and unticks by where the item is', async () => {
+  it('ticks and unticks by where the item is in the file', async () => {
     const p = props();
     render(WeekView, { props: p });
     await fireEvent.click(screen.getByLabelText('Tick: Sprint demo prep'));
@@ -168,20 +159,13 @@ describe('To-do, the week', () => {
     expect(chip.hasAttribute('disabled')).toBe(true);
   });
 
-  it('moves, links, unlinks and deletes from the item menu', async () => {
+  it('links, unlinks and deletes from the item menu, with no day to move to', async () => {
     const p = props();
     render(WeekView, { props: p });
     const more = () => screen.getByRole('button', { name: 'More for: Renew the domain' });
 
     await fireEvent.click(more());
-    const move = screen.getByLabelText('Move: Renew the domain') as HTMLSelectElement;
-    expect([...move.options].map((o) => o.value)).not.toContain('anytime');
-    await fireEvent.change(move, { target: { value: '2026-09-26' } });
-    await waitFor(() =>
-      expect(p.onmove).toHaveBeenCalledWith({ slot: 'anytime', index: 0 }, '2026-09-26'),
-    );
-
-    await fireEvent.click(more());
+    expect(screen.queryByLabelText('Move: Renew the domain')).toBeNull();
     await fireEvent.change(screen.getByLabelText('Task for: Renew the domain'), {
       target: { value: 'release-watch' },
     });
@@ -205,11 +189,10 @@ describe('To-do, the week', () => {
 
   it('closes the item menu with Escape', async () => {
     render(WeekView, { props: props() });
-    const more = screen.getByRole('button', { name: 'More for: Renew the domain' });
-    await fireEvent.click(more);
-    const move = screen.getByLabelText('Move: Renew the domain');
-    await fireEvent.keyDown(move, { key: 'Escape' });
-    expect(screen.queryByLabelText('Move: Renew the domain')).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'More for: Renew the domain' }));
+    const link = screen.getByLabelText('Task for: Renew the domain');
+    await fireEvent.keyDown(link, { key: 'Escape' });
+    expect(screen.queryByLabelText('Task for: Renew the domain')).toBeNull();
   });
 
   it('says on the row when an edit was refused', async () => {
@@ -232,13 +215,13 @@ describe('To-do, the calendar', () => {
     const onloadweeks = vi.fn();
     const p = { ...props({ weeks: weeks(), onloadweeks, ...over }), onloadweeks };
     const view = render(WeekView, { props: p });
-    await fireEvent.click(screen.getByRole('button', { name: 'Pick a day' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Pick a week' }));
     return { ...view, p, dialog: screen.getByRole('dialog', { name: 'Pick a day' }) };
   };
 
   it('has no calendar unless the panel hands it the weeks', () => {
     render(WeekView, { props: props() });
-    expect(screen.queryByRole('button', { name: 'Pick a day' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Pick a week' })).toBeNull();
   });
 
   it("opens on the shown week's month with today marked, dots on days with items, weeks shaded", async () => {
@@ -265,36 +248,24 @@ describe('To-do, the calendar', () => {
     expect(within(dialog).getByText('August 2026')).toBeTruthy();
   });
 
-  it('shows the week of a day picked, then scrolls to it and lights it briefly', async () => {
-    vi.useFakeTimers();
-    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
-    try {
-      const { dialog, p, container } = await open();
-      await fireEvent.click(within(dialog).getByRole('gridcell', { name: /\b22 September 2026/ }));
-      expect(p.onbrowse).not.toHaveBeenCalled();
-      expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
-      await vi.advanceTimersByTimeAsync(0);
-      const day = container.querySelector('[data-day="2026-09-22"]') as HTMLElement;
-      expect(day.classList.contains('flash')).toBe(true);
-      expect(scroll).toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(1300);
-      expect(day.classList.contains('flash')).toBe(false);
+  it('shows the week of the day picked and closes', async () => {
+    const { dialog, p } = await open();
+    await fireEvent.click(within(dialog).getByRole('gridcell', { name: /\b22 September 2026/ }));
+    expect(p.onbrowse).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
 
-      await fireEvent.click(screen.getByRole('button', { name: 'Pick a day' }));
-      const again = screen.getByRole('dialog', { name: 'Pick a day' });
-      await fireEvent.click(within(again).getByRole('button', { name: 'Next month' }));
-      await fireEvent.click(within(again).getByRole('gridcell', { name: /\b8 October 2026/ }));
-      expect(p.onbrowse).toHaveBeenCalledWith('2026-W41');
-    } finally {
-      vi.useRealTimers();
-    }
+    await fireEvent.click(screen.getByRole('button', { name: 'Pick a week' }));
+    const again = screen.getByRole('dialog', { name: 'Pick a day' });
+    await fireEvent.click(within(again).getByRole('button', { name: 'Next month' }));
+    await fireEvent.click(within(again).getByRole('gridcell', { name: /\b8 October 2026/ }));
+    expect(p.onbrowse).toHaveBeenCalledWith('2026-W41');
   });
 
   it('closes on Escape and on a press outside it', async () => {
     const { dialog } = await open();
     await fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
-    await fireEvent.click(screen.getByRole('button', { name: 'Pick a day' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Pick a week' }));
     expect(screen.getByRole('dialog', { name: 'Pick a day' })).toBeTruthy();
     await fireEvent.pointerDown(document.body);
     expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
