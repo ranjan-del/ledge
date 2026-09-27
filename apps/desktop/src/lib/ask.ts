@@ -18,6 +18,8 @@ import {
   type SessionRecord,
   type TaskInsights,
 } from '@ledge/core/pure';
+import { numberedLines } from './week-view.ts';
+import type { WeekFile } from './week.ts';
 
 /** How many earlier turns are quoted back to the model. */
 export const HISTORY_TURNS = 4;
@@ -36,6 +38,8 @@ export interface LedgeContextInput {
   insights: Record<string, TaskInsights>;
   sessions: SessionRecord[];
   now: Date;
+  /** This week's to-do. Absent, the context says nothing about the week. */
+  week?: WeekFile;
 }
 
 /**
@@ -74,6 +78,12 @@ export function renderLedgeContext(input: LedgeContextInput): string {
     ].filter((p) => p !== '');
     if (facts.length > 0) lines.push(`  ${facts.join('. ')}`);
   }
+  if (input.week) {
+    lines.push('', `=== THIS WEEK'S TO-DO, ${input.week.week}, numbered as \`ledge week\` prints it ===`);
+    const items = numberedLines(input.week);
+    if (items.length === 0) lines.push('(nothing yet)');
+    lines.push(...items);
+  }
   lines.push('=== END ===');
   return lines.join('\n');
 }
@@ -88,6 +98,9 @@ const RULES = [
   '  ledge done <id>   ledge plan <id> "step" "step" ...   ledge todo <id> "text"',
   '  ledge tick <id> <n>   ledge untick <id> <n>   ledge note <id> "text"',
   '  ledge when <id> <YYYY-MM-DD|today|tomorrow|none>',
+  '  ledge week --json   ledge week add "text" --day <day> [--task <id>]',
+  '  ledge week tick <n>   ledge week untick <n>   ledge week rm <n>   ledge week move <n> --day <day>',
+  '  (<day> is YYYY-MM-DD, today, tomorrow, mon to sun, or anytime)',
   'Never delete a task. Checklist numbers are 1-based in file order, ticked items included.',
   '',
   'Rules:',
@@ -97,6 +110,9 @@ const RULES = [
   '3. Lead with the answer. At most 150 words. Plain sentences or short "- " lists. No headings,',
   '   no bold, no tables, no preamble, no offer of more help.',
   '4. Never use an em dash or an en dash. Use a comma, a colon or a full stop.',
+  '5. "Remind me", "this week" and "add to my week" requests go on the weekly to-do, not on a',
+  '   task: run `ledge week add "<text>" --day <day>`, with `--task <id>` when it is about a task.',
+  '   To tick, untick or remove one, run `ledge week --json` first and use the number it gives.',
 ].join('\n');
 
 /** The whole prompt for one question: rules, context, the last few turns, then the question. */
