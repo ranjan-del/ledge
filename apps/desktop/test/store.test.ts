@@ -100,9 +100,19 @@ import {
   loadArchive,
   markDone,
   mergeConfig,
+  TASK_MODE_KEY,
+  addWeekItem,
+  browseWeek,
+  moveWeekItem,
+  openWeek,
+  rememberedTaskMode,
   removeTask,
+  removeWeekItem,
   reorderTasks,
   select,
+  setTaskMode,
+  updateWeekItem,
+  weekFor,
   setSurface,
   setView,
   shiftStatus,
@@ -110,6 +120,8 @@ import {
   todayPlan,
   toggleChecklist,
 } from '../src/lib/store.svelte.ts';
+import { todayIso } from '../src/lib/time.ts';
+import { isoWeekOf, parseWeek, serializeWeek, shiftWeek, weekDays } from '../src/lib/week.ts';
 
 const readsOf = (file: string) =>
   (readTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((c) => c[0] === file)
@@ -171,6 +183,7 @@ describe('store', () => {
       LEDGE_HOME,
       `${LEDGE_HOME}/sessions`,
       `${LEDGE_HOME}/insights`,
+      `${LEDGE_HOME}/weeks`,
     ]);
     expect(disk.state.watchArgs?.opts).toMatchObject({ delayMs: 150 });
   });
@@ -679,5 +692,163 @@ describe('store', () => {
     expect(desk.insights['release-watch-banner']?.headline).toBe('Banner built, poll next');
     /* A sidecar event never re-reads a task file. */
     expect(readsOf(TASK_A_FILE)).toBe(1);
+  });
+
+  /* ---------------------------------------------------------------- weeks */
+
+  const WEEKS = `${LEDGE_HOME}/weeks`;
+  const thisWeek = () => isoWeekOf(todayIso());
+  const weekFile = (week: string) => `${WEEKS}/${week}.md`;
+  const sample = (week: string) => {
+    const [mon, , , thu] = weekDays(week);
+    return `---
+week: ${week}
+updated: 2026-09-27T12:40:00+05:30
+---
+
+## Anytime
+
+- [ ] Renew the domain
+
+## Mon ${mon}
+
+- [x] Call the vendor about invoices
+- [ ] Review the PR {task: release-watch-banner}
+
+## Thu ${thu}
+
+- [ ] Sprint demo prep
+`;
+  };
+
+  it('creates weeks/ at boot, watches it, and reads this week', async () => {
+    expect(disk.dirs.has(WEEKS)).toBe(true);
+    const week = thisWeek();
+    expect(weekFor(week)).toMatchObject({ week, anytime: [], days: {} });
+    disk.files.set(weekFile(week), sample(week));
+    shutdown();
+    await boot();
+    expect(weekFor(week).anytime).toEqual([{ text: 'Renew the domain', done: false }]);
+    expect(weekFor(week).days[weekDays(week)[0]!]?.[1]?.taskId).toBe('release-watch-banner');
+  });
+
+  it('treats a missing week as empty and a garbled one as whatever it can read', async () => {
+    const next = shiftWeek(thisWeek(), 1);
+    browseWeek(next);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(desk.week).toBe(next);
+    expect(weekFor(next)).toMatchObject({ anytime: [], days: {}, extra: '' });
+
+    const prev = shiftWeek(thisWeek(), -1);
+    disk.files.set(weekFile(prev), '\u0000 not a week at all\n## Anytime\n- [ ] still read\n');
+    browseWeek(prev);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(weekFor(prev).anytime).toEqual([{ text: 'still read', done: false }]);
+    expect(weekFor(prev).extra).toContain('not a week at all');
+  });
+
+  it('adds through serializeWeek with a temporary file and a rename', async () => {
+    const week = thisWeek();
+    const today = todayIso();
+    await addWeekItem(week, today, 'Call the bank', 'release-watch-banner');
+    const text = disk.files.get(weekFile(week)) as string;
+    const parsed = parseWeek(text, week);
+    expect(parsed.days[today]).toEqual([
+      { text: 'Call the bank', done: false, taskId: 'release-watch-banner' },
+    ]);
+    expect(serializeWeek(parsed)).toBe(text);
+    expect(parsed.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const renames = (rename as unknown as { mock: { calls: string[][] } }).mock.calls;
+    const last = renames[renames.length - 1]!;
+    expect(last[0]).toMatch(new RegExp(`^${weekFile(week)}\\..+\\.tmp$`));
+    expect(last[1]).toBe(weekFile(week));
+    expect([...disk.files.keys()].some((f) => f.endsWith('.tmp'))).toBe(false);
+    expect(weekFor(week).days[today]).toHaveLength(1);
+  });
+
+  it('edits the file as it is on disk, so a change made in a terminal is kept', async () => {
+    const week = thisWeek();
+    const [mon, tue] = weekDays(week);
+    disk.files.set(weekFile(week), sample(week));
+    /* The desk has not seen this yet: the CLI wrote it a moment ago. */
+    await updateWeekItem(week, { slot: mon!, index: 1 }, { done: true });
+    let w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.days[mon!]!.map((i) => i.done)).toEqual([true, true]);
+    expect(w.anytime).toHaveLength(1);
+
+    await moveWeekItem(week, { slot: 'anytime', index: 0 }, tue!);
+    await removeWeekItem(week, { slot: mon!, index: 0 });
+    await updateWeekItem(week, { slot: mon!, index: 0 }, { taskId: undefined, text: 'Review it' });
+    w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.anytime).toEqual([]);
+    expect(w.days[tue!]).toEqual([{ text: 'Renew the domain', done: false }]);
+    expect(w.days[mon!]).toEqual([{ text: 'Review it', done: true }]);
+  });
+
+  it('runs quick edits one after another so none is lost', async () => {
+    const week = thisWeek();
+    await Promise.all([
+      addWeekItem(week, 'anytime', 'one'),
+      addWeekItem(week, 'anytime', 'two'),
+      addWeekItem(week, 'anytime', 'three'),
+    ]);
+    const w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.anytime.map((i) => i.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('puts the old copy back when the write is refused', async () => {
+    const week = thisWeek();
+    (writeTextFile as unknown as { mockRejectedValueOnce: (e: unknown) => void }).mockRejectedValueOnce(
+      'forbidden path',
+    );
+    await expect(addWeekItem(week, 'anytime', 'nope')).rejects.toBe('forbidden path');
+    expect(weekFor(week).anytime).toEqual([]);
+  });
+
+  it('re-reads a week the watcher names, and ignores its temporary files', async () => {
+    const week = thisWeek();
+    disk.files.set(weekFile(week), sample(week));
+    fire([`${weekFile(week)}.123.tmp`]);
+    await settle();
+    expect(weekFor(week).anytime).toEqual([]);
+    fire([weekFile(week)]);
+    await settle();
+    expect(weekFor(week).anytime).toHaveLength(1);
+    disk.files.delete(weekFile(week));
+    fire([WEEKS]);
+    await settle();
+    expect(weekFor(week).anytime).toEqual([]);
+  });
+
+  it('remembers Tasks or To-do per viewer, and survives storage that refuses', () => {
+    setTaskMode('todo');
+    expect(desk.taskMode).toBe('todo');
+    expect(desk.surface).toBe('tasks');
+    expect(localStorage.getItem(TASK_MODE_KEY)).toBe('todo');
+    expect(rememberedTaskMode()).toBe('todo');
+    setTaskMode('tasks');
+    expect(rememberedTaskMode()).toBe('tasks');
+
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect(rememberedTaskMode()).toBe('tasks');
+    expect(() => setTaskMode('todo')).not.toThrow();
+    expect(desk.taskMode).toBe('todo');
+    spy.mockRestore();
+    set.mockRestore();
+    setTaskMode('tasks');
+  });
+
+  it('opens the To-do view on this week', () => {
+    browseWeek(shiftWeek(thisWeek(), 3));
+    openWeek();
+    expect(desk.taskMode).toBe('todo');
+    expect(desk.surface).toBe('tasks');
+    expect(desk.week).toBe(thisWeek());
+    setTaskMode('tasks');
   });
 });
