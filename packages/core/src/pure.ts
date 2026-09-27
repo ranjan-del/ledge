@@ -81,3 +81,25 @@ export {
   serializeSessionRecord,
   sessionDurationMs,
 } from './sidecars.ts';
+export type { DigestEntry, SessionTodo, TranscriptDigest, RenderDigestOptions } from './transcript.ts';
+export { DIGEST_MAX_CHARS, parseTranscript, renderDigest } from './transcript.ts';
+export type {
+  CaptureDecision,
+  CaptureHistory,
+  CaptureParse,
+  CapturePromptInput,
+  CaptureResult,
+} from './capture.ts';
+export {
+  CAPTURE_DEBOUNCE_LINES,
+  CAPTURE_DEBOUNCE_MS,
+  PLAN_STEP_MAX,
+  SESSION_TITLE_MAX,
+  buildCapturePrompt,
+  captureDue,
+  extractJsonObject,
+  matchItem,
+  parseCaptureResult,
+  samePlan,
+} from './capture.ts';
+export { BRIEF_MAX_LINES, buildBrief, firstSentences } from './brief.ts';

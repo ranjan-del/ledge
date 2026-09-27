@@ -91,4 +91,16 @@ describe('claudeCodeProvider', () => {
     const provider = claudeCodeProvider({ command: stub('sleep 30') });
     await assert.rejects(() => provider.ask('anything', { timeoutMs: 200 }), /did not answer/);
   });
+
+  test('a model option is passed as --model after the isolation arguments, and named', async () => {
+    const command = stub('for a in "$@"; do printf "[%s]" "$a"; done');
+    const pinned = claudeCodeProvider({ command, model: 'haiku' });
+    assert.equal(pinned.model, 'haiku');
+    const answer = await pinned.ask('x');
+    assert.match(answer.text, /\[--setting-sources\]\[\]/);
+    assert.match(answer.text, /\[--model\]\[haiku\]$/);
+    const plain = claudeCodeProvider({ command });
+    assert.equal(plain.model, undefined);
+    assert.doesNotMatch((await plain.ask('x')).text, /--model/);
+  });
 });

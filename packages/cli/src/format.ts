@@ -6,9 +6,12 @@ import {
   ACTIVITY_HALF_LIFE_MS,
   ACTIVITY_HORIZON_MS,
   formatAge,
+  isSessionRunning,
+  sessionDurationMs,
 } from '@ledge/core';
 import type { ActivitySignal, AskResult, MemoryEntry, NoteEntry, Observed } from '@ledge/core';
 import type { ObservedRepo, ObservedTask, RepoStatus, SessionRef, Task } from '@ledge/core';
+import type { SessionRecord } from '@ledge/core';
 
 /** A pending repo plus the task that references it, when one does. */
 export interface PendingRow extends RepoStatus {
@@ -271,9 +274,44 @@ export function sessionRow(ref: SessionRef): string[] {
   return [ref.id, ref.isLatest ? 'latest' : '', ref.taskTitle, repo, ref.lastSeen];
 }
 
-/** Renders the Sessions section, `(none)` when no task has a session id recorded. */
-export function renderSessions(refs: SessionRef[]): string {
-  return section('Sessions', refs.map(sessionRow));
+/**
+ * Row for a session that has a SessionRecord: the id, `running` or `ended` or nothing, the AI
+ * title (or `Untitled session`), the task, when it started and how long it was worked, and what
+ * it left behind. The id is shortened to eight characters, which is how Claude Code's own
+ * resume picker shows it and is still unique in practice.
+ */
+export function sessionRecordRow(record: SessionRecord, now: Date): string[] {
+  const state = isSessionRunning(record, now) ? 'running' : record.ended ? 'ended' : '';
+  const traces = [
+    `${record.filesChanged.length} files`,
+    `${record.commits.length} commits`,
+    `${record.todosTicked.length} ticked`,
+  ].join(', ');
+  return [
+    record.id.slice(0, 8),
+    state,
+    record.title ?? 'Untitled session',
+    record.taskId ?? '',
+    record.started.slice(0, 16).replace('T', ' '),
+    formatAge(sessionDurationMs(record)),
+    traces,
+  ];
+}
+
+/**
+ * Renders the Sessions section: recorded sessions first, then any session ids that tasks carry
+ * but no record describes, and `(none)` when there is neither.
+ */
+export function renderSessions(
+  refs: SessionRef[],
+  records: SessionRecord[] = [],
+  now: Date = new Date(),
+): string {
+  if (records.length === 0) return section('Sessions', refs.map(sessionRow));
+  const rows = records.map((record) => sessionRecordRow(record, now));
+  const recorded = section('Sessions', rows);
+  if (refs.length === 0) return recorded;
+  return `${recorded}\n\n${section('Linked on tasks, no record', refs.map(sessionRow))}`;
 }
 
 /**
