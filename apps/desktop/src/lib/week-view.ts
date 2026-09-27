@@ -139,8 +139,8 @@ export function openCount(w: WeekFile): number {
 
 /**
  * The week as `ledge week` numbers it, one line per item: Anytime first, then days in order,
- * items in file order, 1-based. Ask Ledge quotes this so the model can tick or remove by the
- * same number the command line would print.
+ * items in file order, 1-based. The assistant's context quotes this so the model can tick or
+ * remove by the same number the command line would print.
  */
 export function numberedLines(w: WeekFile): string[] {
   const out: string[] = [];

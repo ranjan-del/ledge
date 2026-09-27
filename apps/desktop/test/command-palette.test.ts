@@ -5,7 +5,7 @@ import { DAY, taskA, taskB, taskC } from './fixtures.ts';
 
 const base = {
   tasks: [taskA(), taskB(), taskC()],
-  surface: 'now' as const,
+  surface: 'assistant' as const,
   day: DAY,
   onrun: () => {},
   onclose: () => {},
@@ -54,11 +54,11 @@ describe('CommandPalette', () => {
     await fireEvent.keyDown(field, { key: 'ArrowUp' });
     expect(highlighted(container)).toBe('Release watch banner for stale tabs');
     await fireEvent.keyDown(field, { key: 'ArrowUp' });
-    expect(highlighted(container)).toBe('Go to Sessions');
+    expect(highlighted(container)).toBe('Go to Tasks');
     await fireEvent.keyDown(field, { key: 'Home' });
     expect(highlighted(container)).toBe('Release watch banner for stale tabs');
     await fireEvent.keyDown(field, { key: 'End' });
-    expect(highlighted(container)).toBe('Go to Sessions');
+    expect(highlighted(container)).toBe('Go to Tasks');
   });
 
   it('walks straight through the group headings rather than stopping on them', async () => {

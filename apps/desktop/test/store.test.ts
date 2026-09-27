@@ -101,6 +101,9 @@ import {
   markDone,
   mergeConfig,
   TASK_MODE_KEY,
+  MEMORY_MODE_KEY,
+  rememberedMemoryMode,
+  setMemoryMode,
   addWeekItem,
   browseWeek,
   moveWeekItem,
@@ -841,6 +844,29 @@ updated: 2026-09-27T12:40:00+05:30
     spy.mockRestore();
     set.mockRestore();
     setTaskMode('tasks');
+  });
+
+  it('remembers Notes or Sessions per viewer, and survives storage that refuses', () => {
+    setMemoryMode('sessions');
+    expect(desk.memoryMode).toBe('sessions');
+    expect(desk.surface).toBe('memory');
+    expect(localStorage.getItem(MEMORY_MODE_KEY)).toBe('sessions');
+    expect(rememberedMemoryMode()).toBe('sessions');
+    setMemoryMode('notes');
+    expect(rememberedMemoryMode()).toBe('notes');
+
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect(rememberedMemoryMode()).toBe('notes');
+    expect(() => setMemoryMode('sessions')).not.toThrow();
+    expect(desk.memoryMode).toBe('sessions');
+    spy.mockRestore();
+    set.mockRestore();
+    setMemoryMode('notes');
   });
 
   it('opens the To-do view on this week', () => {

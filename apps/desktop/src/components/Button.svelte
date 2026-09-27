@@ -88,13 +88,13 @@
   /**
    * Whether the panel should open at its full height, so it opens at the right size instead of
    * re-sizing a moment after it appears. This is the button window's own answer, and it can
-   * only be an answer about NOW: the panel window keeps its own surface and its own open task,
-   * and two webviews share no state. The panel corrects this for itself as soon as it has the
+   * only be an answer about the idle ASSISTANT: the panel window keeps its own surface and its
+   * own open task, and two webviews share no state. The panel corrects this for itself as soon as it has the
    * focus, so a wrong guess costs one resize rather than a wrong-sized panel.
    */
   function panelWantsFullHeight(): boolean {
     const content = panelContent({
-      surface: 'now',
+      surface: 'assistant',
       view: 'live',
       detailOpen: false,
       working: workingTasks().length,
@@ -106,6 +106,7 @@
       done: 0,
       backlog: 0,
       pending: desk.pending.length,
+      recent: Math.min(3, desk.tasks.filter((t) => t.status !== 'done').length),
     });
     const avail = typeof screen === 'undefined' ? 0 : screen.availHeight;
     const ratio = typeof window === 'undefined' ? 1 : window.devicePixelRatio;

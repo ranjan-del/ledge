@@ -12,12 +12,18 @@
    * summary from its task's insights or from its own first sentences, with the words as they
    * were written one press away, under its day, beside its task. The filter is `searchMemory` from core, which requires every term
    * to appear and ranks nothing, so what the field returns is predictable.
+   *
+   * Above the notes sits a switch, `Notes | Sessions`. Sessions was a tab of its own; it is the
+   * other record of what the work left behind, so it lives here now, drawn exactly as it was.
+   * The panel hands the Sessions view in as a snippet, so this component stays about notes.
    */
   import { searchMemory, type MemoryEntry, type Task } from '@ledge/core/pure';
   import { noteDigest } from '../lib/digest.ts';
   import type { TaskInsights } from '@ledge/core/pure';
+  import type { Snippet } from 'svelte';
   import { dayLabel, todayIso } from '../lib/time.ts';
   import Digest from './Digest.svelte';
+  import ViewSwitch, { type ViewOption } from './ViewSwitch.svelte';
 
   interface Props {
     /** From `memoryFor` in core: newest date first. */
@@ -29,9 +35,32 @@
     onselect: (task: Task) => void;
     /** A task's insights, for the note titles. Absent means every note uses the fallback. */
     insightsFor?: (taskId: string) => TaskInsights | undefined;
+    /** Notes or Sessions. Without `onmode` there is no switch, and this is the notes only. */
+    mode?: 'notes' | 'sessions';
+    onmode?: (mode: 'notes' | 'sessions') => void;
+    /** The Sessions view, drawn when `mode` is `sessions`. */
+    sessions?: Snippet;
+    /** How many sessions there are, for the switch. */
+    sessionCount?: number;
   }
 
-  let { entries, taskFor, day = todayIso(), onselect, insightsFor }: Props = $props();
+  let {
+    entries,
+    taskFor,
+    day = todayIso(),
+    onselect,
+    insightsFor,
+    mode = 'notes',
+    onmode,
+    sessions,
+    sessionCount,
+  }: Props = $props();
+
+  const modes = $derived<ViewOption[]>([
+    { id: 'notes', label: 'Notes', count: entries.length },
+    { id: 'sessions', label: 'Sessions', count: sessionCount },
+  ]);
+  const showSessions = $derived(onmode !== undefined && mode === 'sessions');
 
   let query = $state('');
 
@@ -48,6 +77,21 @@
   );
 </script>
 
+{#if onmode}
+  <div class="views">
+    <ViewSwitch
+      options={modes}
+      active={mode}
+      variant="segmented"
+      label="Notes or sessions"
+      onchange={(id) => onmode?.(id as 'notes' | 'sessions')}
+    />
+  </div>
+{/if}
+
+{#if showSessions}
+  {@render sessions?.()}
+{:else}
 <div class="pane">
   {#if entries.length > 0}
     <div class="finder">
@@ -103,8 +147,14 @@
     {/if}
   </div>
 </div>
+{/if}
 
 <style>
+  /* The switch sits on its own line under the tabs, as it does on TASKS. */
+  .views {
+    flex: none;
+    padding: 0 var(--space-3) var(--space-2);
+  }
   .pane-scroll {
     gap: var(--space-3);
   }
