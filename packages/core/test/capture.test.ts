@@ -195,7 +195,7 @@ describe('buildCapturePrompt', () => {
     assert.match(prompt, /requirement, first line: Show a banner\./);
     assert.match(prompt, /- \[ \] Banner component/);
     assert.match(prompt, /DIGEST BODY/);
-    assert.doesNotMatch(prompt, /[—–]/);
+    assert.doesNotMatch(prompt, /[\u2014\u2013]/);
   });
 });
 

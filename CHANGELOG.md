@@ -17,6 +17,34 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ### Added
 
+- Background capture, from the AI assistant contract (v3). `ledge capture` reads a Claude Code
+  session transcript, asks Haiku which task the work was for, and keeps that task current through
+  `TaskStore`: the plan when it changed, checklist items added and ticked by word match, a short
+  note, and the session link. When no task fits it creates one marked `origin: auto`. It is
+  debounced (fewer than 40 new lines and under 10 minutes is a skip), writes nothing when the
+  model cannot answer or answers with the wrong shape, serialises captures of one session with a
+  lock, and logs one line per run to `capture.log`.
+- Two sidecar folders beside the task files, so the Markdown format does not change:
+  `sessions/<id>.json` holds a SessionRecord per session (start, last activity, end, AI title
+  and summary, files changed, commits from `git log`, todos ticked and added) and
+  `insights/<task>.json` holds AI titles and summaries for notes and plan steps, keyed by
+  `contentKey`. Writes are atomic; unreadable files are treated as absent.
+- `@ledge/core/pure`: `contentKey`, `noteKey`, the `SessionRecord` and `TaskInsights` types,
+  `parseSessionRecord`, `parseInsights`, `isSessionRunning`, `sessionDurationMs`, the transcript
+  digest (`parseTranscript`, `renderDigest`), the capture rules (`captureDue`,
+  `buildCapturePrompt`, `parseCaptureResult`, `matchItem`), `buildBrief` and the summarise
+  helpers. `@ledge/core` adds `SessionStore`, `InsightStore`, `runCapture` and `trackSession`.
+- `ledge track`, which the hooks use to write a session record skeleton and to mark it ended;
+  `ledge brief <id>`, the briefing a new session on a task starts from, at most 40 lines; and
+  `ledge summarise [<id>] [--all]`, which backfills titles and summaries for notes and plan
+  steps that have none, one Haiku call per task, without touching the task file.
+- `claudeCodeProvider({ model })` passes `--model`, and a provider may name its `model`.
+- Plugin: the SessionStart block ends with a short set of standing rules (plan, tick, note, and
+  give a new goal its own task), SessionStart writes the session record, Stop starts a capture
+  detached, PreCompact starts a final capture, and a new SessionEnd hook marks the session ended
+  and starts a final capture. Every hook exits at once when `LEDGE_CAPTURE=1` is set, which the
+  capture sets for the model call it makes.
+
 - Four surfaces in the desktop panel, replacing the three tabs: Now answers what I am doing,
   Sessions where I am working, Tasks what I need to accomplish, Memory what I need to remember.
   Pending did not go away; it became part of what Now and Tasks show.
@@ -38,6 +66,12 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
   labelled with which of the two it came from so an observation is never mistaken for a guess.
 
 ### Changed
+
+- `ledge sessions --json` prints SessionRecords from `sessions/` instead of the SessionRef list.
+  The text form lists recorded sessions with their title, state and duration first, then the
+  session ids that tasks carry without a record. It also takes `--task <id>`.
+- The `/ledge` standing rules tick with `ledge tick` rather than an edit of the file, and tell
+  the session to give a new goal its own task.
 
 - The floating button sits in the top right corner rather than centred on the right edge.
 - The panel takes the full work area height once there is something to show, and stays short while

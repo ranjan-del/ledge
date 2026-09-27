@@ -68,7 +68,10 @@ Four of those Claude does on its own, because the command file makes them standi
 - Append a closing note before compaction and at the end of a session: what was done, what is
   left, what the next session needs to know.
 
-When a session ends, the Stop hook links the session id to the task. The next time you open Claude
+After each turn the Stop hook links the session id to the task and starts `ledge capture` in
+the background, which reads the session's transcript, keeps the plan, checklist and notes
+current, and gives the session a title (`ledge sessions` shows it; `~/.ledge/capture.log` says
+what each run did). The next time you open Claude
 Code in that folder, the SessionStart hook briefs it with the title, the planned day, the
 requirement, the plan, the unchecked items and the latest note.
 

@@ -105,6 +105,13 @@ From `@ledge/core/pure` (no platform modules):
 From `@ledge/core` (Node): `SessionStore` and `InsightStore` with `get`, `list`, `put`, bound to
 `ledgeHome()`.
 
+Notes from stream A on readings the text above left open, none of which changes a shape:
+`sessionDurationMs` is `lastActivity - started`, never `ended - started`, so a terminal left open
+overnight is not a night of work. `SessionStore.list(taskId?)` sorts newest `lastActivity` first.
+Temporary files are `<file>.<pid>.tmp`, so two writers cannot share one. `ledge sessions` text
+output lists recorded sessions and then linked ids with no record; only `--json` is records only.
+A `--final` capture still skips when the transcript has no new line since the last capture.
+
 ## CLI (stream A)
 
 | Command | Does |
@@ -113,6 +120,7 @@ From `@ledge/core` (Node): `SessionStore` and `InsightStore` with `get`, `list`,
 | `ledge summarise [<task-id>] [--all]` | Backfills `TaskInsights` for notes and plan steps that have no current entry |
 | `ledge sessions [--task <id>] --json` | Prints SessionRecords, newest first |
 | `ledge brief <task-id>` | Prints the resume briefing (see below) |
+| `ledge track --session <id> [--transcript <path>] [--cwd <dir>] [--ended]` | Added by stream A for the hooks: writes the SessionRecord skeleton if absent, fills `repo` and `transcriptPath`, and with `--ended` sets `ended`. Without `--ended` it clears `ended`, because a session that fires SessionStart again has been resumed |
 
 ### What capture does
 
