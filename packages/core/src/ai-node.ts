@@ -46,6 +46,12 @@ export interface ClaudeCodeOptions {
   command?: string;
   /** Arguments before stdin. Defaults to DEFAULT_ARGS; replace the whole list to change it. */
   args?: string[];
+  /**
+   * Model to ask, passed as `--model <model>` after the arguments, e.g. `haiku` or `sonnet`.
+   * Absent means Claude Code's own default. The capture and `ledge summarise` pin Haiku here,
+   * because they run after every few turns and a title does not need a large model.
+   */
+  model?: string;
   /** Milliseconds `ask` waits before killing the child. Defaults to 90000. */
   timeoutMs?: number;
   /**
@@ -131,7 +137,8 @@ function firstLines(text: string, count = 3): string {
  */
 export function claudeCodeProvider(options: ClaudeCodeOptions = {}): Provider {
   const command = options.command ?? 'claude';
-  const args = options.args ?? DEFAULT_ARGS;
+  const model = options.model?.trim() || undefined;
+  const args = [...(options.args ?? DEFAULT_ARGS), ...(model ? ['--model', model] : [])];
   const defaultTimeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const cwd = options.cwd ?? tmpdir();
   let cached: boolean | undefined;
@@ -143,6 +150,7 @@ export function claudeCodeProvider(options: ClaudeCodeOptions = {}): Provider {
 
   return {
     name: 'claude-code',
+    ...(model ? { model } : {}),
 
     async available(): Promise<boolean> {
       if (cached !== undefined) return cached;

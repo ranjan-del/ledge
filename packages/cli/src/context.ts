@@ -15,8 +15,22 @@ export interface Flags {
   /** Writes the result into the task file. Only `handoff` reads it. */
   save: boolean;
   repo?: string;
-  /** The Claude Code session id. Only `began` reads it, to tie a record to one session. */
+  /** The Claude Code session id. `began`, `capture` and `track` read it. */
   session?: string;
+  /** With capture: skip the debounce, as the PreCompact and SessionEnd hooks do. */
+  final: boolean;
+  /** With capture: run whatever the debounce says. */
+  force: boolean;
+  /** With summarise: every open task rather than one. */
+  all: boolean;
+  /** With track: the session has ended. */
+  ended: boolean;
+  /** With capture and track: the transcript path from the hook payload. */
+  transcript?: string;
+  /** With capture and track: the session's working directory, when it is not this one. */
+  dir?: string;
+  /** With sessions: only the sessions attributed to this task. */
+  task?: string;
 }
 
 /**
@@ -31,6 +45,12 @@ export interface CommandContext {
   out: (text: string) => void;
   err: (text: string) => void;
   provider: Provider;
+  /**
+   * The fast model for background work: `capture` and `summarise`. A separate provider rather
+   * than a flag on the first, because those two run after every few turns and must pin Haiku,
+   * while `ask` and friends leave the model to Claude Code. Tests inject a stand-in for both.
+   */
+  fastProvider: Provider;
 }
 
 /** A command handler: returns the exit code, or throws one of the error classes below. */

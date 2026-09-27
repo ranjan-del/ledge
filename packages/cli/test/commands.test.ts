@@ -778,25 +778,12 @@ describe('sessions', () => {
     assert.match(r.stdout, /\/repos\/banner/);
   });
 
-  test('--json carries the task, the repo and the lastSeen bound', async () => {
+  test('--json prints session records only, so a linked id without one is not there', async () => {
     await addTask('Banner work', '--repo', '/repos/banner');
     await run(['link', 'banner-work', 'aaa111']);
     const r = await run(['sessions', '--json']);
-    const refs = JSON.parse(r.stdout) as {
-      id: string;
-      taskId: string;
-      taskTitle: string;
-      repo?: string;
-      lastSeen: string;
-      isLatest: boolean;
-    }[];
-    assert.equal(refs.length, 1);
-    assert.equal(refs[0]!.id, 'aaa111');
-    assert.equal(refs[0]!.taskId, 'banner-work');
-    assert.equal(refs[0]!.taskTitle, 'Banner work');
-    assert.equal(refs[0]!.repo, '/repos/banner');
-    assert.equal(refs[0]!.isLatest, true);
-    assert.match(refs[0]!.lastSeen, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(r.code, 0);
+    assert.deepEqual(JSON.parse(r.stdout), []);
   });
 
   test('a store with no linked session prints (none) and an empty list', async () => {
