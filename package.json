@@ -1,7 +1,7 @@
 {
   "name": "ledge-monorepo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ledge: a floating desktop assistant for Claude Code. Current tasks, backlog and pending git work, from plain Markdown files.",
   "license": "MIT",
   "type": "module",

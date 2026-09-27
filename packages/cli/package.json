@@ -1,6 +1,6 @@
 {
   "name": "@ledge/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The ledge command: current tasks, backlog and pending git work.",
   "license": "MIT",
   "type": "module",
