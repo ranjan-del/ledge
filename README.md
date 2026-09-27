@@ -79,6 +79,8 @@ Everything lives under `~/.ledge/` (override with `LEDGE_HOME`):
     2026-09-14-release-watch-banner.md
     2026-09-14-optimistic-crud.md
   archive/            # done tasks are moved here by `ledge done`
+  weeks/
+    2026-W39.md       # this week's to-do list, one file per ISO week
 ```
 
 Each task is one Markdown file with YAML frontmatter and four known headings: `## Requirement`,
@@ -86,6 +88,11 @@ Each task is one Markdown file with YAML frontmatter and four known headings: `#
 other three are optional. There is no database, no server and no daemon. Any editor, any script
 and Claude Code can change the files, and the files are the API. Full format in
 [docs/task-file-format.md](docs/task-file-format.md).
+
+Beside the tasks there is a weekly to-do list: one file per ISO week under `weeks/`, items grouped
+by day plus an Anytime bucket, each a reminder that may link to a task. `ledge week` reads and
+changes it, and `ledge today` and the session start context show today's unticked items. Format
+in [docs/week-file-format.md](docs/week-file-format.md).
 
 ### The CLI is the one thing everyone calls
 
@@ -365,7 +372,10 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge plan <id> "step" "step" ...` | Replace the ordered plan steps |
 | `ledge note <id> "text"` | Append text to today's notes |
 | `ledge when <id> <YYYY-MM-DD\|today\|tomorrow\|none>` | Set or clear the planned day |
-| `ledge today` | Tasks planned for today, overdue ones, then the remaining current tasks |
+| `ledge today` | Tasks planned for today, today's week items, overdue ones, then the remaining current tasks |
+| `ledge week [--week W\|--next] [--json]` | This week's to-do list by day, each item numbered |
+| `ledge week add "text" [--day d] [--task id]` | Add a week item; `--day` takes `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun` or `anytime` (the default) |
+| `ledge week tick\|untick\|rm <n>`, `ledge week move <n> --day d` | Change week item n, as `ledge week` numbered it |
 | `ledge sessions [--task id] [--json]` | Sessions newest first with title, duration and what they left; `--json` prints the session records |
 | `ledge capture --session id --transcript path [--cwd dir] [--final] [--force]` | Read a session transcript into its task and the sidecars. The hooks run it |
 | `ledge track --session id [--transcript path] [--cwd dir] [--ended]` | Write the session record skeleton, or mark it ended. The hooks run it |
@@ -379,7 +389,8 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge help [command]` | Print the help screen, or the usage of one command |
 
 `ledge current --context` prints what the SessionStart hook injects: the title, the planned day,
-the requirement, the plan, the unchecked items and the latest note, capped at 40 lines. When it
+the requirement, the plan, the unchecked items, today's unticked week items (at most five lines)
+and the latest note, capped at 40 lines. When it
 does not fit, the note is shortened from its oldest line first and dropped before anything else.
 
 ## Limitations

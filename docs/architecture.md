@@ -95,6 +95,7 @@ The full signatures are Contract 2 in the
 | Sidecars (v3) | `contentKey`, `noteKey`, `parseSessionRecord`, `parseInsights`, `isSessionRunning`, `sessionDurationMs`, `emptyInsights`; `SessionStore`, `InsightStore` | all but the two stores |
 | Capture (v3) | `parseTranscript`, `renderDigest`, `captureDue`, `buildCapturePrompt`, `parseCaptureResult`, `matchItem`; `runCapture`, `trackSession`, `mergeInsights` | all but the last three |
 | Briefing and backfill (v3) | `buildBrief`, `missingInsights`, `buildSummarisePrompt`, `parseSummariseResult` | yes |
+| Week (to-do) | `isoWeekOf`, `weekDays`, `shiftWeek`, `isIsoWeek`, `parseWeek`, `serializeWeek`, `itemsFor`, `numberWeek`, `emptyWeek`; `WeekStore` | all but the store |
 | Types | `Task`, `TaskStatus`, `ChecklistItem`, `NoteEntry`, `Config`, `RepoStatus`, `TaskPaths`, `SessionRecord`, `TaskInsights` | yes |
 
 ### The planning helpers
@@ -264,13 +265,25 @@ requirement giving way before the open items. The panel passes it as the prompt 
 Haiku once per task for a title and summary each, and writes only the insights file. A task with
 nothing missing costs no model call.
 
+## The weekly to-do list
+
+Added by the [weekly to-do contract](superpowers/specs/2026-09-27-weekly-todo-contract.md). A
+personal list of things to do in one ISO week, kept in `weeks/<YYYY>-W<ww>.md`, grouped by day
+plus Anytime. The format, the ISO week arithmetic and the numbering are pure, in `week.ts`, so
+the panel and the CLI write the same bytes; `week-node.ts` holds `WeekStore`, which reads a
+missing file as an empty week and writes atomically. `ledge week` is the only writer outside the
+panel and an editor. `ledge today` and `ledge current --context` read today's unticked items, at
+most five lines, and the SessionStart standing rules carry one line saying to add items only when
+the person asks. The capture never writes a week file. Format in
+[week-file-format.md](week-file-format.md).
+
 ## What Ledge reads and does not read
 
 | Reads | Does not read |
 |---|---|
 | `~/.ledge/tasks/*.md` and `~/.ledge/config.json` | Any transcript other than the one a hook named for its own session |
 | `~/.ledge/archive/` for a count only | The claude-mem database or any other memory plugin's store ([ADR 0003](adr/0003-no-claude-mem-read.md)) |
-| `~/.ledge/sessions/` and `~/.ledge/insights/` | Claude Code settings, memory or other files under `~/.claude` |
+| `~/.ledge/sessions/`, `~/.ledge/insights/` and `~/.ledge/weeks/` | Claude Code settings, memory or other files under `~/.claude` |
 | `git -C <repo> status --porcelain=v2 --branch` for repositories under `roots` | Anything over the network, apart from the model call `claude -p` makes |
 | `.git/index` mtime to decide whether a repository is stale | Any other field of the hook payload |
 | `cwd`, `session_id` and `transcript_path` from the hook payload | |
