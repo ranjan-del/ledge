@@ -3,10 +3,15 @@
  * and the one action that ties it together, `openInClaude`. Terminal launches go through the
  * shell plugin by allow-listed name; if that fails the Rust `open_terminal` command is tried,
  * and if that fails too the caller receives the exact command to copy and run.
+ *
+ * Which command runs is decided in `lib/brief.ts`: a session active in the last 12 hours is
+ * resumed, anything else starts fresh with a briefing from `ledge brief` (or, when the CLI
+ * cannot give one, the same briefing built locally from the task and its insights).
  */
 import { buildResumePrompt, type Config, type Task } from '@ledge/core/pure';
 import { invoke } from '@tauri-apps/api/core';
 import { platform as osPlatform } from '@tauri-apps/plugin-os';
+import { acceptBrief, briefArgs, buildBrief, chooseLaunch, lastRecordFor } from './brief.ts';
 import { runAllowed } from './io.ts';
 import { desk } from './store.svelte.ts';
 
@@ -91,14 +96,57 @@ export function claudeCommand(task: Task, resume: boolean, claude: Config['claud
 export type LaunchResult = { ok: true } | { ok: false; command: string; dir: string; error: string };
 
 /**
+ * The briefing for a fresh session: `ledge brief <id>` through the allow-listed `ledge-brief`
+ * entry when it answers, else built locally. Never throws.
+ */
+export async function briefFor(task: Task): Promise<string> {
+  try {
+    const out = await runAllowed('ledge-brief', briefArgs(task.id));
+    const brief = acceptBrief(out.code, out.stdout);
+    if (brief) return brief;
+  } catch {
+    /* no CLI, or no Tauri host: the local briefing below is the answer */
+  }
+  return buildBrief(task, desk.insights[task.id], lastRecordFor(task, desk.sessionRecords));
+}
+
+/**
+ * The command that opens Claude Code on a task: `claude --resume <id>` for a session active in
+ * the last 12 hours, otherwise `claude '<briefing>'`. `sessionId` asks about one session
+ * rather than the task's newest.
+ */
+export async function launchCommand(
+  task: Task,
+  resume: boolean,
+  claude: Config['claude'],
+  opts: { sessionId?: string; now?: Date } = {},
+): Promise<string> {
+  const plan = chooseLaunch({
+    task,
+    records: desk.sessionRecords,
+    now: opts.now ?? new Date(),
+    resume,
+    sessionId: opts.sessionId,
+  });
+  if (plan.kind === 'resume') {
+    return `${claude.command} ${claude.resumeFlag} ${shellQuote(plan.sessionId)}`;
+  }
+  return `${claude.command} ${shellQuote((await briefFor(task)).trimEnd())}`;
+}
+
+/**
  * Opens the configured terminal in the task's repo (or the home folder) running Claude Code,
- * resuming the last session when `resume` is true and one exists. Never throws: a failure
+ * resuming a recent session when `resume` is true and one exists, briefing a new one otherwise. Never throws: a failure
  * returns the command so the panel can show it for copy and paste.
  */
-export async function openInClaude(task: Task, resume: boolean): Promise<LaunchResult> {
+export async function openInClaude(
+  task: Task,
+  resume: boolean,
+  opts: { sessionId?: string } = {},
+): Promise<LaunchResult> {
   const os = detectOs();
   const dir = task.repo ?? desk.home;
-  const command = claudeCommand(task, resume, desk.config.claude);
+  const command = await launchCommand(task, resume, desk.config.claude, opts);
   const spec = terminalLaunch(os, desk.config.terminal, dir, command);
   try {
     await runAllowed(spec.name, spec.args);

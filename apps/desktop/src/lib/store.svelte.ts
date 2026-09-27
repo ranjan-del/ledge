@@ -32,6 +32,12 @@ import {
   watchPaths,
   writeText,
 } from './io.ts';
+import {
+  parseInsights,
+  parseSessionRecord,
+  type SessionRecord,
+  type TaskInsights,
+} from './insights.ts';
 import { basename, expandTilde, isTaskFile, join, ledgeHomeFor } from './paths.ts';
 import { discoverRepos, scanRepoList } from './scan.ts';
 import { nowIso, todayIso } from './time.ts';
@@ -71,9 +77,17 @@ export interface Desk {
   archiveDir: string;
   configPath: string;
   cachePath: string;
+  /** `sessions/`: one SessionRecord per Claude Code session, written by `ledge capture`. */
+  sessionsDir: string;
+  /** `insights/`: AI titles and summaries per task, written by `ledge capture` and `summarise`. */
+  insightsDir: string;
   config: Config;
   tasks: Task[];
   broken: BrokenTask[];
+  /** Every readable session record, newest `started` first. A bad file is left out. */
+  sessionRecords: SessionRecord[];
+  /** Insights keyed by task id. A task with no readable sidecar has no key. */
+  insights: Record<string, TaskInsights>;
   pending: RepoStatus[];
   archivedCount: number;
   /** Parsed archive files, newest first. Empty until the Done view is first asked for. */
@@ -100,9 +114,13 @@ export const desk: Desk = $state({
   archiveDir: '',
   configPath: '',
   cachePath: '',
+  sessionsDir: '',
+  insightsDir: '',
   config: defaultConfig(),
   tasks: [],
   broken: [],
+  sessionRecords: [],
+  insights: {},
   pending: [],
   archivedCount: 0,
   archive: [],
@@ -210,6 +228,16 @@ export function errorText(e: unknown): string {
     }
   }
   return String(e);
+}
+
+/** The insights sidecar for a task, when one was readable. */
+export function insightsFor(taskId: string): TaskInsights | undefined {
+  return desk.insights[taskId];
+}
+
+/** Session records attributed to a task, newest first. */
+export function sessionRecordsFor(taskId: string): SessionRecord[] {
+  return desk.sessionRecords.filter((r) => r.taskId === taskId);
 }
 
 /** Git status for a task's repo from the last scan, if the repo was scanned. */
@@ -711,6 +739,79 @@ export async function removeTask(id: string): Promise<void> {
   forgetTask(task.file);
 }
 
+/* ------------------------------------------------------------------ sidecars */
+
+/** True for `<dir>/<name>.json`, not hidden and not a `.tmp` from an atomic write. */
+function isSidecar(path: string, dir: string): boolean {
+  if (dir === '' || !path.startsWith(dir + '/')) return false;
+  const name = path.slice(dir.length + 1);
+  return !name.includes('/') && !name.startsWith('.') && name.endsWith('.json');
+}
+
+function byStartedDesc(a: SessionRecord, b: SessionRecord): number {
+  return Date.parse(b.started) - Date.parse(a.started) || b.id.localeCompare(a.id);
+}
+
+/** Reads a sidecar, or undefined when it is missing or unreadable. Never throws. */
+async function readSidecar(path: string): Promise<string | undefined> {
+  try {
+    return await readText(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads every `sessions/*.json`. A missing folder, an unreadable file and a file that is not a
+ * session record are all simply absent, which is the contract's rule for both sidecars.
+ */
+export async function reloadSessionRecords(): Promise<void> {
+  const entries = await listDir(desk.sessionsDir);
+  const records: SessionRecord[] = [];
+  for (const e of entries) {
+    const path = join(desk.sessionsDir, e.name);
+    if (!e.isFile || !isSidecar(path, desk.sessionsDir)) continue;
+    const text = await readSidecar(path);
+    const rec = text === undefined ? undefined : parseSessionRecord(text);
+    if (rec) records.push(rec);
+  }
+  desk.sessionRecords = records.sort(byStartedDesc);
+}
+
+/** Re-reads one session record, replacing or dropping its previous copy. */
+async function reloadSessionRecord(path: string): Promise<void> {
+  const text = await readSidecar(path);
+  const rec = text === undefined ? undefined : parseSessionRecord(text);
+  const id = basename(path).replace(/\.json$/, '');
+  const rest = desk.sessionRecords.filter((r) => r.id !== id && r.id !== rec?.id);
+  desk.sessionRecords = (rec ? [...rest, rec] : rest).sort(byStartedDesc);
+}
+
+/** Reads every `insights/*.json`, keyed by the task id inside the file. */
+export async function reloadInsights(): Promise<void> {
+  const entries = await listDir(desk.insightsDir);
+  const next: Record<string, TaskInsights> = {};
+  for (const e of entries) {
+    const path = join(desk.insightsDir, e.name);
+    if (!e.isFile || !isSidecar(path, desk.insightsDir)) continue;
+    const text = await readSidecar(path);
+    const parsed = text === undefined ? undefined : parseInsights(text);
+    if (parsed) next[parsed.taskId] = parsed;
+  }
+  desk.insights = next;
+}
+
+/** Re-reads one insights file. The file name is the task id, as the contract lays it out. */
+async function reloadInsight(path: string): Promise<void> {
+  const text = await readSidecar(path);
+  const parsed = text === undefined ? undefined : parseInsights(text);
+  const id = basename(path).replace(/\.json$/, '');
+  const next = { ...desk.insights };
+  delete next[id];
+  if (parsed) next[parsed.taskId] = parsed;
+  desk.insights = next;
+}
+
 /* ------------------------------------------------------------------ watching */
 
 let changeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -737,9 +838,17 @@ export async function applyChanges(paths: string[]): Promise<void> {
   let reloadConfig = false;
   let reloadAll = false;
   let archiveTouched = false;
+  let allSessions = false;
+  let allInsights = false;
   const files = new Set<string>();
+  const sessionFiles = new Set<string>();
+  const insightFiles = new Set<string>();
   for (const p of paths) {
-    if (basename(p) === 'config.json') reloadConfig = true;
+    if (desk.sessionsDir !== '' && p === desk.sessionsDir) allSessions = true;
+    else if (isSidecar(p, desk.sessionsDir)) sessionFiles.add(p);
+    else if (desk.insightsDir !== '' && p === desk.insightsDir) allInsights = true;
+    else if (isSidecar(p, desk.insightsDir)) insightFiles.add(p);
+    else if (basename(p) === 'config.json') reloadConfig = true;
     else if (p === desk.tasksDir) reloadAll = true;
     else if (p.startsWith(desk.tasksDir + '/') && isTaskFile(p)) files.add(p);
     else if (p === desk.archiveDir || p.startsWith(desk.archiveDir + '/')) archiveTouched = true;
@@ -748,15 +857,25 @@ export async function applyChanges(paths: string[]): Promise<void> {
   if (reloadAll) await reloadTasks();
   else for (const file of files) await reloadTask(file);
   if (archiveTouched) invalidateArchive();
+  if (allSessions) await reloadSessionRecords();
+  else for (const file of sessionFiles) await reloadSessionRecord(file);
+  if (allInsights) await reloadInsights();
+  else for (const file of insightFiles) await reloadInsight(file);
 }
 
 async function startWatching(): Promise<void> {
   if (stopWatching) stopWatching();
+  /* A sidecar folder that could not be created is left out rather than failing the watch
+     on the tasks it would otherwise have taken down with it. */
+  const sidecars: string[] = [];
+  for (const dir of [desk.sessionsDir, desk.insightsDir]) {
+    if (await pathExists(dir)) sidecars.push(dir);
+  }
   try {
     stopWatching = await watchPaths(
       /* The archive is watched too, not because the panel reads it often, but because a task
          finished in another window has to invalidate the cached Done list. */
-      [desk.tasksDir, desk.archiveDir, desk.ledgeHome],
+      [desk.tasksDir, desk.archiveDir, desk.ledgeHome, ...sidecars],
       scheduleChange,
       WATCH_DEBOUNCE_MS,
     );
@@ -835,13 +954,27 @@ export async function boot(homeOverride?: string): Promise<void> {
   desk.archiveDir = join(desk.ledgeHome, 'archive');
   desk.configPath = join(desk.ledgeHome, 'config.json');
   desk.cachePath = join(desk.ledgeHome, '.scan-cache.json');
+  desk.sessionsDir = join(desk.ledgeHome, 'sessions');
+  desk.insightsDir = join(desk.ledgeHome, 'insights');
 
   await ensureDir(desk.tasksDir);
   /* The archive is created here rather than on the first `ledge done`, because the watcher
      cannot subscribe to a folder that does not exist yet. */
   await ensureDir(desk.archiveDir);
+  /* The two sidecar folders are made here for the same reason: capture creates them on its
+     first write, and a folder that does not exist yet cannot be watched. A refusal must not
+     stop the panel booting; the sidecars are an addition to the tasks, not a dependency. */
+  for (const dir of [desk.sessionsDir, desk.insightsDir]) {
+    try {
+      await ensureDir(dir);
+    } catch (e) {
+      report('warn', `could not create ${dir}: ${errorText(e)}`);
+    }
+  }
   await loadConfigFile();
   await reloadTasks();
+  await reloadSessionRecords();
+  await reloadInsights();
   await loadScanCache();
   await startWatching();
   desk.ready = true;
