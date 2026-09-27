@@ -74,7 +74,7 @@ export const COMMANDS: Record<string, HelpEntry> = {
     summary: 'Write the session record skeleton, or mark it ended (the hooks run this)',
   },
   summarise: {
-    usage: 'ledge summarise [<id>] [--all] [--json]',
+    usage: 'ledge summarise [<id>] [--all] [--json] [--quiet]',
     summary: 'Add AI titles next to notes and plan steps that have none; files untouched',
   },
   brief: {
@@ -138,6 +138,7 @@ export function renderHelp(): string {
     '  --week W     With week: act on week W, e.g. 2026-W40, instead of the current one',
     '  --next       With week: act on next week',
     '  --all        With summarise: every task in the tasks folder',
+    '  --quiet      With summarise: no progress lines on stderr',
     '  -h, --help   Show help; -v, --version prints the version',
     '',
     'ask, standup and handoff send your task files and git state to a model and print what it',

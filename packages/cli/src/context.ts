@@ -37,6 +37,8 @@ export interface Flags {
   week?: string;
   /** With week: act on next week instead of the current one. */
   next: boolean;
+  /** With summarise: no progress lines on stderr. */
+  quiet: boolean;
 }
 
 /**
