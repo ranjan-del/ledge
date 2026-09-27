@@ -37,6 +37,11 @@ describe('summarise', { skip: coreKind === 'fake' }, () => {
     const r = await run(['summarise', id], home, provider);
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.stdout, `${id}: titled 1 notes and 1 plan steps\n`);
+    assert.match(r.stderr, /^\[1\/1\] Release banner: 3 items to title$/m, 'progress names the task');
+    assert.match(r.stderr, /done in \d+\.\ds: 1 notes, 1 plan steps/);
+    assert.match(r.stderr, /^Finished in \d+\.\ds: 1 titled, 0 failed, 0 already done$/m);
+    const quiet = await run(['summarise', id, '--quiet'], home, fakeProvider('{}'));
+    assert.equal(quiet.stderr, '', '--quiet prints no progress');
     assert.equal(provider.prompts.length, 1);
     assert.equal(readFileSync(file, 'utf8'), before, 'the task file is byte for byte the same');
     const insights = JSON.parse(readFileSync(join(home, 'insights', `${id}.json`), 'utf8'));
