@@ -77,7 +77,8 @@ describe('buildPalette, asked', () => {
     const notes = group(buildPalette({ ...base, query: 'service worker' }), 'note');
     expect(notes?.items).toHaveLength(1);
     expect(notes?.items[0]?.label).toContain('Polling a static file beats a service worker');
-    expect(notes?.items[0]?.sub).toBe('Sat, 12 Sept · Roll the version file out to every app');
+    // The comma after the weekday differs between ICU versions, so the day is matched loosely.
+    expect(notes?.items[0]?.sub).toMatch(/^Sat,? 12 Sept? · Roll the version file out to every app$/);
   });
 
   it('carries the typed text into a create action, first among the actions', () => {
