@@ -154,6 +154,7 @@
     {/if}
     {#if tools}
       <div class="tools">
+        {#if others.length > 0}
         <label>
           <span>Move to</span>
           <select
@@ -174,6 +175,7 @@
             {/each}
           </select>
         </label>
+        {/if}
         <label>
           <span>Task</span>
           <select

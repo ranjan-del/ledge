@@ -18,9 +18,9 @@ const LEDGE_COMMANDS = [
   '  ledge done <id>   ledge plan <id> "step" "step" ...   ledge todo <id> "text"',
   '  ledge tick <id> <n>   ledge untick <id> <n>   ledge note <id> "text"',
   '  ledge when <id> <YYYY-MM-DD|today|tomorrow|none>   ledge list --json',
-  '  ledge week --json   ledge week add "text" --day <day> [--task <id>]',
-  '  ledge week tick <n>   ledge week untick <n>   ledge week rm <n>   ledge week move <n> --day <day>',
-  '  (<day> is YYYY-MM-DD, today, tomorrow, mon to sun, or anytime)',
+  '  ledge week --json   ledge week add "text" [--next] [--task <id>]',
+  '  ledge week tick <n>   ledge week untick <n>   ledge week rm <n>',
+  '  (the week is one list with no days: add without --day unless the person names a day)',
 ];
 
 /** The rules, appended to Claude Code's own system prompt for the life of the process. */
@@ -95,7 +95,7 @@ function tildePath(p: string, home?: string): string {
   return p.replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~');
 }
 
-/** One line for the "Did 3 things" list, e.g. `ledge week add "Call vendor" --day thu`. */
+/** One line for the "Did 3 things" list, e.g. `ledge week add "Call vendor"`. */
 export function toolSummary(name: string, input: unknown, home?: string): string {
   const a = isObject(input) ? input : {};
   const s = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : undefined);

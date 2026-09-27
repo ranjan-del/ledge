@@ -44,7 +44,7 @@
   import { provideInsights } from '../lib/insight-context.ts';
   import { todayIso } from '../lib/time.ts';
   import { isoWeekOf } from '@ledge/core/pure';
-  import { openElsewhere, openToday } from '../lib/week-view.ts';
+  import { openEntries } from '../lib/week-view.ts';
   import { mergeTask } from '../lib/merge.ts';
   import { groupSessions, sessionCount } from '../lib/session-view.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
@@ -148,8 +148,11 @@
   const currentWeek = $derived(isoWeekOf(today));
   const weekNow = $derived(weekFor(currentWeek));
   const weekShown = $derived(weekFor(desk.week));
-  const weekToday = $derived(openToday(weekNow, today));
-  const weekMore = $derived(openElsewhere(weekNow, today));
+  /* The Assistant shows the first few open items of this week and a count of the rest. */
+  const WEEK_PREVIEW = 3;
+  const weekOpen = $derived(openEntries(weekNow));
+  const weekToday = $derived(weekOpen.slice(0, WEEK_PREVIEW));
+  const weekMore = $derived(Math.max(0, weekOpen.length - WEEK_PREVIEW));
   const taskChoices = $derived(
     [...currentTasks(), ...backlogTasks()].map((t) => ({ id: t.id, title: t.title })),
   );
