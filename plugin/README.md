@@ -1,9 +1,11 @@
 # Ledge plugin for Claude Code
 
 The plugin is the bridge between Claude Code and your Ledge task files. It adds one slash
-command, `/ledge`, and three hooks that brief each session, link it to the task it worked
-on, and remind Claude to update the checklist and append a closing note before compaction.
-Nothing runs in the background and nothing leaves your machine.
+command, `/ledge`, and four hooks that brief each session, link it to the task it worked
+on, remind Claude to update the checklist and append a closing note before compaction, and
+start `ledge capture` in the background after each turn, before compaction and at session end.
+The capture sends a digest of that session's transcript to Haiku through `claude -p`, the same
+Claude Code you are already signed in to; nothing else leaves your machine.
 
 ## Requirements
 
@@ -62,21 +64,34 @@ compaction and at the end of a session.
 
 ## Hooks
 
-All three hooks are POSIX `sh` scripts in `hooks/`, wired in `hooks/hooks.json` with a
+All four hooks are POSIX `sh` scripts in `hooks/`, wired in `hooks/hooks.json` with a
 5 second timeout each. They read the JSON payload Claude Code writes to stdin and use only
-the `cwd` and `session_id` fields, extracted with `awk`, so there is no `jq` dependency.
-Every script exits 0 in every case, so a hook can never fail or block a session.
+the `cwd`, `session_id` and `transcript_path` fields, extracted with `awk`, so there is no
+`jq` dependency. Every script exits 0 in every case, so a hook can never fail or block a
+session. Every script also exits at once when `LEDGE_CAPTURE=1` is set: the capture sets it
+for the `claude -p` it runs, so a capture never starts another capture.
+
+The capture is launched as `( LEDGE_CAPTURE=1 nohup ledge capture ... >/dev/null 2>&1 & )`:
+detached, with every stream redirected, so the hook returns in well under a second. Its own
+debounce (fewer than 40 new transcript lines and under 10 minutes since the last capture is a
+skip) keeps most turns free. What it did is in `~/.ledge/capture.log`.
 
 - SessionStart, `session-start.sh`: runs `ledge current --repo "<cwd>" --context`. If a task
   matches, its title, planned day, requirement, plan, unchecked items and latest note are
   injected as context. Otherwise it prints `No Ledge task for this repo. Use /ledge start to
-  create one.` If `ledge` is not on PATH it prints one hint line instead.
+  create one.` Either way a standing rules block of nine lines follows. It also runs
+  `ledge track` to write the session record skeleton. If `ledge` is not on PATH it prints one
+  hint line instead.
 - Stop, `stop.sh`: resolves the task for `cwd` with `ledge current --json`, then runs
-  `ledge link <id> <session_id>` so the session is recorded on the task. Prints nothing.
+  `ledge link <id> <session_id>` so the session is recorded on the task, then `ledge settle`,
+  then starts `ledge capture` detached when the payload names a transcript. Prints nothing
+  unless settle promoted a task.
+- SessionEnd, `session-end.sh`: runs `ledge track --ended` so the session stops showing as
+  running, then starts `ledge capture --final` detached. Prints nothing.
 - PreCompact, `pre-compact.sh`: if a task matches `cwd`, prints one line asking Claude to
   tick that task's checklist and to run `ledge note <id> "..."` with what was done, what is
   left and what the next session needs, before the reasoning is compacted away. Prints
-  nothing otherwise.
+  nothing otherwise. It also starts `ledge capture --final` detached, task or not.
 
 Errors from `ledge` (parse errors, unexpected exit codes) produce no output at all.
 
@@ -86,11 +101,14 @@ Errors from `ledge` (parse errors, unexpected exit codes) produce no output at a
   tokens, capped at 40 lines by the CLI. When the block would overflow, the CLI drops the
   oldest note lines first and never the requirement or the unchecked items.
 - SessionStart hint line, only when no task matches or `ledge` is missing: under 30 tokens.
-- Stop hook, every time Claude stops: 0 tokens, it prints nothing.
+- Standing rules, with every SessionStart block: about 150 tokens.
+- Stop hook, every time Claude stops: 0 tokens in the session, it prints nothing. The capture
+  it starts costs one Haiku call when it is not debounced.
 - PreCompact reminder, only when compaction happens and a task matches: about 60 tokens.
 - `/ledge` command body, only when you invoke `/ledge`: about 2,600 tokens.
 
-Nothing else is injected. The plugin does not read transcripts or memory.
+Nothing else is injected. The capture reads only the transcript of the session whose hook
+started it, and no memory plugin's store.
 
 ## Test
 

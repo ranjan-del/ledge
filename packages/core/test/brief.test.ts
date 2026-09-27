@@ -64,7 +64,7 @@ describe('buildBrief', () => {
     assert.doesNotMatch(brief, /Investigate caching/);
     assert.match(brief, /Last note \(2026-09-16\): Moved the write into closeBundle\. Not committed yet\.$/m);
     assert.doesNotMatch(brief, /Last session/);
-    assert.doesNotMatch(brief, /[—–]/);
+    assert.doesNotMatch(brief, /[\u2014\u2013]/);
   });
 
   test('with sidecars it uses the headline, the phase, the note insight and the last session', () => {

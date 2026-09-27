@@ -68,7 +68,7 @@ describe('buildSummarisePrompt and parseSummariseResult', () => {
     const prompt = buildSummarisePrompt(task, items);
     for (const item of items) assert.ok(prompt.includes(item.key));
     assert.match(prompt, /Never add facts/);
-    assert.doesNotMatch(prompt, /[—–]/);
+    assert.doesNotMatch(prompt, /[\u2014\u2013]/);
   });
 
   test('keeps only asked keys, skips bad entries, trims titles', () => {

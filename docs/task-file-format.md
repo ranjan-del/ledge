@@ -87,6 +87,13 @@ Unknown frontmatter keys are kept. They are read into `Task.meta` in their origi
 written back after the known keys, so you or another tool can add a key of your own and a round
 trip through Ledge does not drop it.
 
+Ledge itself writes one such key: `origin: auto`, on a task that `ledge capture` created because
+no existing task fitted a session. It rides on the same preservation, so it is not a new known
+key and the format does not change; the panel reads it to offer Rename, Merge and Delete. AI
+titles and summaries never go into the file at all: they live in `$LEDGE_HOME/insights/`, keyed
+by the content they describe (see the
+[AI assistant contract](superpowers/specs/2026-09-27-ai-assistant-contract.md)).
+
 ### The `planned` rule in full
 
 `planned` is validated with `isIsoDay`, which requires the exact shape `YYYY-MM-DD` and a day
