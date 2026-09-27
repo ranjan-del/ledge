@@ -59,7 +59,7 @@
   import { appendReference } from '@ledge/core/pure';
   import { dayLabel, daysBetween, lateLabel, relativeTime, todayIso } from '../lib/time.ts';
   import { noteDigest, stepDigest } from '../lib/digest.ts';
-  import type { TaskInsights } from '../lib/insights.ts';
+  import type { TaskInsights } from '@ledge/core/pure';
   import { isAutoTask, withoutAutoOrigin } from '../lib/merge.ts';
   import ConfirmButton from './ConfirmButton.svelte';
   import Digest from './Digest.svelte';

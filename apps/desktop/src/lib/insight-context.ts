@@ -5,7 +5,7 @@
  * fallback digest. Nothing here reads the store: the lookup is whatever the provider hands in.
  */
 import { getContext, setContext } from 'svelte';
-import type { TaskInsights } from './insights.ts';
+import type { TaskInsights } from '@ledge/core/pure';
 
 export type InsightLookup = (taskId: string) => TaskInsights | undefined;
 

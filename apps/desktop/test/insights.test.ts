@@ -7,7 +7,7 @@ import {
   parseSessionRecord,
   sessionDurationMs,
   type SessionRecord,
-} from '../src/lib/insights.ts';
+} from '@ledge/core/pure';
 import {
   clip,
   noteDigest,
@@ -97,9 +97,9 @@ describe('running and duration', () => {
     expect(isSessionRunning(rec({ ended: r.lastActivity }), at(r.lastActivity))).toBe(false);
   });
 
-  it('measures to ended, else to the last activity', () => {
+  it('measures to the last activity, even once the session has ended', () => {
     expect(sessionDurationMs(rec())).toBe(40 * 60_000);
-    expect(sessionDurationMs(rec({ ended: '2026-09-27T11:00:00+05:30' }))).toBe(60 * 60_000);
+    expect(sessionDurationMs(rec({ ended: '2026-09-27T11:00:00+05:30' }))).toBe(40 * 60_000);
     expect(sessionDurationMs(rec({ started: 'bad' }))).toBe(0);
   });
 });

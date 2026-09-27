@@ -17,7 +17,7 @@ import {
   isSessionRunning,
   type SessionRecord,
   type TaskInsights,
-} from './insights.ts';
+} from '@ledge/core/pure';
 
 /** How many earlier turns are quoted back to the model. */
 export const HISTORY_TURNS = 4;

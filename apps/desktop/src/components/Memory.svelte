@@ -15,7 +15,7 @@
    */
   import { searchMemory, type MemoryEntry, type Task } from '@ledge/core/pure';
   import { noteDigest } from '../lib/digest.ts';
-  import type { TaskInsights } from '../lib/insights.ts';
+  import type { TaskInsights } from '@ledge/core/pure';
   import { dayLabel, todayIso } from '../lib/time.ts';
   import Digest from './Digest.svelte';
 

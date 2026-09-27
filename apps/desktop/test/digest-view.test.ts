@@ -5,7 +5,7 @@ import Digest from '../src/components/Digest.svelte';
 import Memory from '../src/components/Memory.svelte';
 import TaskDetail from '../src/components/TaskDetail.svelte';
 import { noteDigest, noteKey } from '../src/lib/digest.ts';
-import { contentKey, type TaskInsights } from '../src/lib/insights.ts';
+import { contentKey, type TaskInsights } from '@ledge/core/pure';
 import { isAutoTask, mergeTask, withoutAutoOrigin } from '../src/lib/merge.ts';
 import { memoryFor } from '@ledge/core/pure';
 import { DAY, HOME, taskA, taskC } from './fixtures.ts';

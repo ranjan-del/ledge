@@ -9,7 +9,7 @@
  * Pure, so the grouping and the ordering are tested without a filesystem.
  */
 import type { Task } from '@ledge/core/pure';
-import { isSessionRunning, sessionDurationMs, type SessionRecord } from './insights.ts';
+import { isSessionRunning, sessionDurationMs, type SessionRecord } from '@ledge/core/pure';
 
 export interface SessionItem {
   id: string;

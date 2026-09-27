@@ -11,7 +11,7 @@
  */
 import type { Task } from '@ledge/core/pure';
 import { noteDigest } from './digest.ts';
-import type { SessionRecord, TaskInsights } from './insights.ts';
+import type { SessionRecord, TaskInsights } from '@ledge/core/pure';
 
 /** How recent a session must be for Resume to reopen it rather than brief a new one. */
 export const RESUME_WINDOW_MS = 12 * 60 * 60 * 1000;
