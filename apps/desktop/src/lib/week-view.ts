@@ -161,3 +161,73 @@ export function numberedLines(w: WeekFile): string[] {
 export function neighbours(week: string): { prev: string; next: string } {
   return { prev: shiftWeek(week, -1), next: shiftWeek(week, 1) };
 }
+
+/* ------------------------------------------------------------------ the month calendar */
+
+const LONG_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+const DAY_MS = 86_400_000;
+
+function utcDay(day: string): number {
+  return Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+}
+
+function dayFromUtc(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** The month a day is in, `YYYY-MM`. */
+export function monthOf(day: string): string {
+  return day.slice(0, 7);
+}
+
+/** The month `n` months after `month`, or before it for a negative `n`. */
+export function shiftMonth(month: string, n: number): string {
+  const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1 + n, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+/** `September 2026`. */
+export function monthLabel(month: string): string {
+  return `${LONG_MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+}
+
+/** A day moved by `n` days. */
+export function addDays(day: string, n: number): string {
+  return dayFromUtc(utcDay(day) + n * DAY_MS);
+}
+
+export interface MonthWeek {
+  /** The ISO week this row is. */
+  week: string;
+  /** Seven days, Monday first, each with whether it falls inside the month. */
+  days: { day: string; inMonth: boolean }[];
+}
+
+/** The rows of a month grid: every ISO week that has a day in the month, Monday first. */
+export function monthGrid(month: string): MonthWeek[] {
+  const first = `${month}-01`;
+  const last = addDays(`${shiftMonth(month, 1)}-01`, -1);
+  const rows: MonthWeek[] = [];
+  let week = isoWeekOf(first);
+  while (true) {
+    const days = weekDays(week);
+    rows.push({ week, days: days.map((day) => ({ day, inMonth: monthOf(day) === month })) });
+    if (days[6]! >= last) break;
+    week = shiftWeek(week, 1);
+  }
+  return rows;
+}
+
+/** A day in the week file has at least one item, ticked or not. */
+export function dayHasItems(w: WeekFile | undefined, day: string): boolean {
+  return (w?.days[day]?.length ?? 0) > 0;
+}
+
+/** The week file holds any item at all, Anytime included. */
+export function weekHasItems(w: WeekFile | undefined): boolean {
+  if (!w) return false;
+  return w.anytime.length > 0 || Object.values(w.days).some((items) => items.length > 0);
+}

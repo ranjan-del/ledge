@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import WeekView from '../src/components/WeekView.svelte';
+import { addDays, dayHasItems, monthGrid, monthLabel, shiftMonth, weekHasItems } from '../src/lib/week-view.ts';
 import { parseWeek } from '@ledge/core/pure';
 
 const W39 = `---
@@ -221,5 +222,116 @@ describe('To-do, the week', () => {
   it('uses no em or en dash anywhere in its words', () => {
     const { container } = render(WeekView, { props: props() });
     expect(container.textContent).not.toMatch(/[\u2013\u2014]/);
+  });
+});
+
+describe('To-do, the calendar', () => {
+  const W41 = parseWeek('---\nweek: 2026-W41\n---\n\n## Anytime\n\n- [ ] Book travel\n', '2026-W41');
+  const weeks = () => ({ '2026-W39': parseWeek(W39, '2026-W39'), '2026-W41': W41 });
+  const open = async (over: Record<string, unknown> = {}) => {
+    const onloadweeks = vi.fn();
+    const p = { ...props({ weeks: weeks(), onloadweeks, ...over }), onloadweeks };
+    const view = render(WeekView, { props: p });
+    await fireEvent.click(screen.getByRole('button', { name: 'Pick a day' }));
+    return { ...view, p, dialog: screen.getByRole('dialog', { name: 'Pick a day' }) };
+  };
+
+  it('has no calendar unless the panel hands it the weeks', () => {
+    render(WeekView, { props: props() });
+    expect(screen.queryByRole('button', { name: 'Pick a day' })).toBeNull();
+  });
+
+  it("opens on the shown week's month with today marked, dots on days with items, weeks shaded", async () => {
+    const { dialog, p } = await open();
+    expect(within(dialog).getByText('September 2026')).toBeTruthy();
+    const today = dialog.querySelector('[aria-current="date"]') as HTMLElement;
+    expect(today.dataset.day).toBe('2026-09-24');
+    const dots = [...dialog.querySelectorAll<HTMLElement>('.cell.dot')].map((c) => c.dataset.day);
+    expect(dots).toEqual(['2026-09-21', '2026-09-24']);
+    const shaded = [...dialog.querySelectorAll<HTMLElement>('.row.shaded')].map((r) => r.dataset.week);
+    expect(shaded).toEqual(['2026-W39']);
+    expect(dialog.querySelector('.row.shown')?.getAttribute('data-week')).toBe('2026-W39');
+    expect(p.onloadweeks).toHaveBeenCalledWith(['2026-W36', '2026-W37', '2026-W38', '2026-W39', '2026-W40']);
+  });
+
+  it('steps through months and asks for the weeks each one shows', async () => {
+    const { dialog, p } = await open();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Next month' }));
+    expect(within(dialog).getByText('October 2026')).toBeTruthy();
+    expect([...dialog.querySelectorAll<HTMLElement>('.row.shaded')].map((r) => r.dataset.week)).toEqual(['2026-W41']);
+    expect(p.onloadweeks).toHaveBeenLastCalledWith(['2026-W40', '2026-W41', '2026-W42', '2026-W43', '2026-W44']);
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Previous month' }));
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Previous month' }));
+    expect(within(dialog).getByText('August 2026')).toBeTruthy();
+  });
+
+  it('shows the week of a day picked, then scrolls to it and lights it briefly', async () => {
+    vi.useFakeTimers();
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView');
+    try {
+      const { dialog, p, container } = await open();
+      await fireEvent.click(within(dialog).getByRole('gridcell', { name: /\b22 September 2026/ }));
+      expect(p.onbrowse).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
+      await vi.advanceTimersByTimeAsync(0);
+      const day = container.querySelector('[data-day="2026-09-22"]') as HTMLElement;
+      expect(day.classList.contains('flash')).toBe(true);
+      expect(scroll).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1300);
+      expect(day.classList.contains('flash')).toBe(false);
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Pick a day' }));
+      const again = screen.getByRole('dialog', { name: 'Pick a day' });
+      await fireEvent.click(within(again).getByRole('button', { name: 'Next month' }));
+      await fireEvent.click(within(again).getByRole('gridcell', { name: /\b8 October 2026/ }));
+      expect(p.onbrowse).toHaveBeenCalledWith('2026-W41');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('closes on Escape and on a press outside it', async () => {
+    const { dialog } = await open();
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'Pick a day' }));
+    expect(screen.getByRole('dialog', { name: 'Pick a day' })).toBeTruthy();
+    await fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole('dialog', { name: 'Pick a day' })).toBeNull();
+  });
+
+  it('walks the days with the arrow keys, across into the next month', async () => {
+    const { dialog } = await open();
+    const today = dialog.querySelector('[data-day="2026-09-24"]') as HTMLElement;
+    await fireEvent.keyDown(today, { key: 'ArrowDown' });
+    await waitFor(() => expect((document.activeElement as HTMLElement).dataset.day).toBe('2026-10-01'));
+    expect(within(dialog).getByText('October 2026')).toBeTruthy();
+  });
+});
+
+describe('the month grid', () => {
+  it('lists every ISO week with a day in the month, Monday first, marking days outside it', () => {
+    const rows = monthGrid('2026-09');
+    expect(rows.map((r) => r.week)).toEqual(['2026-W36', '2026-W37', '2026-W38', '2026-W39', '2026-W40']);
+    expect(rows[0]!.days[0]).toEqual({ day: '2026-08-31', inMonth: false });
+    expect(rows[0]!.days[1]).toEqual({ day: '2026-09-01', inMonth: true });
+    expect(rows[4]!.days[6]).toEqual({ day: '2026-10-04', inMonth: false });
+  });
+
+  it('crosses years, and steps months and days in the calendar rather than by 30s', () => {
+    expect(monthGrid('2026-12').at(-1)!.week).toBe('2026-W53');
+    expect(shiftMonth('2026-12', 1)).toBe('2027-01');
+    expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+    expect(addDays('2026-02-28', 1)).toBe('2026-03-01');
+    expect(monthLabel('2026-09')).toBe('September 2026');
+  });
+
+  it('says which days and weeks hold items', () => {
+    const w = parseWeek(W39, '2026-W39');
+    expect(dayHasItems(w, '2026-09-21')).toBe(true);
+    expect(dayHasItems(w, '2026-09-22')).toBe(false);
+    expect(weekHasItems(w)).toBe(true);
+    expect(weekHasItems(parseWeek('', '2026-W40'))).toBe(false);
+    expect(weekHasItems(undefined)).toBe(false);
   });
 });
