@@ -51,7 +51,7 @@ export const COMMANDS: Record<string, HelpEntry> = {
   },
   today: {
     usage: 'ledge today [--json]',
-    summary: 'Tasks planned for today, overdue ones, then current',
+    summary: "Tasks planned for today, today's week items, overdue ones, then current",
   },
   week: {
     usage: 'ledge week [add "text"|tick|untick|rm|move <n>] [--day d] [--week W|--next] [--json]',
@@ -121,7 +121,8 @@ export function renderHelp(): string {
     '  --json       Print JSON instead of text on listing and mutating commands',
     '  --context    With current: print the block the SessionStart hook injects (max 40 lines):',
     '               title, planned day, requirement, plan, unchecked items, the latest note and',
-    '               a line saying how much is in References, never References itself',
+    '               a line saying how much is in References, never References itself, and',
+    "               today's unticked week items (at most 5 lines)",
     '  --repo path  With add, current, began or settle: the repo the task belongs to',
     '  --session id With began: the Claude Code session id, so a record knows its session',
     '  --backlog    With add: create the task in the backlog instead of current',

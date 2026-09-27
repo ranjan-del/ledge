@@ -17,6 +17,17 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ### Added
 
+- A weekly to-do list, from the weekly to-do contract. One Markdown file per ISO week in
+  `$LEDGE_HOME/weeks/<YYYY>-W<ww>.md`, items under `## Anytime` or a `## <Ddd> <YYYY-MM-DD>`
+  day, each optionally linked to a task with a trailing `{task: <id>}`. Format in
+  [docs/week-file-format.md](docs/week-file-format.md). `@ledge/core/pure` adds `isoWeekOf`,
+  `weekDays`, `shiftWeek`, `isIsoWeek`, `parseWeek`, `serializeWeek`, `itemsFor` and
+  `numberWeek`; `@ledge/core` adds `WeekStore`. A file Ledge wrote round trips byte for byte.
+- `ledge week`, with `add "text" [--day d] [--task id]`, `tick`, `untick`, `rm` and
+  `move <n> --day d` by the number it prints, and `--week W` or `--next` for another week.
+  `ledge today` and `ledge current --context` show today's unticked items, at most five lines.
+- Plugin: one standing rule line and a `/ledge week` subcommand, both saying to add week items
+  only when the person asks. The capture never adds them.
 - Background capture, from the AI assistant contract (v3). `ledge capture` reads a Claude Code
   session transcript, asks Haiku which task the work was for, and keeps that task current through
   `TaskStore`: the plan when it changed, checklist items added and ticked by word match, a short
