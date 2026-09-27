@@ -6,9 +6,16 @@ import {
   ACTIVITY_HALF_LIFE_MS,
   ACTIVITY_HORIZON_MS,
   formatAge,
+  isSessionRunning,
+  numberWeek,
+  sessionDurationMs,
+  weekDays,
+  weekdayName,
 } from '@ledge/core';
+import type { NumberedWeekItem, WeekFile } from '@ledge/core';
 import type { ActivitySignal, AskResult, MemoryEntry, NoteEntry, Observed } from '@ledge/core';
 import type { ObservedRepo, ObservedTask, RepoStatus, SessionRef, Task } from '@ledge/core';
+import type { SessionRecord } from '@ledge/core';
 
 /** A pending repo plus the task that references it, when one does. */
 export interface PendingRow extends RepoStatus {
@@ -24,6 +31,13 @@ export interface Desk {
 
 /** Hard cap on the SessionStart context block, from Contract 3. */
 export const CONTEXT_MAX_LINES = 40;
+
+/**
+ * Most lines today's week items may take in `ledge today` and in the context block, from the
+ * weekly to-do contract. The list is a reminder next to the work, not the work, so a long week
+ * must not crowd out the task the session is about.
+ */
+export const WEEK_TODAY_MAX_LINES = 5;
 
 /**
  * Aligns rows of cells into columns separated by two spaces, padding every cell to the widest
@@ -149,6 +163,8 @@ export interface Today {
   planned: Task[];
   overdue: Task[];
   current: Task[];
+  /** Today's unticked items from this week's to-do list, numbered as `ledge week` numbers them. */
+  week: NumberedWeekItem[];
 }
 
 /** Row for the Today section: id, title, repo and progress. */
@@ -172,11 +188,67 @@ export function overdueRow(task: Task): string[] {
  * a missing section.
  */
 export function renderToday(today: Today): string {
-  return [
-    section(`Today ${today.day}`, today.planned.map(todayRow)),
+  const blocks = [section(`Today ${today.day}`, today.planned.map(todayRow))];
+  // Only when there is something: a person who never uses the weekly list should not be shown
+  // an empty section for it every morning.
+  if (today.week.length > 0) {
+    blocks.push(`Week to-do today\n${weekTodayLines(today.week).map((l) => `  ${l}`).join('\n')}`);
+  }
+  blocks.push(
     section('Overdue', today.overdue.map(overdueRow)),
     section('Current', today.current.map(currentRow)),
-  ].join('\n\n');
+  );
+  return blocks.join('\n\n');
+}
+
+/** How a slot reads in text: `Anytime`, or the day with its name, e.g. `Mon 2026-09-21`. */
+export function weekItemLabel(slot: string): string {
+  return slot === 'anytime' ? 'Anytime' : `${weekdayName(slot)} ${slot}`;
+}
+
+/** One numbered item as a line: number, box, text, and the linked task when there is one. */
+function weekItemLine(item: NumberedWeekItem): string {
+  const link = item.taskId ? `  (task: ${item.taskId})` : '';
+  return `${String(item.n).padStart(2)}  [${item.done ? 'x' : ' '}] ${item.text}${link}`;
+}
+
+/**
+ * Today's week items as at most WEEK_TODAY_MAX_LINES lines. When there are more, the last line
+ * says how many were left out instead of showing one more item, so the cap holds exactly.
+ */
+export function weekTodayLines(items: NumberedWeekItem[], max = WEEK_TODAY_MAX_LINES): string[] {
+  const line = (item: NumberedWeekItem) =>
+    `${item.n}. ${item.text}${item.taskId ? ` (task: ${item.taskId})` : ''}`;
+  if (items.length <= max) return items.map(line);
+  const kept = items.slice(0, Math.max(max - 1, 0)).map(line);
+  kept.push(`... ${items.length - kept.length} more, see ledge week`);
+  return kept;
+}
+
+/**
+ * Renders `ledge week`: a heading with the week and its dates, then Anytime and every day that
+ * holds an item, Monday first, each item with the number the subcommands take. Anytime always
+ * appears, so an empty week reads as `(none)` rather than as nothing. Today's heading is marked.
+ */
+export function renderWeek(file: WeekFile, today: string): string {
+  const days = weekDays(file.week);
+  const numbered = numberWeek(file);
+  const head = `Week ${file.week}, ${weekItemLabel(days[0]!)} to ${weekItemLabel(days[6]!)}`;
+  const blocks = [head];
+  const slots = ['anytime', ...days];
+  for (const slot of slots) {
+    const items = numbered.filter((item) => item.day === slot);
+    if (items.length === 0 && slot !== 'anytime') continue;
+    const title = weekItemLabel(slot) + (slot === today ? ' (today)' : '');
+    const body = items.length === 0 ? '  (none)' : items.map((i) => `  ${weekItemLine(i)}`).join('\n');
+    blocks.push(`${title}\n${body}`);
+  }
+  const outside = numbered.filter((item) => item.day !== 'anytime' && !days.includes(item.day));
+  if (outside.length > 0) {
+    blocks.push(`Outside this week\n${outside.map((i) => `  ${weekItemLine(i)}`).join('\n')}`);
+  }
+  if (file.extra.trim() !== '') blocks.push('Other text in the file is kept; see ledge week --json.');
+  return blocks.join('\n\n');
 }
 
 /** Today's note entry, or the newest one when nothing was written today. */
@@ -195,8 +267,16 @@ export function latestNote(task: Task, day: string): NoteEntry | undefined {
  * The references themselves are never in here, only the fact of them and their size. They are
  * pasted material of no fixed length, and this block is spent every session on the small number
  * of things the assistant cannot start without.
+ *
+ * `week` is today's unticked items from the weekly to-do list. When there are any they follow
+ * the unchecked items, at most WEEK_TODAY_MAX_LINES of them, inside the same 40 line cap.
  */
-export function renderContext(task: Task, day: string, max = CONTEXT_MAX_LINES): string {
+export function renderContext(
+  task: Task,
+  day: string,
+  max = CONTEXT_MAX_LINES,
+  week: NumberedWeekItem[] = [],
+): string {
   const head: string[] = [`Ledge task: ${task.title} (id: ${task.id})`];
   if (task.planned) {
     const when =
@@ -222,6 +302,13 @@ export function renderContext(task: Task, day: string, max = CONTEXT_MAX_LINES):
   const open = task.checklist.filter((item) => !item.done);
   if (open.length === 0) head.push('(nothing unchecked; decide the next step)');
   else for (const item of open) head.push(`- [ ] ${item.text}`);
+  // Today's reminders from the weekly list, after the task's own open items because the task is
+  // what the session is for. They sit in the part a long note is trimmed to make room for, so
+  // the 40 line cap still holds, and they are capped at five lines of their own.
+  if (week.length > 0) {
+    head.push('', 'Week to-do today (ledge week tick <n> when done):');
+    head.push(...weekTodayLines(week));
+  }
 
   const tail: string[] = [];
   if (task.file !== '') {
@@ -271,9 +358,44 @@ export function sessionRow(ref: SessionRef): string[] {
   return [ref.id, ref.isLatest ? 'latest' : '', ref.taskTitle, repo, ref.lastSeen];
 }
 
-/** Renders the Sessions section, `(none)` when no task has a session id recorded. */
-export function renderSessions(refs: SessionRef[]): string {
-  return section('Sessions', refs.map(sessionRow));
+/**
+ * Row for a session that has a SessionRecord: the id, `running` or `ended` or nothing, the AI
+ * title (or `Untitled session`), the task, when it started and how long it was worked, and what
+ * it left behind. The id is shortened to eight characters, which is how Claude Code's own
+ * resume picker shows it and is still unique in practice.
+ */
+export function sessionRecordRow(record: SessionRecord, now: Date): string[] {
+  const state = isSessionRunning(record, now) ? 'running' : record.ended ? 'ended' : '';
+  const traces = [
+    `${record.filesChanged.length} files`,
+    `${record.commits.length} commits`,
+    `${record.todosTicked.length} ticked`,
+  ].join(', ');
+  return [
+    record.id.slice(0, 8),
+    state,
+    record.title ?? 'Untitled session',
+    record.taskId ?? '',
+    record.started.slice(0, 16).replace('T', ' '),
+    formatAge(sessionDurationMs(record)),
+    traces,
+  ];
+}
+
+/**
+ * Renders the Sessions section: recorded sessions first, then any session ids that tasks carry
+ * but no record describes, and `(none)` when there is neither.
+ */
+export function renderSessions(
+  refs: SessionRef[],
+  records: SessionRecord[] = [],
+  now: Date = new Date(),
+): string {
+  if (records.length === 0) return section('Sessions', refs.map(sessionRow));
+  const rows = records.map((record) => sessionRecordRow(record, now));
+  const recorded = section('Sessions', rows);
+  if (refs.length === 0) return recorded;
+  return `${recorded}\n\n${section('Linked on tasks, no record', refs.map(sessionRow))}`;
 }
 
 /**

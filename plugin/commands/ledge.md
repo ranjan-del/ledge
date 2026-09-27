@@ -1,6 +1,6 @@
 ---
 description: Ledge task desk. Bare shows the desk; the subcommands update this repo's task.
-argument-hint: [start "t" | park "why" | done | todo "i" | plan | note "text" | when <day>]
+argument-hint: [start "t" | park "why" | done | todo "i" | plan | note "text" | when <day> | week]
 ---
 
 # /ledge $ARGUMENTS
@@ -25,7 +25,8 @@ its argument. Quotes around the argument are optional.
 | `plan` | Write or rewrite the ordered plan for the current task. |
 | `note "text"` | Append `text` to today's notes on the current task. |
 | `when <day>` | Set the planned day: `YYYY-MM-DD`, `today`, `tomorrow`, or `none` to clear. |
-| anything else | Say the subcommand is unknown and list the eight above. Run nothing. |
+| `week ["item"]` | Show this week's to-do list, or add `item` to it. See `### week` below. |
+| anything else | Say the subcommand is unknown and list the nine above. Run nothing. |
 
 ## Finding the current task and its file
 
@@ -119,6 +120,12 @@ Rules that keep the file valid:
 | `ledge note <id> "text"` | Append text to today's notes |
 | `ledge when <id> <YYYY-MM-DD\|today\|tomorrow\|none>` | Set or clear the planned day |
 | `ledge today` | Tasks planned for today, overdue ones, then current tasks |
+| `ledge brief <id>` | The briefing a new session on this task starts from |
+| `ledge sessions --task <id> --json` | This task's session records: titles, files, commits |
+| `ledge week [--next\|--week 2026-W40]` | This week's to-do list by day, each item numbered |
+| `ledge week add "text" [--day <day>] [--task <id>]` | Add an item; the day defaults to Anytime |
+| `ledge week tick <n>` / `untick <n>` / `rm <n>` | Change item n, as `ledge week` numbered it |
+| `ledge week move <n> --day <day>` | Move item n to another day of the same week |
 
 Exit codes: 0 ok, 1 usage error, 2 not found, 3 parse error (prints file and line). If
 `ledge` is not on PATH, say so and point to the plugin README; do not try to recreate the
@@ -190,15 +197,37 @@ store by hand.
    `none` to clear it. Anything else is rejected; do not guess a date from prose without
    saying which date you used.
 
+### week ["item"]
+
+The weekly to-do list is the person's own list of things to remember this week, one file per
+ISO week under `~/.ledge/weeks/`. It is not a task checklist, though an item may link to a
+task. Only touch it when the person asks.
+
+1. With no item, run `ledge week` and show its output unchanged. Stop there.
+2. With an item, run `ledge week add "<item>"`. Add `--day <day>` when the person named a day:
+   `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun` in this week, or `anytime` (the default).
+   Add `--next` for next week. Add `--task <id>` when the item is about a Ledge task.
+3. To tick, untick, remove or move an item, run `ledge week` first and use the number it
+   prints: `ledge week tick <n>`, `untick <n>`, `rm <n>`, `move <n> --day <day>`.
+4. Never edit the week file by hand, and never add items the person did not ask for.
+
 ## Standing rules during normal work
 
-Do all of the following without being asked. Each one is a rule, not a suggestion.
+Do all of the following without being asked. Each one is a rule, not a suggestion. The
+session start context repeats them in short: keep the task current as you work; plan with
+`ledge plan`, tick with `ledge tick`, note with `ledge note`, and a new goal gets
+`ledge add` then `ledge start`.
 
 **Tick the checklist as you go.** Whenever you finish a step that matches an unchecked
-item in the current task, tick it immediately: run `ledge open <id>` to get the path, then
-use the Edit tool to change that item's `- [ ]` to `- [x]`. Add new unchecked items when
-work reveals extra steps. Find the task with `ledge current --repo "$PWD" --json` if you
-do not already know its id from the session start context.
+item in the current task, tick it immediately with `ledge tick <id> <n>`, where `n` is the
+item's 1-based position. Add new unchecked items with `ledge todo <id> "item"` when work
+reveals extra steps. Find the task with `ledge current --repo "$PWD" --json` if you do not
+already know its id from the session start context.
+
+**A new goal gets its own task.** If the work the person asks for is a different goal from
+the current task, run `ledge add "title" --repo "$PWD"`, then `ledge start <id>`, then plan
+it, before you edit code for it. Do not fold unrelated work into the task that happens to
+be current.
 
 **Write a plan before you edit code.** Before your first file edit in a session, check
 the current task's `plan` field. If it is empty, decide the ordered steps and run
@@ -229,6 +258,20 @@ run `ledge note <id> "<text>"` covering three things in this order:
 Tick the checklist first, then write that note. Do this even when the session felt short,
 and even when nothing landed: "tried X, it fails because Y, not committed" is exactly the
 note the next session needs.
+
+**Ledge also reads the session.** After each turn, before compaction and at session end,
+Ledge reads this session's transcript in the background and fills in what was not written
+down: the plan, ticks, a short note, and a title for the session. It creates a task marked
+`origin: auto` when no task fits. That is a safety net, not a replacement: what you write at
+the moment is more accurate than what is inferred afterwards, so keep following the rules
+above.
+
+**The week list is the person's, not yours.** When the person asks you to remember
+something for the week, or to remind them of something this week, run
+`ledge week add "<text>"` with `--day` when they named one. Do not add week items on your
+own initiative and do not turn checklist items into week items. The session start context
+lists today's unticked week items; tick one with `ledge week tick <n>` only when the person
+says it is done.
 
 **Read the notes at the start.** The session start context carries the latest note. Read
 it before you plan anything, and if it disagrees with the checklist, trust the note and

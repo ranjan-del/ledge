@@ -2,8 +2,10 @@
 
 Status: the core, CLI and plugin sections describe what is on `main`, including the planning and
 session memory additions of the
-[v2 contract](superpowers/specs/2026-09-15-v2-contract.md). The desktop app sections describe
-phase 1 and 2; phase 1 is in progress and no release exists yet.
+[v2 contract](superpowers/specs/2026-09-15-v2-contract.md). The capture, sidecar and briefing
+parts of the [AI assistant contract (v3)](superpowers/specs/2026-09-27-ai-assistant-contract.md)
+are on the `feat/ai-capture` branch and described below under "The capture". The desktop app
+sections describe phase 1 and 2; phase 1 is in progress and no release exists yet.
 
 ## One idea
 
@@ -31,7 +33,7 @@ script and Claude Code can change them, and the files are the API.
 |---|---|---|
 | `packages/core` (`@ledge/core`) | Task file parse and serialize, config, `TaskStore`, planning helpers, repo matching, porcelain v2 parser, repository scanner, resume prompt | `yaml` only |
 | `packages/cli` (`@ledge/cli`) | The `ledge` binary. Thin argument parsing over `TaskStore`; plain text or JSON output | `@ledge/core` |
-| `plugin/` | Claude Code plugin: `/ledge` command file, `hooks.json`, three POSIX sh scripts | The `ledge` CLI on PATH |
+| `plugin/` | Claude Code plugin: `/ledge` command file, `hooks.json`, four POSIX sh scripts | The `ledge` CLI on PATH |
 | `apps/desktop` | Tauri 2 shell in Rust, Svelte 5 UI in TypeScript. Imports `@ledge/core/pure` for all parsing | Tauri plugins `fs` (with `watch`), `shell`, `os`; crates `window-vibrancy`, and `objc2` for AppKit on macOS |
 
 Dependency direction is strict: the CLI and the app depend on core; core depends on nothing but
@@ -90,7 +92,11 @@ The full signatures are Contract 2 in the
 | Matching | `matchRepo(tasks, cwd)` returns the deepest repo match | no |
 | Git | `parsePorcelainV2()`, `findRepos()`, `scanRepos()`, `isPending()` | parser and `isPending()` only |
 | Claude | `buildResumePrompt(task)` returns title, requirement and unchecked items | yes |
-| Types | `Task`, `TaskStatus`, `ChecklistItem`, `NoteEntry`, `Config`, `RepoStatus`, `TaskPaths` | yes |
+| Sidecars (v3) | `contentKey`, `noteKey`, `parseSessionRecord`, `parseInsights`, `isSessionRunning`, `sessionDurationMs`, `emptyInsights`; `SessionStore`, `InsightStore` | all but the two stores |
+| Capture (v3) | `parseTranscript`, `renderDigest`, `captureDue`, `buildCapturePrompt`, `parseCaptureResult`, `matchItem`; `runCapture`, `trackSession`, `mergeInsights` | all but the last three |
+| Briefing and backfill (v3) | `buildBrief`, `missingInsights`, `buildSummarisePrompt`, `parseSummariseResult` | yes |
+| Week (to-do) | `isoWeekOf`, `weekDays`, `shiftWeek`, `isIsoWeek`, `parseWeek`, `serializeWeek`, `itemsFor`, `numberWeek`, `emptyWeek`; `WeekStore` | all but the store |
+| Types | `Task`, `TaskStatus`, `ChecklistItem`, `NoteEntry`, `Config`, `RepoStatus`, `TaskPaths`, `SessionRecord`, `TaskInsights` | yes |
 
 ### The planning helpers
 
@@ -136,12 +142,19 @@ every save and never writes outside its `home`.
 ```
 Claude Code starts in ~/code/foo
   \-- SessionStart hook: session-start.sh
+       |-- ledge track --session <id> --cwd ~/code/foo --transcript <path>
+       |    \-- writes sessions/<id>.json if absent: started, repo, transcriptPath
        \-- ledge current --repo ~/code/foo --context
             |-- TaskStore.currentFor(cwd): deepest repo match among status: current
             |-- match: print title, planned day, requirement, plan, unchecked items and the
             |          latest note (max 40 lines)                                ~200 tokens
             \-- no match: print "No Ledge task for this repo. Use /ledge start to create one."
 ```
+
+After the context block, or the no-task line, the hook prints the standing rules: nine lines
+asking the session to keep its task current with `ledge plan`, `ledge tick`, `ledge todo` and
+`ledge note`, and to give a new goal its own task with `ledge add` then `ledge start`. It prints
+them only when `ledge` answered, so a broken store still produces no output at all.
 
 The context block is assembled by `renderContext` in `packages/cli/src/format.ts` and capped at
 40 lines. When it does not fit, the note is shortened from its oldest line first, and dropped
@@ -176,24 +189,107 @@ compaction with their reasoning intact, which is why the PreCompact hook asks fo
 ### Session end
 
 ```
-Stop hook: stop.sh
-  \-- reads session_id and cwd from the payload on stdin
-       \-- ledge link <id> <session_id>    (silent, exit 0 whatever happens)
+Stop hook: stop.sh                      (after every assistant turn)
+  \-- reads session_id, transcript_path and cwd from the payload on stdin
+       |-- ledge link <id> <session_id>    (silent, exit 0 whatever happens)
+       |-- ledge settle --repo <cwd>       (promotes a launched backlog task on evidence)
+       \-- ( LEDGE_CAPTURE=1 nohup ledge capture --session ... --transcript ... --cwd ... & )
+PreCompact hook: pre-compact.sh
+  \-- the same detached launch with --final, then the one line reminder
+SessionEnd hook: session-end.sh
+  |-- ledge track --session <id> --ended   (synchronous, so the record stops showing as running)
+  \-- the same detached launch with --final
 ```
 
 Hooks are POSIX sh with 5 second timeouts. They always exit 0 and print nothing on error, so a
 Ledge bug can never fail a Claude Code session. Only SessionStart may print a hint, and only when
-`ledge` is missing from PATH.
+`ledge` is missing from PATH. The capture is launched from a subshell with every stream
+redirected, so the hook returns in well under a second and the capture is not its child. Every
+hook exits at once when `LEDGE_CAPTURE=1` is set, which the capture sets for the `claude -p` it
+starts, so a capture can never trigger another one.
+
+## The capture
+
+Added by the [AI assistant contract (v3)](superpowers/specs/2026-09-27-ai-assistant-contract.md).
+The standing rules ask a session to keep its task current as it works; the capture reads the
+transcript afterwards and fills in what the session did not write down. Pure rules live in
+`capture.ts`, `transcript.ts`, `brief.ts` and `summarise.ts`; `capture-node.ts` and
+`sidecars-node.ts` read and write.
+
+```
+ledge capture --session <id> --transcript <path> --cwd <dir> [--final] [--force]
+  |-- lock sessions/<id>.lock            (a second capture of the same session waits, then skips)
+  |-- parseTranscript(jsonl)             prompts, replies, Bash commands, Edit/Write/NotebookEdit
+  |                                      paths, TodoWrite and TaskCreate/TaskUpdate state;
+  |                                      thinking, tool results and subagent traffic are dropped
+  |-- captureDue(record, lines, now)     skip under 40 new lines and under 10 minutes; --final
+  |                                      skips the debounce, never a read with no new line
+  |-- candidates                         non-done tasks whose repo holds cwd, plus the linked one
+  |-- ask Haiku (claude -p --model haiku --setting-sources '')   one JSON object
+  |-- parseCaptureResult                 wrong types or an unknown taskId: refuse, write nothing
+  |-- TaskStore                          add (meta origin: auto) | setPlan if changed | addTodo |
+  |                                      setTodo by word match | addNote | link
+  |-- sessions/<id>.json                 title, summary, files, commits (git log), ticks, lines
+  |-- insights/<task>.json               headline, phase, today's note title keyed by contentKey
+  \-- capture.log                        one line: captured | skipped | failed, and why
+```
+
+The digest is capped at about 12k tokens (48,000 characters). Entries are chosen newest first,
+material since the last capture before older material, and then printed in transcript order with
+a marker where the new material begins, so a note is written only about what is new while the
+session title can describe the whole session.
+
+Three guarantees, each covered by a test. Nothing is written when the model is unavailable, fails,
+or answers with something that does not check out, so the next capture tries again from the same
+place. An `ended` mark written by SessionEnd while the model was thinking is kept, because the
+capture re-reads the record before it writes. And the model can only attribute a session to a
+task it was shown: a taskId outside the candidates refuses the whole answer.
+
+### The sidecars
+
+`sessions/<id>.json` and `insights/<task-id>.json` hold what is the model's view rather than the
+person's record, so the task file format does not change. Both are written to a temporary file and
+renamed, and a reader treats a missing or unparseable file as absent. An insight is keyed by
+`contentKey`, FNV-1a 32 bit over the UTF-8 bytes of the text with whitespace collapsed, so an
+entry written for a note that has since been edited stops matching and is simply not shown.
+`isSessionRunning` is derived, never stored: not ended, and active within `ACTIVE_WINDOW_MS`.
+`sessionDurationMs` runs from `started` to `lastActivity`, not to `ended`.
+
+### Briefing and backfill
+
+`ledge brief <id>` prints `buildBrief`: title, headline, phase, requirement, open items, the last
+session's title and summary and the last note's title and summary, capped at 40 lines, with the
+requirement giving way before the open items. The panel passes it as the prompt of a new session.
+
+`ledge summarise [<id>] [--all]` finds the notes and plan steps with no current insight, asks
+Haiku once per task for a title and summary each, and writes only the insights file. A task with
+nothing missing costs no model call.
+
+## The weekly to-do list
+
+Added by the [weekly to-do contract](superpowers/specs/2026-09-27-weekly-todo-contract.md). A
+personal list of things to do in one ISO week, kept in `weeks/<YYYY>-W<ww>.md`, grouped by day
+plus Anytime. The format, the ISO week arithmetic and the numbering are pure, in `week.ts`, so
+the panel and the CLI write the same bytes; `week-node.ts` holds `WeekStore`, which reads a
+missing file as an empty week and writes atomically. `ledge week` is the only writer outside the
+panel and an editor. `ledge today` and `ledge current --context` read today's unticked items, at
+most five lines, and the SessionStart standing rules carry one line saying to add items only when
+the person asks. The capture never writes a week file. Format in
+[week-file-format.md](week-file-format.md).
 
 ## What Ledge reads and does not read
 
 | Reads | Does not read |
 |---|---|
-| `~/.ledge/tasks/*.md` and `~/.ledge/config.json` | Claude Code conversation transcripts |
+| `~/.ledge/tasks/*.md` and `~/.ledge/config.json` | Any transcript other than the one a hook named for its own session |
 | `~/.ledge/archive/` for a count only | The claude-mem database or any other memory plugin's store ([ADR 0003](adr/0003-no-claude-mem-read.md)) |
-| `git -C <repo> status --porcelain=v2 --branch` for repositories under `roots` | Anything under `~/.claude` |
-| `.git/index` mtime to decide whether a repository is stale | Anything over the network |
-| `cwd` and `session_id` from the hook payload | Any other field of the hook payload |
+| `~/.ledge/sessions/`, `~/.ledge/insights/` and `~/.ledge/weeks/` | Claude Code settings, memory or other files under `~/.claude` |
+| `git -C <repo> status --porcelain=v2 --branch` for repositories under `roots` | Anything over the network, apart from the model call `claude -p` makes |
+| `.git/index` mtime to decide whether a repository is stale | Any other field of the hook payload |
+| `cwd`, `session_id` and `transcript_path` from the hook payload | |
+| The session's own transcript, at the path the hook payload gives, during `ledge capture` | |
+| `git log` between a session's start and last activity, for its commits | |
+| Modification times under `~/.claude/projects` for `ledge active` | |
 
 ## The git scan
 

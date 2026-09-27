@@ -45,13 +45,24 @@
    * in `repo` stands for, so the file keeps the short form it was written with.
    *
    * Actions: Resume or Open in Claude, Park, Mark done, Open folder, and Delete.
+   *
+   * READING. Notes and plan steps are shown as digests: a bold one line title and a muted
+   * summary, from the task's insights sidecar when it has a current entry and from the text
+   * itself otherwise, with the original one press away. Earlier notes are a compact timeline.
+   * A task capture created by itself (`origin: auto` in its frontmatter) says so with a chip
+   * and offers the three things a person does with one: rename it, merge it into a task they
+   * already have, or delete it.
    */
   import { appendNote, serializeTask, setPlan, type RepoStatus, type Task } from '@ledge/core/pure';
   import { reducedMotion } from '../lib/motion.svelte.ts';
   import { paragraphs } from '../lib/prose.ts';
   import { appendReference } from '@ledge/core/pure';
   import { dayLabel, daysBetween, lateLabel, relativeTime, todayIso } from '../lib/time.ts';
+  import { noteDigest, stepDigest } from '../lib/digest.ts';
+  import type { TaskInsights } from '@ledge/core/pure';
+  import { isAutoTask, withoutAutoOrigin } from '../lib/merge.ts';
   import ConfirmButton from './ConfirmButton.svelte';
+  import Digest from './Digest.svelte';
   import FieldEdit from './FieldEdit.svelte';
   import Progress from './Progress.svelte';
 
@@ -79,6 +90,12 @@
     onopenfolder?: (task: Task) => void;
     /** Deletes the task and its file for good. Asked twice before it is called. */
     ondelete?: (task: Task) => void;
+    /** AI titles and summaries for this task, when the sidecar exists. */
+    insights?: TaskInsights;
+    /** Tasks an auto-created task may be merged into. Merge is offered only when given. */
+    mergeTargets?: Task[];
+    /** Merges this task into `target` and deletes it. Asked twice before it is called. */
+    onmerge?: (source: Task, target: Task) => void;
   }
 
   let {
@@ -93,6 +110,9 @@
     onresume,
     onopenfolder,
     ondelete,
+    insights,
+    mergeTargets = [],
+    onmerge,
   }: Props = $props();
 
   /** Which single piece of text is open for editing. At most one at a time, deliberately. */
@@ -109,6 +129,11 @@
     | { kind: 'new-reference' };
 
   let parking = $state(false);
+  /* Merging an auto task: the picker is open, and which task it would go into. */
+  let merging = $state(false);
+  let mergeInto = $state('');
+  /* Which plan steps have their full text open, by index. */
+  let openSteps = $state<Record<number, boolean>>({});
   let reason = $state('');
   /* Every body of text starts closed. The owner's rule for this view: if I want I will read it. */
   let open = $state({
@@ -162,6 +187,17 @@
   /* Whatever the file holds that is not a section Ledge knows about, the references aside. */
   const rest = $derived(task.extra);
   const behind = $derived(task.planned ? daysBetween(task.planned, day) : undefined);
+  const auto = $derived(isAutoTask(task));
+  const steps = $derived(task.plan.map((text) => ({ text, digest: stepDigest(text, insights) })));
+  /* The step the insights say is in progress, matched on its title or its words. */
+  const phaseIndex = $derived.by(() => {
+    const phase = insights?.phase?.trim().toLowerCase();
+    if (!phase) return -1;
+    return steps.findIndex(
+      (s) => s.digest.title.toLowerCase() === phase || s.text.toLowerCase().includes(phase),
+    );
+  });
+  const others = $derived(mergeTargets.filter((t) => t.file !== task.file && t.status !== 'done'));
 
   /**
    * Where the branch stands against its remote, in the words the scan can support. A branch
@@ -242,11 +278,12 @@
       editError = 'A task needs a title, so this one was not saved.';
       return;
     }
-    if (title === task.title) {
+    /* Renaming an auto task is the person claiming it, so the flag goes with the old name. */
+    if (title === task.title && !auto) {
       stopEdit();
       return;
     }
-    if (await write({ ...task, title })) stopEdit();
+    if (await write({ ...withoutAutoOrigin(task), title })) stopEdit();
   }
 
   /* ---------------------------------------------------------------- requirement */
@@ -409,6 +446,13 @@
     startEdit(next);
   }
 
+  function submitMerge() {
+    const target = others.find((t) => t.file === mergeInto);
+    if (!target || !onmerge) return;
+    onmerge(task, target);
+    merging = false;
+  }
+
   function submitPark() {
     if (!onpark) return;
     onpark(task, reason.trim() || 'Parked from the panel');
@@ -452,8 +496,16 @@
         >{task.title}</button>
       </h2>
     {/if}
+    {#if insights?.headline}
+      <p class="headline" title="Written by a model from this task's records">
+        {insights.headline}
+      </p>
+    {/if}
     <div class="meta">
       <span class="chip neutral">{task.status}</span>
+      {#if auto}
+        <span class="chip auto" title="Created by Ledge from a Claude Code session">auto</span>
+      {/if}
       {#if task.planned && behind !== undefined && behind > 0}
         <span class="chip late">{lateLabel(task.planned, day)}</span>
       {:else if task.planned}
@@ -462,6 +514,65 @@
     </div>
     {#if task.parked}
       <p class="quiet parked">Parked: {task.parked}</p>
+    {/if}
+    {#if auto && editing?.kind !== 'title'}
+      <div class="auto-bar" role="group" aria-label="This task was created automatically">
+        <p class="quiet">
+          Ledge made this task from a Claude Code session that matched no task of yours.
+        </p>
+        <div class="row-actions">
+          <button type="button" class="btn motion" onclick={() => startEdit({ kind: 'title' })}>
+            Rename
+          </button>
+          {#if onmerge && others.length > 0}
+            <button
+              type="button"
+              class="btn motion"
+              aria-expanded={merging}
+              onclick={() => {
+                merging = !merging;
+                mergeInto = mergeInto || (others[0]?.file ?? '');
+              }}
+            >
+              Merge into…
+            </button>
+          {/if}
+          {#if ondelete}
+            <ConfirmButton
+              label="Delete"
+              question="Delete this task?"
+              confirmLabel="Delete"
+              groupLabel="Confirm deleting this automatic task"
+              title="Delete the task and its file"
+              onconfirm={() => ondelete?.(task)}
+            />
+          {/if}
+        </div>
+        {#if merging && onmerge}
+          <form
+            class="row-actions merge"
+            onsubmit={(e) => {
+              e.preventDefault();
+              submitMerge();
+            }}
+          >
+            <label for="merge-into" class="visually-hidden">Merge into which task</label>
+            <select id="merge-into" class="field" bind:value={mergeInto}>
+              {#each others as other (other.file)}
+                <option value={other.file}>{other.title}</option>
+              {/each}
+            </select>
+            <button type="submit" class="btn primary motion">Merge</button>
+            <button type="button" class="btn motion" onclick={() => (merging = false)}>
+              Cancel
+            </button>
+            <p class="quiet faint">
+              Its checklist, plan, notes and sessions are added to that task, then this one is
+              deleted.
+            </p>
+          </form>
+        {/if}
+      </div>
     {/if}
     {#if saveError?.where === 'top'}
       <p class="edit-error" role="alert">{saveError.text}</p>
@@ -607,21 +718,31 @@
       <div class="fold-body" id="fold-plan" hidden={!open.plan}>
         {#if task.plan.length > 0}
           <ol class="plan-list selectable">
-            {#each task.plan as step, i (i)}
-              <li>{#if editing?.kind === 'step' && editing.index === i}<FieldEdit
-                    value={step}
+            {#each steps as step, i (i)}
+              <li class:now={i === phaseIndex}>{#if editing?.kind === 'step' && editing.index === i}<FieldEdit
+                    value={step.text}
                     label={`Plan step ${i + 1}`}
                     multiline
                     rows={2}
                     error={editError}
                     oncommit={(text) => commitStep(i, text)}
                     oncancel={stopEdit}
-                  />{:else}<button
+                  />{:else}<div class="step"><button
                     type="button"
                     class="line-edit"
                     aria-describedby="edit-hint"
                     onclick={() => startEdit({ kind: 'step', index: i })}
-                  >{step}</button><span class="tools"><button
+                  ><span class="d-title step-title">{step.digest.title}</span>{#if step.digest.summary}<span
+                        class="d-sum">{step.digest.summary}</span>{/if}</button>{#if step.digest.fromInsight}<span
+                      class="d-ai"
+                      title="Title written by a model from this step">AI</span>{/if}{#if i === phaseIndex}<span
+                      class="chip info">now</span>{/if}{#if step.digest.hasMore}<button
+                      type="button"
+                      class="d-more motion"
+                      aria-expanded={openSteps[i] === true}
+                      onclick={() => (openSteps[i] = !openSteps[i])}
+                    >{openSteps[i] ? 'Hide the full step' : 'Show the full step'}</button>{/if}{#if openSteps[i]}<p
+                      class="d-full note-text">{step.text}</p>{/if}</div><span class="tools"><button
                       type="button"
                       class="drop tool motion"
                       aria-label={`Move step ${i + 1} up`}
@@ -719,9 +840,7 @@
             oncancel={stopEdit}
           />
         {:else if todayNote}
-          {#each paragraphs(todayNote.body) as para, i (i)}
-            <p class="note-text selectable">{para}</p>
-          {/each}
+          <Digest digest={noteDigest(todayNote, insights)} original={todayNote.body} />
           {#if editing === null}
             <button
               type="button"
@@ -878,17 +997,17 @@
           </button>
         </h3>
         <div class="fold-body notes" id="fold-earlier" hidden={!open.earlier}>
-          {#each earlier as note, i (note.date + i)}
-            <article class="note-card">
-              <p class="note-date">
-                {dayLabel(note.date, day)}
-                {#if i === 0 && earlier.length > 1}<span>latest</span>{/if}
-              </p>
-              {#each paragraphs(note.body) as para, p (p)}
-                <p class="note-text selectable">{para}</p>
-              {/each}
-            </article>
-          {/each}
+          <ol class="timeline">
+            {#each earlier as note, i (note.date + i)}
+              <li>
+                <p class="note-date t-when">
+                  {dayLabel(note.date, day)}
+                  {#if i === 0 && earlier.length > 1}<span>latest</span>{/if}
+                </p>
+                <Digest digest={noteDigest(note, insights)} original={note.body} />
+              </li>
+            {/each}
+          </ol>
         </div>
       </section>
     {/if}
@@ -1283,16 +1402,79 @@
      the shrunk width, so an `auto` basis here put the three small tools on their own line under
      every step. Zero keeps them beside the step, and the floor is what makes the row break when
      the tools become a question wider than the panel. */
-  .line-edit {
+  .step {
     flex: 1 1 0;
     min-width: 8rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--space-1);
+  }
+  .line-edit {
+    flex: 1 1 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
     text-align: left;
     line-height: 1.4;
     border-radius: var(--radius-sm);
     overflow-wrap: anywhere;
   }
-  .line-edit:hover {
+  /* A step title may wrap: unlike a note in a timeline, a step is read in place, and cutting
+     the only line of a short step would hide the one thing it says. */
+  .line-edit .step-title {
+    white-space: normal;
+    font-size: var(--fs-base);
+  }
+  .line-edit:hover .step-title {
     color: var(--accent);
+  }
+  .step .d-ai,
+  .step .chip {
+    flex: none;
+  }
+  .step .d-full {
+    flex: 1 1 100%;
+    margin: 0;
+  }
+  .plan-list li.now::marker {
+    color: var(--accent);
+  }
+  .plan-list li + li {
+    margin-top: 3px;
+  }
+  .headline {
+    margin: var(--space-1) 0 0;
+    font-size: var(--fs-sm);
+    line-height: 1.45;
+    color: var(--text-muted);
+  }
+  .auto-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--info-bg);
+  }
+  .auto-bar .quiet {
+    color: var(--info-fg);
+  }
+  .merge select {
+    flex: 1;
+    min-width: 140px;
+  }
+  .merge .quiet {
+    flex: 1 1 100%;
+  }
+  /* In the timeline the day is a column, so "latest" sits under it rather than beside it. */
+  .timeline .note-date {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    margin: 0;
   }
   .tools {
     flex: none;

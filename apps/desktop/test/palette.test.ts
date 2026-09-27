@@ -3,7 +3,7 @@ import { buildPalette, flattenPalette, shorten, type PaletteGroup } from '../src
 import { DAY, taskA, taskB, taskC } from './fixtures.ts';
 
 const tasks = [taskA(), taskB(), taskC()];
-const base = { tasks, surface: 'now' as const, day: DAY, now: Date.parse('2026-09-15T12:00:00Z') };
+const base = { tasks, surface: 'assistant' as const, day: DAY, now: Date.parse('2026-09-15T12:00:00Z') };
 
 function group(groups: PaletteGroup[], kind: string): PaletteGroup | undefined {
   return groups.find((g) => g.kind === kind);
@@ -77,7 +77,8 @@ describe('buildPalette, asked', () => {
     const notes = group(buildPalette({ ...base, query: 'service worker' }), 'note');
     expect(notes?.items).toHaveLength(1);
     expect(notes?.items[0]?.label).toContain('Polling a static file beats a service worker');
-    expect(notes?.items[0]?.sub).toBe('Sat, 12 Sept · Roll the version file out to every app');
+    // The comma after the weekday differs between ICU versions, so the day is matched loosely.
+    expect(notes?.items[0]?.sub).toMatch(/^Sat,? 12 Sept? · Roll the version file out to every app$/);
   });
 
   it('carries the typed text into a create action, first among the actions', () => {
@@ -96,13 +97,24 @@ describe('buildPalette, asked', () => {
     expect(memory?.items.map((i) => i.command)).toContainEqual({
       type: 'surface',
       surface: 'memory',
+      memory: 'notes',
+    });
+    const sessions = group(buildPalette({ ...base, query: 'sessions' }), 'action');
+    expect(sessions?.items.map((i) => i.command)).toContainEqual({
+      type: 'surface',
+      surface: 'memory',
+      memory: 'sessions',
     });
   });
 
   it('does not offer to take you to the surface you are already on', () => {
-    const here = buildPalette({ ...base, query: 'go to', surface: 'now' });
-    expect(labels(here, 'action')).not.toContain('Go to Now');
+    const here = buildPalette({ ...base, query: 'go to', surface: 'assistant' });
+    expect(labels(here, 'action')).not.toContain('Go to Assistant');
     expect(labels(here, 'action')).toContain('Go to Sessions');
+    /* Sessions is half of Memory, so it is still offered from Memory. */
+    const memory = buildPalette({ ...base, query: 'go to', surface: 'memory' });
+    expect(labels(memory, 'action')).not.toContain('Go to Memory');
+    expect(labels(memory, 'action')).toContain('Go to Sessions');
   });
 
   it('answers a query nothing matches with the create action alone', () => {

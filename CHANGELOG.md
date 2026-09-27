@@ -9,13 +9,67 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 | Version | Phase | Contents |
 |---|---|---|
 | v0.1.0 | 0 | `@ledge/core`, the `ledge` CLI, the Claude Code plugin, tests, docs |
-| v0.2.0 | 1 | Desktop app on macOS: button, panel, three tabs, detail, file watch, git scan |
+| v0.2.0 | 1 | Desktop app on macOS, background capture, weekly to-do, the Assistant tab |
 | v0.3.0 | 2 | Open and Resume in Claude, Windows and Linux builds, installers on GitHub Releases |
 | v0.4.0 | 3 | Optional PR status and calendar connectors |
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-27
+
 ### Added
+
+- The Assistant tab, from the assistant tab contract. The panel's tabs are now Assistant, Tasks
+  and Memory. Assistant is a chat with one warm Claude Code process behind it, so a question does
+  not wait for a start-up. Each turn is routed to Haiku, Sonnet or Opus by a local heuristic, or
+  by the model picker. It is a full agent: reads and Ledge edits run at once, and deletes, access
+  grants, pushes, deploys and messages to other people wait on an inline Approve or Cancel card.
+  Chats are kept in `~/.ledge/chats/` with New chat and a searchable History. While idle it shows
+  the recent tasks, today's to-dos and the Pending line that used to be on Now.
+- Memory has a Notes and Sessions switch; the Sessions tab moved there unchanged.
+- The To-do week header has a calendar: a month grid with a dot on days that have items. Clicking
+  a day shows its week and highlights that day.
+- `ledge summarise` prints progress on stderr, one line per task and per batch, and finishes a
+  long task in one run. `--quiet` turns the progress off.
+
+- A weekly to-do list, from the weekly to-do contract. One Markdown file per ISO week in
+  `$LEDGE_HOME/weeks/<YYYY>-W<ww>.md`, items under `## Anytime` or a `## <Ddd> <YYYY-MM-DD>`
+  day, each optionally linked to a task with a trailing `{task: <id>}`. Format in
+  [docs/week-file-format.md](docs/week-file-format.md). `@ledge/core/pure` adds `isoWeekOf`,
+  `weekDays`, `shiftWeek`, `isIsoWeek`, `parseWeek`, `serializeWeek`, `itemsFor` and
+  `numberWeek`; `@ledge/core` adds `WeekStore`. A file Ledge wrote round trips byte for byte.
+- `ledge week`, with `add "text" [--day d] [--task id]`, `tick`, `untick`, `rm` and
+  `move <n> --day d` by the number it prints, and `--week W` or `--next` for another week.
+  `ledge today` and `ledge current --context` show today's unticked items, at most five lines.
+- Plugin: one standing rule line and a `/ledge week` subcommand, both saying to add week items
+  only when the person asks. The capture never adds them.
+- Background capture, from the AI assistant contract (v3). `ledge capture` reads a Claude Code
+  session transcript, asks Haiku which task the work was for, and keeps that task current through
+  `TaskStore`: the plan when it changed, checklist items added and ticked by word match, a short
+  note, and the session link. When no task fits it creates one marked `origin: auto`. It is
+  debounced (fewer than 40 new lines and under 10 minutes is a skip), writes nothing when the
+  model cannot answer or answers with the wrong shape, serialises captures of one session with a
+  lock, and logs one line per run to `capture.log`.
+- Two sidecar folders beside the task files, so the Markdown format does not change:
+  `sessions/<id>.json` holds a SessionRecord per session (start, last activity, end, AI title
+  and summary, files changed, commits from `git log`, todos ticked and added) and
+  `insights/<task>.json` holds AI titles and summaries for notes and plan steps, keyed by
+  `contentKey`. Writes are atomic; unreadable files are treated as absent.
+- `@ledge/core/pure`: `contentKey`, `noteKey`, the `SessionRecord` and `TaskInsights` types,
+  `parseSessionRecord`, `parseInsights`, `isSessionRunning`, `sessionDurationMs`, the transcript
+  digest (`parseTranscript`, `renderDigest`), the capture rules (`captureDue`,
+  `buildCapturePrompt`, `parseCaptureResult`, `matchItem`), `buildBrief` and the summarise
+  helpers. `@ledge/core` adds `SessionStore`, `InsightStore`, `runCapture` and `trackSession`.
+- `ledge track`, which the hooks use to write a session record skeleton and to mark it ended;
+  `ledge brief <id>`, the briefing a new session on a task starts from, at most 40 lines; and
+  `ledge summarise [<id>] [--all]`, which backfills titles and summaries for notes and plan
+  steps that have none, one Haiku call per task, without touching the task file.
+- `claudeCodeProvider({ model })` passes `--model`, and a provider may name its `model`.
+- Plugin: the SessionStart block ends with a short set of standing rules (plan, tick, note, and
+  give a new goal its own task), SessionStart writes the session record, Stop starts a capture
+  detached, PreCompact starts a final capture, and a new SessionEnd hook marks the session ended
+  and starts a final capture. Every hook exits at once when `LEDGE_CAPTURE=1` is set, which the
+  capture sets for the model call it makes.
 
 - Four surfaces in the desktop panel, replacing the three tabs: Now answers what I am doing,
   Sessions where I am working, Tasks what I need to accomplish, Memory what I need to remember.
@@ -39,11 +93,21 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ### Changed
 
+- `ledge sessions --json` prints SessionRecords from `sessions/` instead of the SessionRef list.
+  The text form lists recorded sessions with their title, state and duration first, then the
+  session ids that tasks carry without a record. It also takes `--task <id>`.
+- The `/ledge` standing rules tick with `ledge tick` rather than an edit of the file, and tell
+  the session to give a new goal its own task.
+
 - The floating button sits in the top right corner rather than centred on the right edge.
 - The panel takes the full work area height once there is something to show, and stays short while
   the store is empty. The width does not change.
 
 ### Fixed
+
+- CI failed on Linux and Windows since 17 Sep because the lockfile held only the darwin rolldown
+  and esbuild bindings. It is regenerated with every platform.
+- The panel could not read or write `~/.ledge/.news.json`; a dotfile needs its own scope entry.
 
 - The button needed two clicks. macOS spends the first click on an inactive application's window
   activating it, and Ledge is deliberately an accessory application, so every click was being

@@ -9,6 +9,8 @@ import { run as active } from './commands/active.ts';
 import { run as add } from './commands/add.ts';
 import { run as app } from './commands/app.ts';
 import { run as began } from './commands/began.ts';
+import { run as brief } from './commands/brief.ts';
+import { run as capture } from './commands/capture.ts';
 import { run as ask } from './commands/ask.ts';
 import { run as current } from './commands/current.ts';
 import { run as deleteTask } from './commands/delete.ts';
@@ -27,11 +29,14 @@ import { run as settle } from './commands/settle.ts';
 import { run as sessions } from './commands/sessions.ts';
 import { run as handoff } from './commands/handoff.ts';
 import { run as standup } from './commands/standup.ts';
+import { run as summarise } from './commands/summarise.ts';
 import { run as start } from './commands/start.ts';
 import { run as tick } from './commands/tick.ts';
+import { run as track } from './commands/track.ts';
 import { run as today } from './commands/today.ts';
 import { run as todo } from './commands/todo.ts';
 import { run as untick } from './commands/untick.ts';
+import { run as week } from './commands/week.ts';
 import { run as when } from './commands/when.ts';
 
 /**
@@ -45,6 +50,8 @@ export interface MainIo {
   err: (text: string) => void;
   cwd: string;
   provider: Provider;
+  /** The provider `capture` and `summarise` use. Defaults to Claude Code pinned to Haiku. */
+  fastProvider: Provider;
 }
 
 const COMMANDS: Record<string, CommandRunner> = {
@@ -67,7 +74,12 @@ const COMMANDS: Record<string, CommandRunner> = {
   ref,
   when,
   today,
+  week,
   sessions,
+  capture,
+  track,
+  brief,
+  summarise,
   memory,
   ask,
   standup,
@@ -84,6 +96,7 @@ function defaultIo(): MainIo {
     err: (text) => process.stderr.write(text + '\n'),
     cwd: process.cwd(),
     provider: claudeCodeProvider(),
+    fastProvider: claudeCodeProvider({ model: 'haiku' }),
   };
 }
 
@@ -98,10 +111,16 @@ function version(): string {
  * and never calls process.exit, so tests can call it directly with a fake io.
  */
 export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<number> {
-  const { out, err, cwd, provider } = { ...defaultIo(), ...io };
+  const merged = { ...defaultIo(), ...io };
+  const { out, err, cwd, provider } = merged;
+  // A caller that injects only `provider`, which is what every test does, gets it for the
+  // background commands too, so no test can reach a real model through the default.
+  const fastProvider = io.fastProvider ?? (io.provider ? io.provider : merged.fastProvider);
 
   let values: { json?: boolean; context?: boolean; backlog?: boolean; yes?: boolean;
-    save?: boolean; repo?: string; session?: string; help?: boolean; version?: boolean };
+    save?: boolean; repo?: string; session?: string; help?: boolean; version?: boolean;
+    final?: boolean; force?: boolean; all?: boolean; ended?: boolean; transcript?: string;
+    cwd?: string; task?: string; day?: string; week?: string; next?: boolean; quiet?: boolean };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -114,6 +133,17 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
         save: { type: 'boolean' },
         repo: { type: 'string' },
         session: { type: 'string' },
+        final: { type: 'boolean' },
+        force: { type: 'boolean' },
+        all: { type: 'boolean' },
+        ended: { type: 'boolean' },
+        transcript: { type: 'string' },
+        cwd: { type: 'string' },
+        task: { type: 'string' },
+        day: { type: 'string' },
+        week: { type: 'string' },
+        next: { type: 'boolean' },
+        quiet: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -152,8 +182,27 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
     save: values.save ?? false,
     repo: values.repo,
     session: values.session,
+    final: values.final ?? false,
+    force: values.force ?? false,
+    all: values.all ?? false,
+    ended: values.ended ?? false,
+    transcript: values.transcript,
+    dir: values.cwd,
+    task: values.task,
+    day: values.day,
+    week: values.week,
+    next: values.next ?? false,
+    quiet: values.quiet ?? false,
   };
-  const ctx: CommandContext = { args: positionals.slice(1), flags, cwd, out, err, provider };
+  const ctx: CommandContext = {
+    args: positionals.slice(1),
+    flags,
+    cwd,
+    out,
+    err,
+    provider,
+    fastProvider,
+  };
 
   try {
     return await runner(ctx);

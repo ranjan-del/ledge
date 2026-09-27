@@ -1,10 +1,10 @@
 <script lang="ts">
   /**
-   * The glass sheet, and the only component that knows about the store. It owns the four
+   * The glass sheet, and the only component that knows about the store. It owns the three
    * surfaces, the chrome around them and every action a surface can trigger, so the surfaces
    * themselves take plain data and callbacks and can be rendered in a test without a filesystem.
    *
-   * The shape is fixed: a header that never scrolls, the four-surface tab strip, then exactly
+   * The shape is fixed: a header that never scrolls, the three-surface tab strip, then exactly
    * one region that scrolls, then a footer. Parse warnings and errors sit under the tabs rather
    * than inside a list, so they are visible whichever surface you are on. Settings, a task
    * detail and the search each take the whole scrolling region rather than floating over it,
@@ -14,17 +14,12 @@
    * reverse before the window is actually hidden: the hide is delayed by exactly as long as the
    * animation, and not at all for someone who asked for less motion.
    */
-  import {
-    collapseTilde,
-    memoryFor,
-    sessionsFor,
-    type Task as CoreTask,
-  } from '@ledge/core/pure';
+  import { collapseTilde, memoryFor, type Task as CoreTask } from '@ledge/core/pure';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-shell';
-  import { onMount } from 'svelte';
-  import { personName, summaryParts } from '../lib/derive.ts';
+  import { onMount, untrack } from 'svelte';
+  import { personName, recentByActivity, summaryParts } from '../lib/derive.ts';
   import {
     dismiss as dismissNews,
     dismissAll as dismissAllNews,
@@ -44,10 +39,20 @@
     panelContent,
     type PanelCounts,
   } from '../lib/sizing.ts';
+  import { getAssistantEngine } from '../lib/assistant/index.ts';
+  import { AssistantChat } from '../lib/assistant-chat.svelte.ts';
+  import { provideInsights } from '../lib/insight-context.ts';
+  import { todayIso } from '../lib/time.ts';
+  import { isoWeekOf } from '@ledge/core/pure';
+  import { openElsewhere, openToday } from '../lib/week-view.ts';
+  import { mergeTask } from '../lib/merge.ts';
+  import { groupSessions, sessionCount } from '../lib/session-view.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
+    addWeekItem,
     attentionRepos,
+    browseWeek,
     backlogTasks,
     counts,
     currentTasks,
@@ -55,62 +60,120 @@
     doneCount,
     doneTasks,
     doneToday,
+    ensureWeeks,
     errorText,
+    insightsFor,
     lastUpdated,
+    loadWeek,
     markDone,
+    moveWeekItem,
+    openWeek,
     parkTask,
     removeTask,
+    removeWeekItem,
     reorderTasks,
     saveConfigFile,
+    saveTask,
     saveMarkdown,
     scanNow,
     shiftStatus,
     select,
     selectedTask,
     setPanelVisible,
+    setMemoryMode,
     setSearching,
     setSurface,
+    setTaskMode,
     setView,
     startTask,
     statusForRepo,
     taskTitleForRepo,
+    updateWeekItem,
     upNextTasks,
+    weekFor,
     workingTasks,
     type Surface,
     type TaskView,
   } from '../lib/store.svelte.ts';
   import type { CardAction } from './TaskCard.svelte';
+  import Assistant from './Assistant.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Header from './Header.svelte';
   import Memory from './Memory.svelte';
   import Notifications from './Notifications.svelte';
-  import Now from './Now.svelte';
   import Sessions from './Sessions.svelte';
   import Settings from './Settings.svelte';
   import Tabs from './Tabs.svelte';
   import TaskDetail from './TaskDetail.svelte';
   import Tasks from './Tasks.svelte';
+  import WeekView from './WeekView.svelte';
+
+  /* Every card's disclosure finds its task's insights through this, rather than through a prop
+     threaded down every list. */
+  provideInsights(insightsFor);
 
   let pinned = $state(false);
   let showSettings = $state(false);
   let launch = $state<LaunchResult | null>(null);
-  /* Bumped by the add shortcut. Now passes it down; AddTask opens and focuses when it changes. */
+  /* The assistant's chat, over the app's one engine. The tab draws it; the palette's Ask row
+     sends through it. */
+  const assistant = new AssistantChat(getAssistantEngine());
+  /* Bumped by the palette's Ask row with nothing typed: the Assistant focuses its field. */
+  let askKey = $state(0);
+  /* Bumped by the add shortcut. Tasks passes it down; AddTask opens and focuses when it changes. */
   let addKey = $state(0);
   /* False for the first frame and for the 160 ms before the window hides, which is what
      gives the sheet something to animate from and to. */
   let onScreen = $state(false);
 
+  /* A minute clock, so a session that went quiet stops showing as running without waiting for
+     a file to change. It only ticks while the panel is on screen. */
+  let clock = $state(Date.now());
   const count = $derived(counts());
+  const sessionGroups = $derived(groupSessions(desk.tasks, desk.sessionRecords, new Date(clock)));
+  const sessionTotal = $derived(sessionCount(sessionGroups));
+  const runningTotal = $derived(
+    sessionGroups.reduce((n, g) => n + g.items.filter((i) => i.running).length, 0),
+  );
+  /* Assistant has no count: a chat is not a list of things waiting. */
   const tabs = $derived([
-    { id: 'now', label: 'Now', count: count.now },
-    { id: 'sessions', label: 'Sessions', count: count.sessions },
+    { id: 'assistant', label: 'Assistant' },
     { id: 'tasks', label: 'Tasks', count: count.tasks },
     { id: 'memory', label: 'Memory', count: count.memory },
   ]);
+  const recent = $derived(recentByActivity(desk.tasks, desk.sessionRecords, 3));
+  /* The weekly to-do. Today follows the minute clock, so the Today block and the highlighted
+     day move on at midnight without a file having to change. */
+  const today = $derived(todayIso(new Date(clock)));
+  const currentWeek = $derived(isoWeekOf(today));
+  const weekNow = $derived(weekFor(currentWeek));
+  const weekShown = $derived(weekFor(desk.week));
+  const weekToday = $derived(openToday(weekNow, today));
+  const weekMore = $derived(openElsewhere(weekNow, today));
+  const taskChoices = $derived(
+    [...currentTasks(), ...backlogTasks()].map((t) => ({ id: t.id, title: t.title })),
+  );
+  const weekItemCount = $derived(
+    weekShown.anytime.length + Object.values(weekShown.days).flat().length,
+  );
+  /* A new week has no file read for it yet. Boot reads the week it started in; this reads the
+     next one when the clock crosses into it. */
+  $effect(() => {
+    if (desk.ready && !(currentWeek in desk.weeks)) void loadWeek(currentWeek);
+  });
+
+  function taskTitle(id: string): string | undefined {
+    return desk.tasks.find((t) => t.id === id)?.title;
+  }
+
+  function openTaskById(id: string) {
+    const task = taskById(id);
+    if (task) select(task.file);
+  }
+
   const selected = $derived(selectedTask());
   const working = $derived(workingTasks());
   const upNext = $derived(upNextTasks());
-  const sessions = $derived(sessionsFor(desk.tasks));
   const notes = $derived(memoryFor(desk.tasks));
   const summary = $derived(
     summaryParts({
@@ -130,12 +193,19 @@
     working: working.length,
     upNext: upNext.length,
     attention: attentionRepos().length,
-    sessions: sessions.length,
+    sessions: sessionTotal,
     notes: notes.length,
     live: currentTasks().length,
     done: doneCount(),
     backlog: backlogTasks().length,
     pending: desk.pending.length,
+    mode: desk.taskMode,
+    weekItems: weekItemCount,
+    todayLines:
+      weekToday.length + weekMore > 0 ? 1 + weekToday.length + (weekMore > 0 ? 1 : 0) : 0,
+    recent: recent.length,
+    chatting: assistant.chatting,
+    memoryMode: desk.memoryMode,
   });
   const full = $derived(
     needsFullHeight(
@@ -149,6 +219,8 @@
   /* Docked right, the sheet leaves to the right. Docked left, it leaves to the left. */
   const slide = $derived(desk.config.ui.edge === 'left' ? '-10px' : '10px');
   const mac = detectOs() === 'macos';
+  /* The assistant runs Claude Code through /bin/sh, which Windows does not have. */
+  const canAsk = detectOs() !== 'windows';
   const modifier = mac ? '⌘' : 'Ctrl';
 
   function clockTime(iso: string): string {
@@ -159,14 +231,32 @@
     return desk.tasks.find((t) => t.id === id);
   }
 
-  async function resume(task: CoreTask, useResume: boolean) {
+  async function resume(task: CoreTask, useResume: boolean, sessionId?: string) {
     launch = null;
-    const result = await openInClaude(task, useResume);
+    const result = await openInClaude(task, useResume, { sessionId });
     if (!result.ok) launch = result;
+  }
+
+  async function resumeSession(task: CoreTask, sessionId: string) {
+    await resume(task, true, sessionId);
   }
 
   async function openFolder(task: CoreTask) {
     if (task.repo) await open(task.repo).catch(() => undefined);
+  }
+
+  /**
+   * Folds an auto-created task into one the person already has: the target is written first,
+   * and only once that landed is the source deleted, so a failed write loses nothing.
+   */
+  async function merge(source: CoreTask, target: CoreTask) {
+    try {
+      await saveTask(mergeTask(source, target));
+      await removeTask(source.id);
+      select(target.file);
+    } catch (e) {
+      desk.error = `Could not merge: ${errorText(e)}`;
+    }
   }
 
   /** Deletes the task and its file, then returns to the list. */
@@ -236,14 +326,31 @@
   function runCommand(command: PaletteCommand) {
     setSearching(false);
     if (command.type === 'open-task') select(command.file);
-    else if (command.type === 'surface') setSurface(command.surface);
-    else if (command.type === 'rescan') void scanNow();
-    else if (command.type === 'add-task') {
+    else if (command.type === 'surface') {
+      if (command.memory) setMemoryMode(command.memory);
+      else setSurface(command.surface);
+    } else if (command.type === 'rescan') void scanNow();
+    else if (command.type === 'ask') {
       showSettings = false;
-      select(null);
-      setSurface('now');
+      setSurface('assistant');
+      if (command.question.trim() === '') askKey += 1;
+      else void assistant.send(command.question);
+    } else if (command.type === 'add-task') {
+      showSettings = false;
+      showLive();
       void addTask({ title: command.title }).catch((e: unknown) => (desk.error = errorText(e)));
     }
+  }
+
+  /** TASKS on its Live list, which is where a new task lands. */
+  function showLive() {
+    if (desk.taskMode !== 'tasks') setTaskMode('tasks');
+    setView('live');
+  }
+
+  /** A link in an answer opens in the system browser, never inside the panel. */
+  function openLink(href: string) {
+    void open(href).catch(() => undefined);
   }
 
   /**
@@ -302,8 +409,7 @@
       event.preventDefault();
       setSearching(false);
       showSettings = false;
-      select(null);
-      if (desk.surface !== 'now' && desk.surface !== 'tasks') setSurface('now');
+      showLive();
       addKey += 1;
     }
   }
@@ -314,6 +420,20 @@
      focus, because it stays visible. */
   $effect(() => {
     if (desk.panelVisible || pinned) sizer.update(full);
+  });
+
+  /* The assistant listens for the life of the panel, and its process is started the moment the
+     panel is on screen, so the first question does not wait for Claude Code to boot. */
+  $effect(() => assistant.attach());
+  $effect(() => {
+    if (canAsk && (desk.panelVisible || pinned)) untrack(() => assistant.warm());
+  });
+
+  $effect(() => {
+    if (!(desk.panelVisible || pinned)) return;
+    clock = Date.now();
+    const tick = setInterval(() => (clock = Date.now()), 60_000);
+    return () => clearInterval(tick);
   });
 
   onMount(() => {
@@ -405,6 +525,9 @@
         onresume={resume}
         onopenfolder={openFolder}
         ondelete={destroy}
+        insights={insightsFor(selected.id)}
+        mergeTargets={desk.tasks}
+        onmerge={(s, t) => void merge(s, t)}
       />
     </div>
   {:else}
@@ -426,23 +549,27 @@
       </div>
     {/if}
 
-    {#if desk.surface === 'now'}
-      <Now
-        {working}
-        {upNext}
+    {#if desk.surface === 'assistant'}
+      <Assistant
+        chat={assistant}
         {name}
         {summary}
-        {addKey}
-        addShortcut="{modifier}N"
-        attention={attentionRepos().length}
+        {recent}
+        day={today}
+        now={clock}
         statusFor={statusForRepo}
-        {actionsFor}
         onselect={(t) => select(t.file)}
-        onadd={addTask}
+        attention={attentionRepos().length}
         onpending={() => {
           setSurface('tasks');
           setView('pending');
         }}
+        {weekToday}
+        {weekMore}
+        {taskTitle}
+        onopentask={openTaskById}
+        onweektick={(ref) => updateWeekItem(currentWeek, ref, { done: true })}
+        onopenweek={() => openWeek()}
         away={news.away}
         onresumeaway={(file) => {
           dismissAway();
@@ -450,17 +577,14 @@
         }}
         ondismissaway={dismissAway}
         onawayseen={markAwaySeen}
-      />
-    {:else if desk.surface === 'sessions'}
-      <Sessions
-        {sessions}
-        taskFor={taskById}
-        onselect={(t) => select(t.file)}
-        onresume={(t) => void resume(t, true)}
+        onopenlink={openLink}
+        focusKey={askKey}
       />
     {:else if desk.surface === 'tasks'}
       <Tasks
         view={desk.view}
+        mode={desk.taskMode}
+        onmode={setTaskMode}
         live={currentTasks()}
         backlog={backlogTasks()}
         done={doneTasks()}
@@ -476,9 +600,46 @@
         onadd={addTask}
         onreorder={moveCurrent}
         onshift={shift}
-      />
+        {addKey}
+        addShortcut="{modifier}N"
+      >
+        {#snippet todo()}
+          <WeekView
+            week={weekShown}
+            day={today}
+            tasks={taskChoices}
+            {taskTitle}
+            onbrowse={browseWeek}
+            onadd={(slot, text, taskId) => addWeekItem(desk.week, slot, text, taskId)}
+            onupdate={(ref, patch) => updateWeekItem(desk.week, ref, patch)}
+            onmove={(ref, to) => moveWeekItem(desk.week, ref, to)}
+            onremove={(ref) => removeWeekItem(desk.week, ref)}
+            onopentask={openTaskById}
+            weeks={desk.weeks}
+            onloadweeks={(weeks) => ensureWeeks(weeks).catch(() => undefined)}
+          />
+        {/snippet}
+      </Tasks>
     {:else}
-      <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />
+      <Memory
+        entries={notes}
+        taskFor={taskById}
+        onselect={(t) => select(t.file)}
+        {insightsFor}
+        mode={desk.memoryMode}
+        onmode={setMemoryMode}
+        sessionCount={sessionTotal}
+      >
+        {#snippet sessions()}
+          <Sessions
+            groups={sessionGroups}
+            now={clock}
+            awake={desk.panelVisible || pinned}
+            onselect={(t) => select(t.file)}
+            onresume={(t, id) => void resumeSession(t, id)}
+          />
+        {/snippet}
+      </Memory>
     {/if}
   {/if}
 
@@ -489,6 +650,7 @@
       {modifier}
       onrun={runCommand}
       onclose={() => setSearching(false)}
+      ask={canAsk}
     />
   {/if}
 
@@ -512,13 +674,15 @@
 
   <footer class="footer">
     <span>
-      {#if desk.surface === 'now'}
+      {#if desk.surface === 'assistant'}
         {@const today = doneToday()}
         <!-- "Finished", not "archived": the count is of tasks whose status is done, and one of
              them may still be waiting for its file to be moved. -->
         {today === undefined ? `${doneCount()} finished` : `${today} done today`}
-      {:else if desk.surface === 'sessions'}
-        {count.sessions} linked {count.sessions === 1 ? 'session' : 'sessions'}
+      {:else if desk.surface === 'memory' && desk.memoryMode === 'sessions'}
+        {sessionTotal} {sessionTotal === 1 ? 'session' : 'sessions'}{runningTotal > 0
+          ? `, ${runningTotal} running`
+          : ''}
       {:else if desk.surface === 'memory'}
         {count.memory} {count.memory === 1 ? 'note' : 'notes'}
       {:else}

@@ -57,6 +57,7 @@ From then on:
 | `/ledge plan` | Writes or rewrites the ordered plan for the current task |
 | `/ledge note "text"` | Appends the text to today's notes on the current task |
 | `/ledge when <day>` | Sets the planned day: `YYYY-MM-DD`, `today`, `tomorrow`, or `none` to clear |
+| `/ledge week ["item"]` | Shows this week's to-do list, or adds the item to it |
 | `/ledge park "reason"` | Refreshes the checklist, writes a note, then runs `ledge park` |
 | `/ledge done` | Ticks completed items, writes a closing note, then runs `ledge done` |
 
@@ -68,7 +69,10 @@ Four of those Claude does on its own, because the command file makes them standi
 - Append a closing note before compaction and at the end of a session: what was done, what is
   left, what the next session needs to know.
 
-When a session ends, the Stop hook links the session id to the task. The next time you open Claude
+After each turn the Stop hook links the session id to the task and starts `ledge capture` in
+the background, which reads the session's transcript, keeps the plan, checklist and notes
+current, and gives the session a title (`ledge sessions` shows it; `~/.ledge/capture.log` says
+what each run did). The next time you open Claude
 Code in that folder, the SessionStart hook briefs it with the title, the planned day, the
 requirement, the plan, the unchecked items and the latest note.
 
@@ -133,7 +137,8 @@ Added current task audit-the-porcelain-parser
 
 Then ask what is on. `ledge today` prints three sections: the tasks planned for today, the ones
 planned earlier that are not done yet, and the current tasks that were not already listed above.
-No task appears twice, which is why Current here holds only the third one:
+No task appears twice, which is why Current here holds only the third one. When this week's to-do
+list has unticked items for today, a fourth section, `Week to-do today`, follows the first:
 
 ```console
 $ ledge today
@@ -213,7 +218,10 @@ ledge current --repo "$PWD" --context    # what the SessionStart hook injects
 | `ledge plan <id> "step" "step" ...` | Replace the ordered plan steps. At least one step is required | 0, 1, 2 |
 | `ledge note <id> "text"` | Append the text to today's `### YYYY-MM-DD` notes subsection | 0, 1, 2 |
 | `ledge when <id> <day>` | Set or clear the planned day. `<day>` is `YYYY-MM-DD`, `today`, `tomorrow`, `yesterday`, or `none` (`clear` also works) | 0, 1, 2 |
-| `ledge today` | Tasks planned for today, overdue ones, then the remaining current tasks | 0 |
+| `ledge today` | Tasks planned for today, today's week items, overdue ones, then the remaining current tasks | 0 |
+| `ledge week [--week W\|--next]` | This week's to-do list by day, each item numbered | 0, 1, 2 |
+| `ledge week add "text" [--day d] [--task id]` | Add a week item. `d` is `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun`, or `anytime` (the default); `--task` must name an existing task | 0, 1, 2 |
+| `ledge week tick\|untick\|rm <n>`, `ledge week move <n> --day d` | Change week item `n`, as `ledge week` numbered it | 0, 1, 2 |
 | `ledge open <id>` | Print the task file path | 0, 1, 2 |
 | `ledge scan` | Run the git scan once, print Pending as JSON | 0 |
 | `ledge init` | Create the store, a default config and a sample task | 0 |

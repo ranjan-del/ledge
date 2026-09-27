@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ReturnToWork from '../src/components/ReturnToWork.svelte';
-import Now from '../src/components/Now.svelte';
+import Assistant from '../src/components/Assistant.svelte';
+import { AssistantChat } from '../src/lib/assistant-chat.svelte.ts';
+import { FakeAssistantEngine } from '../src/lib/assistant/fake.ts';
 import type { AwaySummary } from '../src/lib/away.ts';
 import { DAY, TASK_A_FILE, taskA } from './fixtures.ts';
 
@@ -70,32 +72,31 @@ describe('ReturnToWork', () => {
   });
 });
 
-describe('Now, returning to it', () => {
-  const props = {
-    working: [taskA()],
-    upNext: [],
+describe('Assistant, returning to it', () => {
+  const props = () => ({
+    chat: new AssistantChat(new FakeAssistantEngine()),
     day: DAY,
     name: 'Ranjan',
+    recent: [{ task: taskA(), at: taskA().updated }],
     onselect: () => {},
-    onadd: () => {},
-  };
+  });
 
   it('puts the summary above the greeting, because it is the perishable part', () => {
-    const { container } = render(Now, {
+    const { container } = render(Assistant, {
       props: {
-        ...props,
+        ...props(),
         away: summary,
         onresumeaway: () => {},
         ondismissaway: () => {},
       },
     });
-    const blocks = [...container.querySelectorAll('.pane-scroll > *')].map((el) => el.className);
-    expect(blocks[0]).toContain('away');
-    expect(blocks[1]).toContain('greet');
+    const blocks = [...container.querySelectorAll('.pane-scroll > *')];
+    expect(blocks[0]?.querySelector('.away')).toBeTruthy();
+    expect(blocks[1]?.className).toContain('greet');
   });
 
   it('shows nothing of the sort when there was no absence to report', () => {
-    const { container } = render(Now, { props: { ...props } });
+    const { container } = render(Assistant, { props: props() });
     expect(container.querySelector('.away')).toBeNull();
   });
 });

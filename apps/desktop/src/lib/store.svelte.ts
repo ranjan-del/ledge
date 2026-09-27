@@ -32,18 +32,50 @@ import {
   watchPaths,
   writeText,
 } from './io.ts';
+import {
+  parseInsights,
+  parseSessionRecord,
+  type SessionRecord,
+  type TaskInsights,
+} from '@ledge/core/pure';
 import { basename, expandTilde, isTaskFile, join, ledgeHomeFor } from './paths.ts';
 import { discoverRepos, scanRepoList } from './scan.ts';
 import { nowIso, todayIso } from './time.ts';
+import { isoWeekOf, parseWeek, serializeWeek, type WeekFile } from '@ledge/core/pure';
+import {
+  addItem,
+  emptyWeek,
+  moveItem,
+  removeItem,
+  updateItem,
+  type WeekItemPatch,
+  type WeekRef,
+  type WeekSlot,
+} from './week-view.ts';
 
 export const WATCH_DEBOUNCE_MS = 150;
 
 /**
- * The four surfaces, in the order the tab strip shows them. They are the whole navigation:
- * NOW is what is in front of you, SESSIONS is what Claude Code has worked on, TASKS is every
- * list of work there is, and MEMORY is the reasoning those sessions left behind.
+ * The three surfaces, in the order the tab strip shows them. They are the whole navigation:
+ * ASSISTANT is what is in front of you and the one you can talk to, TASKS is every list of work
+ * there is, and MEMORY is the reasoning and the sessions that work left behind.
  */
-export type Surface = 'now' | 'sessions' | 'tasks' | 'memory';
+export type Surface = 'assistant' | 'tasks' | 'memory';
+
+/** The two halves of MEMORY: the dated notes, and the Claude Code sessions. */
+export type MemoryMode = 'notes' | 'sessions';
+
+/** Where the viewer's last choice of Notes or Sessions is kept. Per viewer, like the task mode. */
+export const MEMORY_MODE_KEY = 'ledge.memory.mode';
+
+/** The remembered Memory half, or Notes when there is none or storage cannot be read. */
+export function rememberedMemoryMode(): MemoryMode {
+  try {
+    return globalThis.localStorage?.getItem(MEMORY_MODE_KEY) === 'sessions' ? 'sessions' : 'notes';
+  } catch {
+    return 'notes';
+  }
+}
 
 /**
  * The views inside TASKS. Live and Done are the two halves of the work you own; Backlog and
@@ -52,6 +84,24 @@ export type Surface = 'now' | 'sessions' | 'tasks' | 'memory';
  * `archive/`, a folder that only grows, so it is never parsed at boot.
  */
 export type TaskView = 'live' | 'done' | 'backlog' | 'pending';
+
+/**
+ * The two halves of TASKS: the task lists, and the weekly to-do. The to-do is a list of
+ * reminders for the week, not steps of a task, so it sits beside the lists rather than in them.
+ */
+export type TaskMode = 'tasks' | 'todo';
+
+/** Where the viewer's last choice of Tasks or To-do is kept. Per viewer, so not in config.json. */
+export const TASK_MODE_KEY = 'ledge.tasks.mode';
+
+/** The remembered mode, or Tasks when there is none or storage cannot be read. */
+export function rememberedTaskMode(): TaskMode {
+  try {
+    return globalThis.localStorage?.getItem(TASK_MODE_KEY) === 'todo' ? 'todo' : 'tasks';
+  } catch {
+    return 'tasks';
+  }
+}
 
 export interface BrokenTask {
   file: string;
@@ -71,9 +121,29 @@ export interface Desk {
   archiveDir: string;
   configPath: string;
   cachePath: string;
+  /** `sessions/`: one SessionRecord per Claude Code session, written by `ledge capture`. */
+  sessionsDir: string;
+  /** `insights/`: AI titles and summaries per task, written by `ledge capture` and `summarise`. */
+  insightsDir: string;
+  /** `weeks/`: one weekly to-do file per ISO week, `2026-W39.md`. */
+  weeksDir: string;
+  /** Week files read so far, keyed by week. A week that is not here has not been read yet. */
+  weeks: Record<string, WeekFile>;
+  /** The week the To-do view is showing. Starts on this week. */
+  week: string;
+  /** Tasks or To-do, inside the TASKS surface. */
+  taskMode: TaskMode;
+  /** Notes or Sessions, inside the MEMORY surface. */
+  memoryMode: MemoryMode;
+  /** The week files in `weeks/`, by week, once the calendar has asked. Null until then. */
+  weekFiles: string[] | null;
   config: Config;
   tasks: Task[];
   broken: BrokenTask[];
+  /** Every readable session record, newest `started` first. A bad file is left out. */
+  sessionRecords: SessionRecord[];
+  /** Insights keyed by task id. A task with no readable sidecar has no key. */
+  insights: Record<string, TaskInsights>;
   pending: RepoStatus[];
   archivedCount: number;
   /** Parsed archive files, newest first. Empty until the Done view is first asked for. */
@@ -100,16 +170,26 @@ export const desk: Desk = $state({
   archiveDir: '',
   configPath: '',
   cachePath: '',
+  sessionsDir: '',
+  insightsDir: '',
+  weeksDir: '',
+  weeks: {},
+  week: isoWeekOf(todayIso()),
+  taskMode: rememberedTaskMode(),
+  memoryMode: rememberedMemoryMode(),
+  weekFiles: null,
   config: defaultConfig(),
   tasks: [],
   broken: [],
+  sessionRecords: [],
+  insights: {},
   pending: [],
   archivedCount: 0,
   archive: [],
   archiveReady: false,
   archiveLoading: false,
   selectedFile: null,
-  surface: 'now',
+  surface: 'assistant',
   view: 'live',
   searching: false,
   scanning: false,
@@ -210,6 +290,16 @@ export function errorText(e: unknown): string {
     }
   }
   return String(e);
+}
+
+/** The insights sidecar for a task, when one was readable. */
+export function insightsFor(taskId: string): TaskInsights | undefined {
+  return desk.insights[taskId];
+}
+
+/** Session records attributed to a task, newest first. */
+export function sessionRecordsFor(taskId: string): SessionRecord[] {
+  return desk.sessionRecords.filter((r) => r.taskId === taskId);
 }
 
 /** Git status for a task's repo from the last scan, if the repo was scanned. */
@@ -328,6 +418,48 @@ export function setView(view: TaskView): void {
   desk.surface = 'tasks';
   desk.selectedFile = null;
   if (view === 'done') void loadArchive();
+}
+
+/**
+ * Switches TASKS between its task lists and the weekly to-do, and remembers the choice for this
+ * viewer. Storage that refuses (a private window, a blocked origin) only costs the memory.
+ */
+export function setTaskMode(mode: TaskMode): void {
+  desk.taskMode = mode;
+  desk.surface = 'tasks';
+  desk.selectedFile = null;
+  try {
+    globalThis.localStorage?.setItem(TASK_MODE_KEY, mode);
+  } catch {
+    /* not remembered, still switched */
+  }
+}
+
+/**
+ * Switches MEMORY between its notes and its sessions, and remembers the choice for this viewer,
+ * the same way the task mode is remembered.
+ */
+export function setMemoryMode(mode: MemoryMode): void {
+  desk.memoryMode = mode;
+  desk.surface = 'memory';
+  desk.selectedFile = null;
+  try {
+    globalThis.localStorage?.setItem(MEMORY_MODE_KEY, mode);
+  } catch {
+    /* not remembered, still switched */
+  }
+}
+
+/** Opens the To-do view on a week, this week when none is named. */
+export function openWeek(week: string = isoWeekOf(todayIso())): void {
+  setTaskMode('todo');
+  browseWeek(week);
+}
+
+/** Shows another week in the To-do view, reading its file the first time. */
+export function browseWeek(week: string): void {
+  desk.week = week;
+  if (!(week in desk.weeks)) void loadWeek(week);
 }
 
 /** Opens or closes the header search. Closing it never changes which surface you are on. */
@@ -711,6 +843,226 @@ export async function removeTask(id: string): Promise<void> {
   forgetTask(task.file);
 }
 
+/* ------------------------------------------------------------------ weeks */
+
+const WEEK_FILE = /^\d{4}-W\d{2}\.md$/;
+
+/** The file a week lives in. */
+export function weekPath(week: string): string {
+  return join(desk.weeksDir, `${week}.md`);
+}
+
+/** A week as the panel knows it: what was read, or an empty week when it has not been. */
+export function weekFor(week: string): WeekFile {
+  return desk.weeks[week] ?? emptyWeek(week);
+}
+
+/**
+ * Reads one week file. A missing file is an empty week, as the contract says. A file that
+ * cannot be read is an empty week too, and says so in the log: the to-do is a reminder list,
+ * and it must never be the reason the panel does not open. The parser itself never refuses,
+ * it keeps whatever it does not understand.
+ */
+async function readWeek(week: string): Promise<WeekFile> {
+  const file = weekPath(week);
+  if (desk.weeksDir === '' || !(await pathExists(file))) return emptyWeek(week);
+  try {
+    return parseWeek(await readText(file), week);
+  } catch (e) {
+    report('warn', `week: could not read ${file}: ${errorText(e)}`);
+    return emptyWeek(week);
+  }
+}
+
+/** Reads a week onto the desk, replacing whatever copy was there. */
+export async function loadWeek(week: string): Promise<void> {
+  const read = await readWeek(week);
+  desk.weeks = { ...desk.weeks, [week]: read };
+}
+
+/**
+ * Lists `weeks/*.md` by name, without reading any of them, so the calendar knows which weeks
+ * have a file at all. Boot only reads the week it started in, and a week is otherwise read
+ * the first time it is shown, so this is what lets a month grid mark weeks nobody has opened.
+ */
+export async function listWeekFiles(): Promise<string[]> {
+  if (desk.weeksDir === '') return [];
+  let names: string[] = [];
+  try {
+    names = (await listDir(desk.weeksDir))
+      .filter((e) => e.isFile && WEEK_FILE.test(e.name))
+      .map((e) => e.name.slice(0, -3))
+      .sort();
+  } catch (e) {
+    report('warn', `week: could not list ${desk.weeksDir}: ${errorText(e)}`);
+  }
+  desk.weekFiles = names;
+  return names;
+}
+
+/**
+ * Reads the named weeks that have a file and are not on the desk yet. The calendar passes the
+ * weeks its month grid shows, so opening it reads five or six small files at most.
+ */
+export async function ensureWeeks(weeks: string[]): Promise<void> {
+  const files = desk.weekFiles ?? (await listWeekFiles());
+  const have = new Set(files);
+  for (const week of weeks) {
+    if (have.has(week) && !(week in desk.weeks)) await loadWeek(week);
+  }
+}
+
+/** Re-reads every week the desk holds, and this week whether or not it was held. */
+async function reloadWeeks(): Promise<void> {
+  const weeks = new Set([...Object.keys(desk.weeks), isoWeekOf(todayIso()), desk.week]);
+  for (const week of weeks) await loadWeek(week);
+}
+
+let tmpCount = 0;
+
+/**
+ * Writes a week file the way the contract asks: to `<file>.<tag>.tmp` first, then a rename over
+ * the real name, so a reader never sees half a file. A WebView has no process id, so the tag is
+ * the time and a counter, which is just as unique for one writer. The watcher sees the `.tmp`
+ * name go by and ignores it, since it is not a week file.
+ */
+async function writeWeekFile(file: string, text: string): Promise<void> {
+  tmpCount += 1;
+  const tmp = `${file}.${Date.now()}-${tmpCount}.tmp`;
+  await writeText(tmp, text);
+  try {
+    await moveFile(tmp, file);
+  } catch (e) {
+    await removeFile(tmp).catch(() => {});
+    throw e;
+  }
+}
+
+let weekWrites: Promise<unknown> = Promise.resolve();
+
+/**
+ * The one door every to-do edit goes through. It reads the file fresh rather than trusting the
+ * copy on the desk, because `ledge week` in a terminal or a Claude session may have written it a
+ * moment ago; applies the edit; stamps `updated`; and writes through `serializeWeek`. The desk
+ * takes the new copy first so a tick shows at once, and gets the old one back if the write is
+ * refused. Edits run one after another, so two quick ticks cannot each undo the other.
+ */
+export function editWeek(week: string, edit: (w: WeekFile) => WeekFile): Promise<WeekFile> {
+  const run = weekWrites.then(async () => {
+    if (desk.weeksDir === '') throw new Error('The weeks folder is not known yet.');
+    const before = desk.weeks[week];
+    const next = { ...edit(await readWeek(week)), updated: nowIso() };
+    desk.weeks = { ...desk.weeks, [week]: next };
+    try {
+      await ensureDir(desk.weeksDir);
+      await writeWeekFile(weekPath(week), serializeWeek(next));
+    } catch (e) {
+      const restored = { ...desk.weeks };
+      if (before) restored[week] = before;
+      else delete restored[week];
+      desk.weeks = restored;
+      throw e;
+    }
+    return next;
+  });
+  weekWrites = run.catch(() => {});
+  return run;
+}
+
+export function addWeekItem(
+  week: string,
+  slot: WeekSlot,
+  text: string,
+  taskId?: string,
+): Promise<WeekFile> {
+  return editWeek(week, (w) => addItem(w, slot, text, taskId));
+}
+
+export function updateWeekItem(week: string, ref: WeekRef, patch: WeekItemPatch): Promise<WeekFile> {
+  return editWeek(week, (w) => updateItem(w, ref, patch));
+}
+
+export function moveWeekItem(week: string, ref: WeekRef, to: WeekSlot): Promise<WeekFile> {
+  return editWeek(week, (w) => moveItem(w, ref, to));
+}
+
+export function removeWeekItem(week: string, ref: WeekRef): Promise<WeekFile> {
+  return editWeek(week, (w) => removeItem(w, ref));
+}
+
+/* ------------------------------------------------------------------ sidecars */
+
+/** True for `<dir>/<name>.json`, not hidden and not a `.tmp` from an atomic write. */
+function isSidecar(path: string, dir: string): boolean {
+  if (dir === '' || !path.startsWith(dir + '/')) return false;
+  const name = path.slice(dir.length + 1);
+  return !name.includes('/') && !name.startsWith('.') && name.endsWith('.json');
+}
+
+function byStartedDesc(a: SessionRecord, b: SessionRecord): number {
+  return Date.parse(b.started) - Date.parse(a.started) || b.id.localeCompare(a.id);
+}
+
+/** Reads a sidecar, or undefined when it is missing or unreadable. Never throws. */
+async function readSidecar(path: string): Promise<string | undefined> {
+  try {
+    return await readText(path);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Reads every `sessions/*.json`. A missing folder, an unreadable file and a file that is not a
+ * session record are all simply absent, which is the contract's rule for both sidecars.
+ */
+export async function reloadSessionRecords(): Promise<void> {
+  const entries = await listDir(desk.sessionsDir);
+  const records: SessionRecord[] = [];
+  for (const e of entries) {
+    const path = join(desk.sessionsDir, e.name);
+    if (!e.isFile || !isSidecar(path, desk.sessionsDir)) continue;
+    const text = await readSidecar(path);
+    const rec = text === undefined ? undefined : parseSessionRecord(text);
+    if (rec) records.push(rec);
+  }
+  desk.sessionRecords = records.sort(byStartedDesc);
+}
+
+/** Re-reads one session record, replacing or dropping its previous copy. */
+async function reloadSessionRecord(path: string): Promise<void> {
+  const text = await readSidecar(path);
+  const rec = text === undefined ? undefined : parseSessionRecord(text);
+  const id = basename(path).replace(/\.json$/, '');
+  const rest = desk.sessionRecords.filter((r) => r.id !== id && r.id !== rec?.id);
+  desk.sessionRecords = (rec ? [...rest, rec] : rest).sort(byStartedDesc);
+}
+
+/** Reads every `insights/*.json`, keyed by the task id inside the file. */
+export async function reloadInsights(): Promise<void> {
+  const entries = await listDir(desk.insightsDir);
+  const next: Record<string, TaskInsights> = {};
+  for (const e of entries) {
+    const path = join(desk.insightsDir, e.name);
+    if (!e.isFile || !isSidecar(path, desk.insightsDir)) continue;
+    const text = await readSidecar(path);
+    const parsed = text === undefined ? undefined : parseInsights(text);
+    if (parsed) next[parsed.taskId] = parsed;
+  }
+  desk.insights = next;
+}
+
+/** Re-reads one insights file. The file name is the task id, as the contract lays it out. */
+async function reloadInsight(path: string): Promise<void> {
+  const text = await readSidecar(path);
+  const parsed = text === undefined ? undefined : parseInsights(text);
+  const id = basename(path).replace(/\.json$/, '');
+  const next = { ...desk.insights };
+  delete next[id];
+  if (parsed) next[parsed.taskId] = parsed;
+  desk.insights = next;
+}
+
 /* ------------------------------------------------------------------ watching */
 
 let changeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -737,9 +1089,24 @@ export async function applyChanges(paths: string[]): Promise<void> {
   let reloadConfig = false;
   let reloadAll = false;
   let archiveTouched = false;
+  let allSessions = false;
+  let allInsights = false;
+  let allWeeks = false;
+  const weekFiles = new Set<string>();
   const files = new Set<string>();
+  const sessionFiles = new Set<string>();
+  const insightFiles = new Set<string>();
   for (const p of paths) {
-    if (basename(p) === 'config.json') reloadConfig = true;
+    if (desk.sessionsDir !== '' && p === desk.sessionsDir) allSessions = true;
+    else if (isSidecar(p, desk.sessionsDir)) sessionFiles.add(p);
+    else if (desk.insightsDir !== '' && p === desk.insightsDir) allInsights = true;
+    else if (isSidecar(p, desk.insightsDir)) insightFiles.add(p);
+    else if (desk.weeksDir !== '' && p === desk.weeksDir) allWeeks = true;
+    else if (desk.weeksDir !== '' && p.startsWith(desk.weeksDir + '/')) {
+      const name = p.slice(desk.weeksDir.length + 1);
+      if (WEEK_FILE.test(name)) weekFiles.add(name.slice(0, -3));
+    }
+    else if (basename(p) === 'config.json') reloadConfig = true;
     else if (p === desk.tasksDir) reloadAll = true;
     else if (p.startsWith(desk.tasksDir + '/') && isTaskFile(p)) files.add(p);
     else if (p === desk.archiveDir || p.startsWith(desk.archiveDir + '/')) archiveTouched = true;
@@ -748,15 +1115,32 @@ export async function applyChanges(paths: string[]): Promise<void> {
   if (reloadAll) await reloadTasks();
   else for (const file of files) await reloadTask(file);
   if (archiveTouched) invalidateArchive();
+  if (allSessions) await reloadSessionRecords();
+  else for (const file of sessionFiles) await reloadSessionRecord(file);
+  if (allInsights) await reloadInsights();
+  else for (const file of insightFiles) await reloadInsight(file);
+  if (allWeeks) await reloadWeeks();
+  else for (const week of weekFiles) await loadWeek(week);
+  /* The calendar's listing, once there is one, learns of a week file written since. */
+  if (desk.weekFiles !== null && (allWeeks || weekFiles.size > 0)) {
+    if (allWeeks) await listWeekFiles();
+    else desk.weekFiles = [...new Set([...desk.weekFiles, ...weekFiles])].sort();
+  }
 }
 
 async function startWatching(): Promise<void> {
   if (stopWatching) stopWatching();
+  /* A sidecar folder that could not be created is left out rather than failing the watch
+     on the tasks it would otherwise have taken down with it. */
+  const sidecars: string[] = [];
+  for (const dir of [desk.sessionsDir, desk.insightsDir, desk.weeksDir]) {
+    if (await pathExists(dir)) sidecars.push(dir);
+  }
   try {
     stopWatching = await watchPaths(
       /* The archive is watched too, not because the panel reads it often, but because a task
          finished in another window has to invalidate the cached Done list. */
-      [desk.tasksDir, desk.archiveDir, desk.ledgeHome],
+      [desk.tasksDir, desk.archiveDir, desk.ledgeHome, ...sidecars],
       scheduleChange,
       WATCH_DEBOUNCE_MS,
     );
@@ -835,13 +1219,31 @@ export async function boot(homeOverride?: string): Promise<void> {
   desk.archiveDir = join(desk.ledgeHome, 'archive');
   desk.configPath = join(desk.ledgeHome, 'config.json');
   desk.cachePath = join(desk.ledgeHome, '.scan-cache.json');
+  desk.sessionsDir = join(desk.ledgeHome, 'sessions');
+  desk.insightsDir = join(desk.ledgeHome, 'insights');
+  desk.weeksDir = join(desk.ledgeHome, 'weeks');
+  desk.week = isoWeekOf(todayIso());
 
   await ensureDir(desk.tasksDir);
   /* The archive is created here rather than on the first `ledge done`, because the watcher
      cannot subscribe to a folder that does not exist yet. */
   await ensureDir(desk.archiveDir);
+  /* The two sidecar folders and `weeks/` are made here for the same reason: capture and
+     `ledge week` create them on their first write, and a folder that does not exist yet cannot
+     be watched. A refusal must not stop the panel booting; they are additions to the tasks,
+     not dependencies. */
+  for (const dir of [desk.sessionsDir, desk.insightsDir, desk.weeksDir]) {
+    try {
+      await ensureDir(dir);
+    } catch (e) {
+      report('warn', `could not create ${dir}: ${errorText(e)}`);
+    }
+  }
   await loadConfigFile();
   await reloadTasks();
+  await reloadSessionRecords();
+  await reloadInsights();
+  await reloadWeeks();
   await loadScanCache();
   await startWatching();
   desk.ready = true;

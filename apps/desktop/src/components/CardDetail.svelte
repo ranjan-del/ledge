@@ -11,8 +11,10 @@
    * Where the file has nothing to say, this says so rather than filling the space.
    */
   import { memoryFor, type Task } from '@ledge/core/pure';
-  import { paragraphs } from '../lib/prose.ts';
+  import { noteDigest, stepDigest } from '../lib/digest.ts';
+  import { useInsights } from '../lib/insight-context.ts';
   import { dayLabel, todayIso } from '../lib/time.ts';
+  import Digest from './Digest.svelte';
 
   /** Ticked items shown in full before the rest are counted instead. */
   const DONE_SHOWN = 5;
@@ -32,6 +34,9 @@
 
   let { task, day = todayIso() }: Props = $props();
 
+  const lookup = useInsights();
+  const insights = $derived(lookup(task.id));
+
   /* `memoryFor` sorts newest date first, so one task's newest note is simply the first entry.
      Going through core rather than reading task.notes directly keeps one definition of which
      note is the newest. */
@@ -49,10 +54,11 @@
   <section>
     <h4 class="section-label">Where it stands</h4>
     {#if note}
+      {#if insights?.headline}
+        <p class="prose headline">{insights.headline}</p>
+      {/if}
       <p class="sub stamp">{dayLabel(note.date, day)}</p>
-      {#each paragraphs(note.body) as para, i (i)}
-        <p class="prose selectable">{para}</p>
-      {/each}
+      <Digest digest={noteDigest(note, insights)} original={note.body} />
     {:else}
       <p class="quiet faint">No note yet. Claude Code writes one when it makes a decision.</p>
     {/if}
@@ -66,7 +72,8 @@
     {#if task.plan.length > 0}
       <ol class="plan-list selectable">
         {#each task.plan as step, i (i)}
-          <li>{step}</li>
+          {@const d = stepDigest(step, insights)}
+          <li title={d.hasMore ? step : undefined}>{d.title}</li>
         {/each}
       </ol>
     {:else if remaining.length > 0}
@@ -125,8 +132,9 @@
     color: var(--text-muted);
     overflow-wrap: break-word;
   }
-  .prose + .prose {
-    margin-top: var(--space-2);
+  .headline {
+    margin-bottom: var(--space-2);
+    color: var(--text);
   }
   .plan-list {
     font-size: var(--fs-sm);

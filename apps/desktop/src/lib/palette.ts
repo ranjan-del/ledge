@@ -19,10 +19,10 @@ import { basename } from './paths.ts';
 import { matches as matchesAll, searchDesk, terms as queryTerms, type Hit } from './search.ts';
 import { dayLabel, relativeTime, todayIso } from './time.ts';
 
-/** The four surfaces, spelled here so this file never has to import the store. */
-export type PaletteSurface = 'now' | 'sessions' | 'tasks' | 'memory';
+/** The three surfaces, spelled here so this file never has to import the store. */
+export type PaletteSurface = 'assistant' | 'tasks' | 'memory';
 
-export type PaletteKind = 'task' | 'session' | 'note' | 'action';
+export type PaletteKind = 'task' | 'session' | 'note' | 'ask' | 'action';
 
 /**
  * What choosing a row does, as data rather than as a closure. The panel owns the doing, so
@@ -31,8 +31,10 @@ export type PaletteKind = 'task' | 'session' | 'note' | 'action';
 export type PaletteCommand =
   | { type: 'add-task'; title: string }
   | { type: 'open-task'; file: string }
-  | { type: 'surface'; surface: PaletteSurface }
-  | { type: 'rescan' };
+  /** `memory` picks the half of MEMORY to show: Sessions lives there now. */
+  | { type: 'surface'; surface: PaletteSurface; memory?: 'notes' | 'sessions' }
+  | { type: 'rescan' }
+  | { type: 'ask'; question: string };
 
 export interface PaletteItem {
   /** Stable within one build of the list, so the keyed each block does not re-create rows. */
@@ -77,28 +79,40 @@ interface ActionSpec {
   command: PaletteCommand;
 }
 
-const SURFACE_ACTIONS: { surface: PaletteSurface; label: string; keywords: string; sub: string }[] =
-  [
-    { surface: 'now', label: 'Go to Now', keywords: 'home today current working', sub: 'Surface' },
-    {
-      surface: 'sessions',
-      label: 'Go to Sessions',
-      keywords: 'claude code session ids resume',
-      sub: 'Surface',
-    },
-    {
-      surface: 'tasks',
-      label: 'Go to Tasks',
-      keywords: 'live done backlog pending archive lists',
-      sub: 'Surface',
-    },
-    {
-      surface: 'memory',
-      label: 'Go to Memory',
-      keywords: 'notes reasoning decisions dead ends',
-      sub: 'Surface',
-    },
-  ];
+const SURFACE_ACTIONS: {
+  surface: PaletteSurface;
+  memory?: 'notes' | 'sessions';
+  label: string;
+  keywords: string;
+  sub: string;
+}[] = [
+  {
+    surface: 'assistant',
+    label: 'Go to Assistant',
+    keywords: 'home now today current working chat ask',
+    sub: 'Surface',
+  },
+  {
+    surface: 'tasks',
+    label: 'Go to Tasks',
+    keywords: 'live done backlog pending archive lists',
+    sub: 'Surface',
+  },
+  {
+    surface: 'memory',
+    memory: 'notes',
+    label: 'Go to Memory',
+    keywords: 'notes reasoning decisions dead ends',
+    sub: 'Surface',
+  },
+  {
+    surface: 'memory',
+    memory: 'sessions',
+    label: 'Go to Sessions',
+    keywords: 'claude code session ids resume',
+    sub: 'In Memory',
+  },
+];
 
 const RESCAN: ActionSpec = {
   label: 'Refresh the git scan',
@@ -227,12 +241,17 @@ function actionItems(query: string, surface: PaletteSurface, words: string[]): P
   }
   const rest: ActionSpec[] = [
     RESCAN,
-    ...SURFACE_ACTIONS.filter((entry) => entry.surface !== surface).map((entry) => ({
-      label: entry.label,
-      keywords: entry.keywords,
-      sub: entry.sub,
-      command: { type: 'surface', surface: entry.surface } as PaletteCommand,
-    })),
+    /* Sessions is a half of MEMORY rather than a surface, so it is offered from there too. */
+    ...SURFACE_ACTIONS.filter((entry) => entry.surface !== surface || entry.memory === 'sessions').map(
+      (entry) => ({
+        label: entry.label,
+        keywords: entry.keywords,
+        sub: entry.sub,
+        command: (entry.memory
+          ? { type: 'surface', surface: entry.surface, memory: entry.memory }
+          : { type: 'surface', surface: entry.surface }) as PaletteCommand,
+      }),
+    ),
   ];
   const offered =
     words.length === 0
@@ -259,6 +278,28 @@ export interface PaletteInput {
   day?: string;
   /** Now in milliseconds, for the relative times. A parameter for the same reason. */
   now?: number;
+  /** Offer "Ask Ledge" for what was typed. Only where the panel can actually run it. */
+  ask?: boolean;
+}
+
+/** Reads like a question or a request, so asking is what Enter should do. */
+export function looksLikeQuestion(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q.endsWith('?')) return true;
+  return /^(what|which|why|how|when|where|who|is|are|am|was|did|do|does|can|could|should|would|will|have|has|tell|show|summari[sz]e|list|explain)\b/.test(
+    q,
+  );
+}
+
+function askItem(query: string): PaletteItem {
+  const q = query.trim();
+  return {
+    id: 'ask',
+    kind: 'ask',
+    label: q === '' ? 'Ask Ledge a question' : `Ask Ledge "${q}"`,
+    sub: 'Opens the Assistant and asks it there',
+    command: { type: 'ask', question: q },
+  };
 }
 
 /**
@@ -273,6 +314,12 @@ export function buildPalette(input: PaletteInput): PaletteGroup[] {
   const words = queryTerms(input.query);
   const hits = words.length === 0 ? [] : searchDesk(input.tasks, input.query, HIT_LIMIT);
   const groups: PaletteGroup[] = [];
+
+  /* A question goes to the top, since that is what Enter should do with it; anything else
+     keeps the rule that the first row is the safest one, and asking sits after what the desk
+     itself found. */
+  const askFirst = input.ask === true && words.length > 0 && looksLikeQuestion(input.query);
+  if (askFirst) groups.push({ kind: 'ask', label: 'Ask', items: [askItem(input.query)] });
 
   const tasks =
     words.length === 0
@@ -291,6 +338,10 @@ export function buildPalette(input: PaletteInput): PaletteGroup[] {
 
   const notes = matchedNotes(hits, day);
   if (notes.length > 0) groups.push({ kind: 'note', label: 'Notes', items: notes });
+
+  if (input.ask === true && !askFirst) {
+    groups.push({ kind: 'ask', label: 'Ask', items: [askItem(input.query)] });
+  }
 
   const actions = actionItems(input.query, input.surface, words);
   if (actions.length > 0) groups.push({ kind: 'action', label: 'Actions', items: actions });

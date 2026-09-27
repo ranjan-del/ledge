@@ -12,7 +12,7 @@ import {
 } from '../src/lib/sizing.ts';
 
 const base: PanelCounts = {
-  surface: 'now',
+  surface: 'assistant',
   view: 'live',
   detailOpen: false,
   working: 0,
@@ -47,10 +47,13 @@ describe('shortPanelHeight', () => {
 
 describe('panelContent', () => {
   it('counts only what the surface you are on is showing', () => {
-    const now = panelContent({ ...base, surface: 'now', working: 2, notes: 40 });
-    expect(now.blocks).toBe(2);
+    const idle = panelContent({ ...base, surface: 'assistant', working: 2, notes: 40, recent: 2 });
+    expect(idle.blocks).toBe(0);
+    expect(idle.lines).toBe(8);
     const memory = panelContent({ ...base, surface: 'memory', working: 2, notes: 40 });
     expect(memory.blocks).toBe(40);
+    const sessions = panelContent({ ...base, surface: 'memory', memoryMode: 'sessions', sessions: 7, notes: 40 });
+    expect(sessions.blocks).toBe(7);
   });
 
   it('reads the view you are in on the tasks surface', () => {
@@ -61,11 +64,23 @@ describe('panelContent', () => {
     expect(panelContent({ ...counts, view: 'pending' }).blocks).toBe(5);
   });
 
-  it('counts Up next and the attention line as lines rather than blocks', () => {
-    const content = panelContent({ ...base, working: 1, upNext: 3, attention: 2 });
-    expect(content.blocks).toBe(1);
-    /* Three items, one attention line, and the two the surface always has. */
-    expect(content.lines).toBe(6);
+  it('counts the idle Assistant as lines: its chrome, two per recent card, the Pending line', () => {
+    const content = panelContent({ ...base, recent: 3, attention: 2 });
+    expect(content.blocks).toBe(0);
+    /* Greeting, input and chips are four; three cards are six; one Pending line. */
+    expect(content.lines).toBe(11);
+  });
+
+  it('gives a conversation the whole height from its first message', () => {
+    const content = panelContent({ ...base, chatting: true });
+    expect(needsFullHeight(content, 4000, 2)).toBe(true);
+  });
+
+  it('sizes the To-do view by its sections and items, and the Assistant by its Today block', () => {
+    const todo = panelContent({ ...base, surface: 'tasks', mode: 'todo', live: 30, weekItems: 6 });
+    expect(todo).toEqual({ detailOpen: false, blocks: 0, lines: 16 });
+    const idle = panelContent({ ...base, working: 1, upNext: 0, todayLines: 4 });
+    expect(idle.lines).toBe(8);
   });
 
   it('stops counting when a task detail is open, because that always needs the room', () => {
@@ -82,12 +97,12 @@ describe('needsFullHeight', () => {
   });
 
   it('is false for a nearly empty one', () => {
-    const content = panelContent({ ...base, working: 1, upNext: 1 });
+    const content = panelContent({ ...base, recent: 2, todayLines: 2 });
     expect(needsFullHeight(content, RETINA.avail, RETINA.ratio)).toBe(false);
   });
 
   it('is true once the short panel would have to scroll', () => {
-    const content = panelContent({ ...base, working: 4, upNext: 2, attention: 1 });
+    const content = panelContent({ ...base, recent: 3, attention: 1, todayLines: 5 });
     expect(needsFullHeight(content, RETINA.avail, RETINA.ratio)).toBe(true);
   });
 

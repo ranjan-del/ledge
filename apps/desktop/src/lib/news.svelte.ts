@@ -44,7 +44,7 @@ export const NEWS_LIMIT = 40;
 export interface News {
   /** Newest first. */
   items: Notification[];
-  /** The summary shown on NOW after a stretch away, or undefined when there is nothing. */
+  /** The summary shown on the Assistant after a stretch away, or undefined when there is nothing. */
   away: AwaySummary | undefined;
   /** True once the summary has been on screen, which is what stops it coming back. */
   awaySeen: boolean;

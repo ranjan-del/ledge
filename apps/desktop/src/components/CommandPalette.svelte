@@ -8,8 +8,8 @@
    *
    * What it shows comes from `lib/palette.ts` and nothing else: tasks by title, requirement,
    * checklist, plan and repository, session ids, dated notes through `searchMemory` in core,
-   * and the handful of actions the panel already has a button for. There is no "ask" entry,
-   * because no provider is wired and a row that cannot do what it says is worse than no row.
+   * and the handful of actions the panel already has a button for. With `ask` on, it also
+   * offers to put what was typed to the Assistant, first when it reads like a question.
    *
    * Keyboard first, and that is a shape rather than a feature. The field holds the focus for
    * the whole life of the palette; up and down move a highlight through one flat list, so the
@@ -37,16 +37,26 @@
     modifier?: string;
     onrun: (command: PaletteCommand) => void;
     onclose: () => void;
+    /** Offer to ask the Assistant. Off where it cannot run. */
+    ask?: boolean;
   }
 
-  let { tasks, surface, day = todayIso(), modifier = '⌘', onrun, onclose }: Props = $props();
+  let {
+    tasks,
+    surface,
+    day = todayIso(),
+    modifier = '⌘',
+    onrun,
+    onclose,
+    ask = false,
+  }: Props = $props();
 
   let query = $state('');
   let active = $state(0);
   let field = $state<HTMLInputElement | null>(null);
   let list = $state<HTMLElement | null>(null);
 
-  const groups = $derived(buildPalette({ tasks, query, surface, day }));
+  const groups = $derived(buildPalette({ tasks, query, surface, day, ask }));
   const items = $derived(flattenPalette(groups));
 
   /* The field takes the focus the moment the palette exists. Nothing else in here is

@@ -35,6 +35,12 @@ export interface AskResult {
  */
 export interface Provider {
   readonly name: string;
+  /**
+   * Optional. The model this provider asks, when it pins one, such as `haiku`. Records written
+   * from an answer carry it so a reader can tell which model wrote a title; a provider that
+   * leaves the choice to its backend leaves this out.
+   */
+  readonly model?: string;
   available(): Promise<boolean>;
   ask(prompt: string, opts?: { timeoutMs?: number }): Promise<AskResult>;
   /**

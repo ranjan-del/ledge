@@ -58,6 +58,7 @@
     type ShiftTarget,
   } from '../lib/drag.svelte.ts';
   import type { ShiftTo } from '../lib/drag.svelte.ts';
+  import { isAutoTask } from '../lib/merge.ts';
   import { basename } from '../lib/paths.ts';
   import { lateLabel, relativeTime, todayIso } from '../lib/time.ts';
   import CardDetail from './CardDetail.svelte';
@@ -452,6 +453,9 @@
     <button type="button" class="title" onclick={() => onselect(task)}>
       {task.title}
     </button>
+    {#if isAutoTask(task)}
+      <span class="chip auto" title="Created by Ledge from a Claude Code session. Open it to rename, merge or delete.">auto</span>
+    {/if}
     <span class="chip {tone}" title="Derived from this task's status, planned day and checklist">
       <span aria-hidden="true">{pill.glyph}</span>
       {pill.label}
