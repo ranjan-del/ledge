@@ -22,7 +22,7 @@
    * The words are a button: pressing it, or Enter on it, turns them into the same in-place
    * editor the task detail uses. Escape closes the tools and the editor alike.
    */
-  import type { WeekItem } from '../lib/week.ts';
+  import type { WeekItem } from '@ledge/core/pure';
   import type { WeekItemPatch } from '../lib/week-view.ts';
   import ConfirmButton from './ConfirmButton.svelte';
   import FieldEdit from './FieldEdit.svelte';

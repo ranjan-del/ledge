@@ -15,7 +15,7 @@ import { chat, clearChat } from '../src/lib/ask-state.svelte.ts';
 import { buildPalette } from '../src/lib/palette.ts';
 import capsText from '../src-tauri/capabilities/default.json?raw';
 import { DAY, repoStatus, taskA, taskB, taskC } from './fixtures.ts';
-import { parseWeek } from '../src/lib/week.ts';
+import { parseWeek } from '@ledge/core/pure';
 
 vi.mock('@tauri-apps/plugin-shell', () => ({ Command: { create: vi.fn() } }));
 

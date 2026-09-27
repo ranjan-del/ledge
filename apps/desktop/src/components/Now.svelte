@@ -28,7 +28,7 @@
   import { startStaggerWindow, staggering } from '../lib/motion.svelte.ts';
   import { basename } from '../lib/paths.ts';
   import type { NewTask } from '../lib/store.svelte.ts';
-  import type { WeekItem } from '../lib/week.ts';
+  import type { WeekItem } from '@ledge/core/pure';
   import type { WeekRef } from '../lib/week-view.ts';
   import { todayIso } from '../lib/time.ts';
   import AddTask from './AddTask.svelte';

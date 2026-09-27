@@ -41,7 +41,7 @@ import {
 import { basename, expandTilde, isTaskFile, join, ledgeHomeFor } from './paths.ts';
 import { discoverRepos, scanRepoList } from './scan.ts';
 import { nowIso, todayIso } from './time.ts';
-import { isoWeekOf, parseWeek, serializeWeek, type WeekFile } from './week.ts';
+import { isoWeekOf, parseWeek, serializeWeek, type WeekFile } from '@ledge/core/pure';
 import {
   addItem,
   emptyWeek,

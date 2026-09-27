@@ -43,7 +43,7 @@
   import { shellAskRunner } from '../lib/ask-runner.ts';
   import { provideInsights } from '../lib/insight-context.ts';
   import { todayIso } from '../lib/time.ts';
-  import { isoWeekOf } from '../lib/week.ts';
+  import { isoWeekOf } from '@ledge/core/pure';
   import { openElsewhere, openToday } from '../lib/week-view.ts';
   import { mergeTask } from '../lib/merge.ts';
   import { groupSessions, sessionCount } from '../lib/session-view.ts';
