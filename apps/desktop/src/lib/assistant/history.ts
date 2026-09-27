@@ -120,17 +120,22 @@ export class ChatHistory {
   private tmpCount = 0;
   private queues = new Map<string, Promise<unknown>>();
 
-  private readonly dir: string;
+  private readonly dirOf: () => string;
   private readonly fs: HistoryFs;
 
-  constructor(dir: string, fs: HistoryFs) {
-    this.dir = dir;
+  /** `dir` may be a function, for a folder only known once the desk has loaded. */
+  constructor(dir: string | (() => string), fs: HistoryFs) {
+    this.dirOf = typeof dir === 'string' ? () => dir : dir;
     this.fs = fs;
+  }
+
+  private get dir(): string {
+    return this.dirOf().replace(/\/+$/, '');
   }
 
   pathFor(id: string): string {
     if (!SAFE_ID.test(id)) throw new Error(`Not a chat id: ${id}`);
-    return `${this.dir.replace(/\/+$/, '')}/${id}.json`;
+    return `${this.dir}/${id}.json`;
   }
 
   /** Saves a chat atomically, after any earlier save of the same chat. */
@@ -177,7 +182,7 @@ export class ChatHistory {
     const out: ChatSummary[] = [];
     for (const name of names) {
       try {
-        const rec = parseChatFile(await this.fs.readText(`${this.dir.replace(/\/+$/, '')}/${name}`));
+        const rec = parseChatFile(await this.fs.readText(`${this.dir}/${name}`));
         if (rec) out.push({ id: rec.chat.id, title: rec.chat.title, updated: rec.chat.updated });
       } catch {
         /* An unreadable file is not a chat. */
