@@ -459,7 +459,7 @@
 }
 
 /*
-  A small round state mark. It appears on the attention line of NOW and on every notification,
+  A small round state mark. It appears on the Pending line of ASSISTANT and on every notification,
   and it is always the second signal: the words beside it say the same thing, so the row still
   reads in greyscale and to anyone who does not see the hue difference.
 */

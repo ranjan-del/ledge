@@ -12,9 +12,14 @@
    * Each week keeps its own items. A new week starts empty and the old one is still there to
    * browse; nothing is carried over, because carrying it over is a decision the person makes by
    * moving or re-adding an item, not one the panel makes for them.
+   *
+   * The calendar button in the header opens a month grid for jumping further than a week at a
+   * time. Choosing a day shows its week, scrolls to that day and lights it up for a moment.
    */
   import type { WeekFile } from '@ledge/core/pure';
   import { isoWeekOf, weekDays } from '@ledge/core/pure';
+  import { tick } from 'svelte';
+  import { reducedMotion } from '../lib/motion.svelte.ts';
   import {
     ANYTIME,
     dayHeading,
@@ -26,6 +31,7 @@
     type WeekRef,
   } from '../lib/week-view.ts';
   import { todayIso } from '../lib/time.ts';
+  import MonthPicker from './MonthPicker.svelte';
   import WeekAdd from './WeekAdd.svelte';
   import WeekItemRow, { type SlotChoice, type TaskChoice } from './WeekItemRow.svelte';
 
@@ -43,6 +49,10 @@
     onmove: (ref: WeekRef, to: string) => unknown;
     onremove: (ref: WeekRef) => unknown;
     onopentask?: (id: string) => void;
+    /** Week files read so far, for the calendar's dots and shading. Without it, no calendar. */
+    weeks?: Record<string, WeekFile>;
+    /** The calendar shows these weeks: read the ones that have a file and are not read yet. */
+    onloadweeks?: (weeks: string[]) => unknown;
   }
 
   let {
@@ -56,7 +66,34 @@
     onmove,
     onremove,
     onopentask,
+    weeks,
+    onloadweeks,
   }: Props = $props();
+
+  /** How long a day picked in the calendar stays lit. */
+  const FLASH_MS = 1200;
+
+  let calendarOpen = $state(false);
+  let flash = $state<string | null>(null);
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  let scroller = $state<HTMLElement | null>(null);
+  let toggle = $state<HTMLButtonElement | null>(null);
+
+  /** Shows the week a day is in, scrolls to the day and lights it briefly. */
+  async function pickDay(d: string) {
+    calendarOpen = false;
+    toggle?.focus();
+    const target = isoWeekOf(d);
+    if (target !== week.week) onbrowse(target);
+    await tick();
+    const el = scroller?.querySelector<HTMLElement>(`[data-day="${d}"]`);
+    el?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    clearTimeout(flashTimer);
+    flash = d;
+    flashTimer = setTimeout(() => (flash = null), FLASH_MS);
+  }
+
+  $effect(() => () => clearTimeout(flashTimer));
 
   const thisWeek = $derived(isoWeekOf(day));
   const current = $derived(week.week === thisWeek);
@@ -91,7 +128,7 @@
 </script>
 
 <div class="pane">
-  <div class="pane-scroll week">
+  <div class="pane-scroll week" bind:this={scroller}>
     <div class="week-head">
       <button
         type="button"
@@ -118,6 +155,27 @@
             stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
+      {#if weeks}
+        <button
+          type="button"
+          class="drop step cal motion"
+          bind:this={toggle}
+          data-calendar-toggle
+          aria-label="Pick a day"
+          aria-haspopup="dialog"
+          aria-expanded={calendarOpen}
+          title="Pick a day"
+          onclick={() => (calendarOpen = !calendarOpen)}
+        >
+          <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true">
+            <rect x="1.8" y="2.8" width="10.4" height="9.4" rx="2" fill="none" stroke="currentColor"
+              stroke-width="1.3" />
+            <path d="M1.8 5.8h10.4M4.7 1.5v2.6M9.3 1.5v2.6" stroke="currentColor" stroke-width="1.3"
+              stroke-linecap="round" />
+            <circle cx="7" cy="9" r="1" fill="currentColor" />
+          </svg>
+        </button>
+      {/if}
       <button
         type="button"
         class="btn this-week motion"
@@ -126,6 +184,16 @@
       >
         This week
       </button>
+      {#if calendarOpen && weeks}
+        <MonthPicker
+          {day}
+          week={week.week}
+          {weeks}
+          onmonth={onloadweeks}
+          onpick={(d) => void pickDay(d)}
+          onclose={() => (calendarOpen = false)}
+        />
+      {/if}
     </div>
 
     {#each sections as section (section.slot)}
@@ -136,6 +204,8 @@
         class:today={section.today}
         class:past={section.past}
         class:empty={items.length === 0}
+        class:flash={flash === section.slot}
+        data-day={section.slot === ANYTIME ? undefined : section.slot}
         aria-label={section.today ? `Today, ${section.title}` : section.title}
       >
         <div class="day-head">
@@ -192,6 +262,7 @@
     gap: var(--space-1);
   }
   .week-head {
+    position: relative;
     display: flex;
     align-items: center;
     gap: var(--space-1);
@@ -212,6 +283,10 @@
     font-size: var(--fs-base);
     font-weight: 700;
     letter-spacing: -0.01em;
+  }
+  .cal[aria-expanded='true'] {
+    background: var(--control);
+    color: var(--text);
   }
   .this-week {
     padding: 3px var(--space-2);
@@ -236,6 +311,19 @@
   }
   .day.past {
     opacity: 0.55;
+  }
+  /* A day just picked in the calendar: lit for a moment so the eye finds it. */
+  .day.flash {
+    opacity: 1;
+    background: var(--info-bg);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .day {
+      transition:
+        background-color 400ms ease,
+        border-color 400ms ease;
+    }
   }
   .day.past:hover,
   .day.past:focus-within {

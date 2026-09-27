@@ -19,8 +19,8 @@ import { basename } from './paths.ts';
 import { matches as matchesAll, searchDesk, terms as queryTerms, type Hit } from './search.ts';
 import { dayLabel, relativeTime, todayIso } from './time.ts';
 
-/** The four surfaces, spelled here so this file never has to import the store. */
-export type PaletteSurface = 'now' | 'sessions' | 'tasks' | 'memory';
+/** The three surfaces, spelled here so this file never has to import the store. */
+export type PaletteSurface = 'assistant' | 'tasks' | 'memory';
 
 export type PaletteKind = 'task' | 'session' | 'note' | 'ask' | 'action';
 
@@ -31,7 +31,8 @@ export type PaletteKind = 'task' | 'session' | 'note' | 'ask' | 'action';
 export type PaletteCommand =
   | { type: 'add-task'; title: string }
   | { type: 'open-task'; file: string }
-  | { type: 'surface'; surface: PaletteSurface }
+  /** `memory` picks the half of MEMORY to show: Sessions lives there now. */
+  | { type: 'surface'; surface: PaletteSurface; memory?: 'notes' | 'sessions' }
   | { type: 'rescan' }
   | { type: 'ask'; question: string };
 
@@ -78,28 +79,40 @@ interface ActionSpec {
   command: PaletteCommand;
 }
 
-const SURFACE_ACTIONS: { surface: PaletteSurface; label: string; keywords: string; sub: string }[] =
-  [
-    { surface: 'now', label: 'Go to Now', keywords: 'home today current working', sub: 'Surface' },
-    {
-      surface: 'sessions',
-      label: 'Go to Sessions',
-      keywords: 'claude code session ids resume',
-      sub: 'Surface',
-    },
-    {
-      surface: 'tasks',
-      label: 'Go to Tasks',
-      keywords: 'live done backlog pending archive lists',
-      sub: 'Surface',
-    },
-    {
-      surface: 'memory',
-      label: 'Go to Memory',
-      keywords: 'notes reasoning decisions dead ends',
-      sub: 'Surface',
-    },
-  ];
+const SURFACE_ACTIONS: {
+  surface: PaletteSurface;
+  memory?: 'notes' | 'sessions';
+  label: string;
+  keywords: string;
+  sub: string;
+}[] = [
+  {
+    surface: 'assistant',
+    label: 'Go to Assistant',
+    keywords: 'home now today current working chat ask',
+    sub: 'Surface',
+  },
+  {
+    surface: 'tasks',
+    label: 'Go to Tasks',
+    keywords: 'live done backlog pending archive lists',
+    sub: 'Surface',
+  },
+  {
+    surface: 'memory',
+    memory: 'notes',
+    label: 'Go to Memory',
+    keywords: 'notes reasoning decisions dead ends',
+    sub: 'Surface',
+  },
+  {
+    surface: 'memory',
+    memory: 'sessions',
+    label: 'Go to Sessions',
+    keywords: 'claude code session ids resume',
+    sub: 'In Memory',
+  },
+];
 
 const RESCAN: ActionSpec = {
   label: 'Refresh the git scan',
@@ -228,12 +241,17 @@ function actionItems(query: string, surface: PaletteSurface, words: string[]): P
   }
   const rest: ActionSpec[] = [
     RESCAN,
-    ...SURFACE_ACTIONS.filter((entry) => entry.surface !== surface).map((entry) => ({
-      label: entry.label,
-      keywords: entry.keywords,
-      sub: entry.sub,
-      command: { type: 'surface', surface: entry.surface } as PaletteCommand,
-    })),
+    /* Sessions is a half of MEMORY rather than a surface, so it is offered from there too. */
+    ...SURFACE_ACTIONS.filter((entry) => entry.surface !== surface || entry.memory === 'sessions').map(
+      (entry) => ({
+        label: entry.label,
+        keywords: entry.keywords,
+        sub: entry.sub,
+        command: (entry.memory
+          ? { type: 'surface', surface: entry.surface, memory: entry.memory }
+          : { type: 'surface', surface: entry.surface }) as PaletteCommand,
+      }),
+    ),
   ];
   const offered =
     words.length === 0
@@ -279,7 +297,7 @@ function askItem(query: string): PaletteItem {
     id: 'ask',
     kind: 'ask',
     label: q === '' ? 'Ask Ledge a question' : `Ask Ledge "${q}"`,
-    sub: 'Answers from your tasks, notes and sessions, and can edit tasks',
+    sub: 'Opens the Assistant and asks it there',
     command: { type: 'ask', question: q },
   };
 }

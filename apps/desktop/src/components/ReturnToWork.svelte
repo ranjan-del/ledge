@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
-   * What changed while you were away, at the top of NOW, with one button back into the work.
+   * What changed while you were away, at the top of the idle Assistant, with one button back
+   * into the work.
    * It exists because the panel is closed most of the day and the store keeps moving without
    * it: Claude Code ticks items and writes notes, the scan notices commits, tasks get archived.
    * Coming back to a list that looks exactly as it did before, but is not, is how a person
