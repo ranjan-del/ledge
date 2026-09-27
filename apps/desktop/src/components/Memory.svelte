@@ -8,13 +8,16 @@
    * It exists because a note was previously only visible inside the one task it belonged to,
    * which is the wrong shape for the question people actually ask, "why did we do it that way".
    *
-   * Nothing is summarised, scored or rewritten here. A note is shown as it was written, under
-   * its day, beside its task. The filter is `searchMemory` from core, which requires every term
+   * Nothing is scored or rewritten here. A note is shown as a digest, a bold title and a short
+   * summary from its task's insights or from its own first sentences, with the words as they
+   * were written one press away, under its day, beside its task. The filter is `searchMemory` from core, which requires every term
    * to appear and ranks nothing, so what the field returns is predictable.
    */
   import { searchMemory, type MemoryEntry, type Task } from '@ledge/core/pure';
-  import { paragraphs } from '../lib/prose.ts';
+  import { noteDigest } from '../lib/digest.ts';
+  import type { TaskInsights } from '../lib/insights.ts';
   import { dayLabel, todayIso } from '../lib/time.ts';
+  import Digest from './Digest.svelte';
 
   interface Props {
     /** From `memoryFor` in core: newest date first. */
@@ -24,9 +27,11 @@
     /** Today as YYYY-MM-DD. A prop so this is testable without touching the clock. */
     day?: string;
     onselect: (task: Task) => void;
+    /** A task's insights, for the note titles. Absent means every note uses the fallback. */
+    insightsFor?: (taskId: string) => TaskInsights | undefined;
   }
 
-  let { entries, taskFor, day = todayIso(), onselect }: Props = $props();
+  let { entries, taskFor, day = todayIso(), onselect, insightsFor }: Props = $props();
 
   let query = $state('');
 
@@ -86,9 +91,10 @@
                 >
                   {note.taskTitle}
                 </button>
-                {#each paragraphs(note.body) as para, p (p)}
-                  <p class="note-text selectable">{para}</p>
-                {/each}
+                <Digest
+                  digest={noteDigest(note, insightsFor?.(note.taskId))}
+                  original={note.body}
+                />
               </article>
             {/each}
           </div>

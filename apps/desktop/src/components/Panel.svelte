@@ -44,6 +44,8 @@
     panelContent,
     type PanelCounts,
   } from '../lib/sizing.ts';
+  import { provideInsights } from '../lib/insight-context.ts';
+  import { mergeTask } from '../lib/merge.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
@@ -56,12 +58,14 @@
     doneTasks,
     doneToday,
     errorText,
+    insightsFor,
     lastUpdated,
     markDone,
     parkTask,
     removeTask,
     reorderTasks,
     saveConfigFile,
+    saveTask,
     saveMarkdown,
     scanNow,
     shiftStatus,
@@ -90,6 +94,10 @@
   import Tabs from './Tabs.svelte';
   import TaskDetail from './TaskDetail.svelte';
   import Tasks from './Tasks.svelte';
+
+  /* Every card's disclosure finds its task's insights through this, rather than through a prop
+     threaded down every list. */
+  provideInsights(insightsFor);
 
   let pinned = $state(false);
   let showSettings = $state(false);
@@ -167,6 +175,20 @@
 
   async function openFolder(task: CoreTask) {
     if (task.repo) await open(task.repo).catch(() => undefined);
+  }
+
+  /**
+   * Folds an auto-created task into one the person already has: the target is written first,
+   * and only once that landed is the source deleted, so a failed write loses nothing.
+   */
+  async function merge(source: CoreTask, target: CoreTask) {
+    try {
+      await saveTask(mergeTask(source, target));
+      await removeTask(source.id);
+      select(target.file);
+    } catch (e) {
+      desk.error = `Could not merge: ${errorText(e)}`;
+    }
   }
 
   /** Deletes the task and its file, then returns to the list. */
@@ -405,6 +427,9 @@
         onresume={resume}
         onopenfolder={openFolder}
         ondelete={destroy}
+        insights={insightsFor(selected.id)}
+        mergeTargets={desk.tasks}
+        onmerge={(s, t) => void merge(s, t)}
       />
     </div>
   {:else}
@@ -478,7 +503,12 @@
         onshift={shift}
       />
     {:else}
-      <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />
+      <Memory
+        entries={notes}
+        taskFor={taskById}
+        onselect={(t) => select(t.file)}
+        {insightsFor}
+      />
     {/if}
   {/if}
 
