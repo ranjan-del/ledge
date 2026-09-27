@@ -43,12 +43,16 @@
   import { shellAskRunner } from '../lib/ask-runner.ts';
   import { provideInsights } from '../lib/insight-context.ts';
   import { todayIso } from '../lib/time.ts';
+  import { isoWeekOf } from '../lib/week.ts';
+  import { openElsewhere, openToday } from '../lib/week-view.ts';
   import { mergeTask } from '../lib/merge.ts';
   import { groupSessions, sessionCount } from '../lib/session-view.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
+    addWeekItem,
     attentionRepos,
+    browseWeek,
     backlogTasks,
     counts,
     currentTasks,
@@ -59,9 +63,13 @@
     errorText,
     insightsFor,
     lastUpdated,
+    loadWeek,
     markDone,
+    moveWeekItem,
+    openWeek,
     parkTask,
     removeTask,
+    removeWeekItem,
     reorderTasks,
     saveConfigFile,
     saveTask,
@@ -73,11 +81,14 @@
     setPanelVisible,
     setSearching,
     setSurface,
+    setTaskMode,
     setView,
     startTask,
     statusForRepo,
     taskTitleForRepo,
+    updateWeekItem,
     upNextTasks,
+    weekFor,
     workingTasks,
     type Surface,
     type TaskView,
@@ -94,6 +105,7 @@
   import Tabs from './Tabs.svelte';
   import TaskDetail from './TaskDetail.svelte';
   import Tasks from './Tasks.svelte';
+  import WeekView from './WeekView.svelte';
 
   /* Every card's disclosure finds its task's insights through this, rather than through a prop
      threaded down every list. */
@@ -126,6 +138,35 @@
     { id: 'tasks', label: 'Tasks', count: count.tasks },
     { id: 'memory', label: 'Memory', count: count.memory },
   ]);
+  /* The weekly to-do. Today follows the minute clock, so the Today block and the highlighted
+     day move on at midnight without a file having to change. */
+  const today = $derived(todayIso(new Date(clock)));
+  const currentWeek = $derived(isoWeekOf(today));
+  const weekNow = $derived(weekFor(currentWeek));
+  const weekShown = $derived(weekFor(desk.week));
+  const weekToday = $derived(openToday(weekNow, today));
+  const weekMore = $derived(openElsewhere(weekNow, today));
+  const taskChoices = $derived(
+    [...currentTasks(), ...backlogTasks()].map((t) => ({ id: t.id, title: t.title })),
+  );
+  const weekItemCount = $derived(
+    weekShown.anytime.length + Object.values(weekShown.days).flat().length,
+  );
+  /* A new week has no file read for it yet. Boot reads the week it started in; this reads the
+     next one when the clock crosses into it. */
+  $effect(() => {
+    if (desk.ready && !(currentWeek in desk.weeks)) void loadWeek(currentWeek);
+  });
+
+  function taskTitle(id: string): string | undefined {
+    return desk.tasks.find((t) => t.id === id)?.title;
+  }
+
+  function openTaskById(id: string) {
+    const task = taskById(id);
+    if (task) select(task.file);
+  }
+
   const selected = $derived(selectedTask());
   const working = $derived(workingTasks());
   const upNext = $derived(upNextTasks());
@@ -154,6 +195,10 @@
     done: doneCount(),
     backlog: backlogTasks().length,
     pending: desk.pending.length,
+    mode: desk.taskMode,
+    weekItems: weekItemCount,
+    todayLines:
+      weekToday.length + weekMore > 0 ? 1 + weekToday.length + (weekMore > 0 ? 1 : 0) : 0,
   });
   const full = $derived(
     needsFullHeight(
@@ -179,6 +224,7 @@
       insights: desk.insights,
       sessions: desk.sessionRecords,
       now: new Date(),
+      week: weekFor(isoWeekOf(todayIso())),
     });
   }
   const modifier = mac ? '⌘' : 'Ctrl';
@@ -514,6 +560,13 @@
         }}
         ondismissaway={dismissAway}
         onawayseen={markAwaySeen}
+        day={today}
+        {weekToday}
+        {weekMore}
+        {taskTitle}
+        onopentask={openTaskById}
+        onweektick={(ref) => updateWeekItem(currentWeek, ref, { done: true })}
+        onopenweek={() => openWeek()}
       />
     {:else if desk.surface === 'sessions'}
       <Sessions
@@ -526,6 +579,8 @@
     {:else if desk.surface === 'tasks'}
       <Tasks
         view={desk.view}
+        mode={desk.taskMode}
+        onmode={setTaskMode}
         live={currentTasks()}
         backlog={backlogTasks()}
         done={doneTasks()}
@@ -541,7 +596,22 @@
         onadd={addTask}
         onreorder={moveCurrent}
         onshift={shift}
-      />
+      >
+        {#snippet todo()}
+          <WeekView
+            week={weekShown}
+            day={today}
+            tasks={taskChoices}
+            {taskTitle}
+            onbrowse={browseWeek}
+            onadd={(slot, text, taskId) => addWeekItem(desk.week, slot, text, taskId)}
+            onupdate={(ref, patch) => updateWeekItem(desk.week, ref, patch)}
+            onmove={(ref, to) => moveWeekItem(desk.week, ref, to)}
+            onremove={(ref) => removeWeekItem(desk.week, ref)}
+            onopentask={openTaskById}
+          />
+        {/snippet}
+      </Tasks>
     {:else}
       <Memory
         entries={notes}

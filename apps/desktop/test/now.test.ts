@@ -130,3 +130,49 @@ describe('Now, with work on it', () => {
     expect(screen.getByRole('menuitem', { name: 'Park' })).toBeTruthy();
   });
 });
+
+describe('Now, the week', () => {
+  const entry = (text: string, index: number, taskId?: string) => ({
+    item: { text, done: false, ...(taskId ? { taskId } : {}) },
+    ref: { slot: DAY, index },
+  });
+
+  it('shows no Today block when nothing is on the week', () => {
+    const { container } = render(Now, { props: { ...base, working: [taskA()] } });
+    expect(container.querySelector('.week-today')).toBeNull();
+  });
+
+  it("puts today's open items at the top, tickable, with how many more the week holds", async () => {
+    const onweektick = vi.fn();
+    const onopenweek = vi.fn();
+    const { container } = render(Now, {
+      props: {
+        ...base,
+        working: [taskA()],
+        name: 'Ranjan',
+        weekToday: [entry('Call the bank', 0), entry('Review the PR', 2, 'release-watch-banner')],
+        weekMore: 3,
+        onweektick,
+        onopenweek,
+        taskTitle: () => 'Release watch banner',
+        onopentask: vi.fn(),
+      },
+    });
+    const blocks = [...container.querySelectorAll('.pane-scroll > *')].map((el) => el.className);
+    expect(blocks[0]).toContain('greet');
+    expect(blocks[1]).toContain('week-today');
+    expect(container.querySelector('.week-today .section-label')?.textContent).toContain('Today');
+    await fireEvent.click(screen.getByLabelText('Tick: Review the PR'));
+    await vi.waitFor(() => expect(onweektick).toHaveBeenCalledWith({ slot: DAY, index: 2 }));
+    expect(screen.getByRole('button', { name: 'Release watch banner' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: /3 more this week/ }));
+    expect(onopenweek).toHaveBeenCalled();
+  });
+
+  it('keeps the block for the rest of the week when today is clear, even on an empty desk', () => {
+    const { container } = render(Now, { props: { ...base, weekMore: 2, onopenweek: () => {} } });
+    expect(container.querySelector('.week-today')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Nothing for today\. 2 more this week/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Nothing in progress.' })).toBeTruthy();
+  });
+});
