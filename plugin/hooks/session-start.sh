@@ -8,7 +8,14 @@
 # the backlog. That line is a nudge, not the mechanism: the Stop hook promotes on evidence.
 # Output rules: task context when a task matches, the backlog line when an intent record is
 # live, one hint line when neither matches or when the ledge CLI is missing, nothing at all
-# on any other error.
+# on any other error. Whenever ledge answers at all, a short block of standing rules follows,
+# telling the session to keep its task current as it works. The hook also writes the session
+# record skeleton (start time, folder, transcript) with `ledge track`, which is what lets the
+# panel show a session as running before any capture has read it.
+
+# A capture runs `claude -p` in the background. That child must never start a capture of its
+# own, so every hook stands down when the capture has marked its environment.
+[ "${LEDGE_CAPTURE:-}" = "1" ] && exit 0
 
 payload=$(cat 2>/dev/null)
 
@@ -37,6 +44,7 @@ fi
 cwd=$(printf '%s' "$payload" | json_str cwd)
 [ -n "$cwd" ] || cwd=$PWD
 session_id=$(printf '%s' "$payload" | json_str session_id)
+transcript=$(printf '%s' "$payload" | json_str transcript_path)
 
 # Arm first, so the before snapshot is taken before anything in this session can change it.
 if [ -n "$session_id" ]; then
@@ -45,16 +53,41 @@ else
   nudge=$(ledge began --repo "$cwd" 2>/dev/null)
 fi
 
+if [ -n "$session_id" ]; then
+  if [ -n "$transcript" ]; then
+    ledge track --session "$session_id" --cwd "$cwd" --transcript "$transcript" >/dev/null 2>&1
+  else
+    ledge track --session "$session_id" --cwd "$cwd" >/dev/null 2>&1
+  fi
+fi
+
 out=$(ledge current --repo "$cwd" --context 2>/dev/null)
 rc=$?
+
+# standing_rules prints the block that asks the session to keep its task current. Twelve lines
+# at most, because it is read at the start of every session and paid for on every turn.
+standing_rules() {
+  echo ""
+  echo "Ledge standing rules: keep this repo's Ledge task current as you work, unasked."
+  echo "- The task id is in the block above, or run \`ledge current --repo \"\$PWD\" --json\`."
+  echo "- When you make or change a plan, run \`ledge plan <id> \"step\" \"step\" ...\` with every step."
+  echo "- When a checklist item is done, run \`ledge tick <id> <n>\`; new work: \`ledge todo <id> \"item\"\`."
+  echo "- For a decision or a dead end, run \`ledge note <id> \"...\"\` when it happens, with why."
+  echo "- If this is a new goal with no task, run \`ledge add \"title\" --repo \"\$PWD\"\`, then"
+  echo "  \`ledge start <id>\`."
+  echo "- Ledge also reads this session in the background, so a missed step is caught later."
+}
 
 if [ "$rc" -eq 0 ] && [ -n "$out" ]; then
   printf '%s\n' "$out"
   [ -n "$nudge" ] && printf '%s\n' "$nudge"
+  standing_rules
 elif [ -n "$nudge" ]; then
   printf '%s\n' "$nudge"
+  standing_rules
 elif [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ]; then
   echo "No Ledge task for this repo. Use /ledge start to create one."
+  standing_rules
 fi
 
 exit 0

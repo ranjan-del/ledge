@@ -15,6 +15,10 @@
  * The one asymmetry is the inference layer. The provider contract and the prompt builders are
  * pure and live in both entries; `claudeCodeProvider`, which starts a child process, is here
  * only, because a WebView has nothing to start.
+ *
+ * The sidecar records of the AI assistant contract split the same way again: the SessionRecord
+ * and TaskInsights shapes, their parsers and `contentKey` are pure and live in both entries,
+ * while SessionStore and InsightStore, which write files, are here only.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
@@ -89,3 +93,48 @@ export {
 } from './activity.ts';
 export type { ActivityOptions } from './activity-node.ts';
 export { collectActivity } from './activity-node.ts';
+export type { SessionCommit, SessionRecord, NoteInsight, PlanInsight, TaskInsights } from './sidecars.ts';
+export {
+  contentKey,
+  emptyInsights,
+  isSessionRunning,
+  noteKey,
+  parseInsights,
+  parseSessionRecord,
+  serializeInsights,
+  serializeSessionRecord,
+  sessionDurationMs,
+} from './sidecars.ts';
+export { SessionStore, InsightStore } from './sidecars-node.ts';
+export type { DigestEntry, SessionTodo, TranscriptDigest, RenderDigestOptions } from './transcript.ts';
+export { DIGEST_MAX_CHARS, parseTranscript, renderDigest } from './transcript.ts';
+export type {
+  CaptureDecision,
+  CaptureHistory,
+  CaptureParse,
+  CapturePromptInput,
+  CaptureResult,
+} from './capture.ts';
+export {
+  CAPTURE_DEBOUNCE_LINES,
+  CAPTURE_DEBOUNCE_MS,
+  PLAN_STEP_MAX,
+  SESSION_TITLE_MAX,
+  buildCapturePrompt,
+  captureDue,
+  extractJsonObject,
+  matchItem,
+  parseCaptureResult,
+  samePlan,
+} from './capture.ts';
+export { BRIEF_MAX_LINES, buildBrief, firstSentences } from './brief.ts';
+export type { CaptureOptions, CaptureOutcome, GitLogReader } from './capture-node.ts';
+export { gitLogBetween, logCapture, mergeInsights, runCapture, trackSession } from './capture-node.ts';
+export type { SummaryItem, SummariseParse } from './summarise.ts';
+export {
+  SUMMARISE_MAX_CHARS,
+  buildSummarisePrompt,
+  fitSummaryBatch,
+  missingInsights,
+  parseSummariseResult,
+} from './summarise.ts';

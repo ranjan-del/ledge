@@ -1,12 +1,9 @@
 #!/bin/sh
-# Ledge PreCompact hook.
-# Reads the hook payload from stdin, resolves the Ledge task for the session's working
-# directory and prints a one-line reminder to bring its checklist up to date and to append
-# a closing note before the context is compacted. The note is the part that survives
-# compaction: the checklist says what is done, the note says why and what is left.
-# Prints nothing when the ledge CLI is missing or no task matches. Always exits 0.
-# It also starts `ledge capture --final` detached, so the transcript is read into the task
-# before compaction throws the detail away, whether or not a task matches yet.
+# Ledge SessionEnd hook.
+# Reads the hook payload from stdin, marks the session's record ended with `ledge track
+# --ended`, which is what stops the panel showing it as running, and then starts a final
+# `ledge capture --final` detached so the last turns are read into the task. Prints nothing
+# and always exits 0: Claude Code is closing, and nothing here may hold it up.
 
 # A capture runs `claude -p` in the background. That child must never start a capture of its
 # own, so every hook stands down when the capture has marked its environment.
@@ -48,17 +45,13 @@ cwd=$(printf '%s' "$payload" | json_str cwd)
 [ -n "$cwd" ] || cwd=$PWD
 session_id=$(printf '%s' "$payload" | json_str session_id)
 transcript=$(printf '%s' "$payload" | json_str transcript_path)
+[ -n "$session_id" ] || exit 0
 
-if [ -n "$session_id" ] && [ -n "$transcript" ]; then
+if [ -n "$transcript" ]; then
+  ledge track --session "$session_id" --cwd "$cwd" --transcript "$transcript" --ended \
+    >/dev/null 2>&1
   launch_capture "$session_id" "$transcript" "$cwd" --final
+else
+  ledge track --session "$session_id" --cwd "$cwd" --ended >/dev/null 2>&1
 fi
-
-task_json=$(ledge current --repo "$cwd" --json 2>/dev/null) || exit 0
-task_id=$(printf '%s' "$task_json" | json_str id)
-[ -n "$task_id" ] || exit 0
-
-echo "Before compaction, update the Ledge task ($task_id): tick finished checklist items" \
-  "and add new ones with the Edit tool on the file from \`ledge open $task_id\`, then run" \
-  "\`ledge note $task_id \"...\"\` with what was done, what is left and what the next" \
-  "session needs to know. Do both now; after compaction the reasoning is gone."
 exit 0
