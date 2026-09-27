@@ -459,7 +459,7 @@
 }
 
 /*
-  A small round state mark. It appears on the attention line of NOW and on every notification,
+  A small round state mark. It appears on the Pending line of ASSISTANT and on every notification,
   and it is always the second signal: the words beside it say the same thing, so the row still
   reads in greyscale and to anyone who does not see the hue difference.
 */
@@ -588,4 +588,131 @@
 }
 .add-line:hover {
   color: var(--accent);
+}
+
+/* ---------------------------------------------------------------- digests */
+/*
+  A note or a plan step read at a glance: the title in the body face at full strength and on
+  one line, the summary muted and held to two lines, and the original behind a quiet
+  disclosure. The task detail, the card's disclosure and MEMORY all show the same object, so it
+  is drawn once here. A title a model wrote carries a small faint AI mark, because what the
+  person wrote and what a model inferred are two different kinds of text.
+*/
+.digest {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.d-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+}
+.d-title > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.d-ai {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--neutral-bg);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.d-sum {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.d-more {
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 1px 0;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-faint);
+}
+.d-more:hover {
+  color: var(--accent);
+}
+.d-full {
+  margin-top: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--rule);
+  font-size: var(--fs-sm);
+}
+
+/*
+  Earlier notes as a timeline: the day on the left in a fixed column, the digest beside it,
+  one hairline down the side joining them. Compact on purpose, since this is the list a person
+  scans for "when did we decide that", not one they read top to bottom.
+*/
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.timeline > li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: 0 0 var(--space-3);
+}
+.timeline > li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  bottom: 0;
+  width: 1px;
+  background: var(--rule);
+}
+.timeline > li:last-child::before {
+  display: none;
+}
+.timeline .t-when {
+  position: relative;
+  padding-left: 13px;
+  line-height: 1.35;
+}
+.timeline .t-when::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.timeline > li:first-child .t-when::before {
+  background: var(--accent);
+}
+
+/* A task the capture created by itself, which the person has not claimed yet. */
+.chip.auto {
+  background: var(--info-bg);
+  color: var(--info-fg);
 }

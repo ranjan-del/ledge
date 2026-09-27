@@ -100,9 +100,24 @@ import {
   loadArchive,
   markDone,
   mergeConfig,
+  TASK_MODE_KEY,
+  MEMORY_MODE_KEY,
+  ensureWeeks,
+  listWeekFiles,
+  rememberedMemoryMode,
+  setMemoryMode,
+  addWeekItem,
+  browseWeek,
+  moveWeekItem,
+  openWeek,
+  rememberedTaskMode,
   removeTask,
+  removeWeekItem,
   reorderTasks,
   select,
+  setTaskMode,
+  updateWeekItem,
+  weekFor,
   setSurface,
   setView,
   shiftStatus,
@@ -110,6 +125,8 @@ import {
   todayPlan,
   toggleChecklist,
 } from '../src/lib/store.svelte.ts';
+import { todayIso } from '../src/lib/time.ts';
+import { isoWeekOf, parseWeek, serializeWeek, shiftWeek, weekDays } from '@ledge/core/pure';
 
 const readsOf = (file: string) =>
   (readTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((c) => c[0] === file)
@@ -165,7 +182,14 @@ describe('store', () => {
     expect(currentTasks().map((t) => t.id)).toEqual(['release-watch-banner']);
     expect(backlogTasks().map((t) => t.id)).toEqual(['optimistic-crud']);
     expect(currentTasks()[0].repo).toBe(`${HOME}/code/app`);
-    expect(disk.state.watchArgs?.paths).toEqual([TASKS_DIR, ARCHIVE_DIR, LEDGE_HOME]);
+    expect(disk.state.watchArgs?.paths).toEqual([
+      TASKS_DIR,
+      ARCHIVE_DIR,
+      LEDGE_HOME,
+      `${LEDGE_HOME}/sessions`,
+      `${LEDGE_HOME}/insights`,
+      `${LEDGE_HOME}/weeks`,
+    ]);
     expect(disk.state.watchArgs?.opts).toMatchObject({ delayMs: 150 });
   });
 
@@ -606,5 +630,279 @@ describe('store', () => {
     const before = disk.files.get(TASK_A_FILE);
     await shiftStatus(currentTasks()[0], 'current');
     expect(disk.files.get(TASK_A_FILE)).toBe(before);
+  });
+
+  /* ---------------------------------------------------------------- sidecars */
+
+  const SESSIONS = `${LEDGE_HOME}/sessions`;
+  const INSIGHTS = `${LEDGE_HOME}/insights`;
+  const record = (id: string, started: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      version: 1,
+      id,
+      taskId: 'release-watch-banner',
+      started,
+      lastActivity: started,
+      filesChanged: [],
+      commits: [],
+      todosTicked: [],
+      todosAdded: [],
+      ...extra,
+    });
+
+  it('creates both sidecar folders at boot so they can be watched', () => {
+    expect(disk.dirs.has(SESSIONS)).toBe(true);
+    expect(disk.dirs.has(INSIGHTS)).toBe(true);
+  });
+
+  it('reads session records newest first and leaves out a file that is not one', async () => {
+    disk.files.set(`${SESSIONS}/old.json`, record('old', '2026-09-20T10:00:00+05:30'));
+    disk.files.set(`${SESSIONS}/new.json`, record('new', '2026-09-26T10:00:00+05:30'));
+    disk.files.set(`${SESSIONS}/bad.json`, '{ not json');
+    disk.files.set(`${SESSIONS}/new.json.tmp`, record('tmp', '2026-09-27T10:00:00+05:30'));
+    fire([SESSIONS]);
+    await settle();
+    expect(desk.sessionRecords.map((r) => r.id)).toEqual(['new', 'old']);
+  });
+
+  it('re-reads only the session file the watcher names, and drops one that was removed', async () => {
+    disk.files.set(`${SESSIONS}/a.json`, record('a', '2026-09-20T10:00:00+05:30'));
+    fire([`${SESSIONS}/a.json`]);
+    await settle();
+    expect(desk.sessionRecords.map((r) => r.title)).toEqual([undefined]);
+    disk.files.set(`${SESSIONS}/a.json`, record('a', '2026-09-20T10:00:00+05:30', { title: 'Fix it' }));
+    fire([`${SESSIONS}/a.json`]);
+    await settle();
+    expect(desk.sessionRecords.map((r) => r.title)).toEqual(['Fix it']);
+    disk.files.delete(`${SESSIONS}/a.json`);
+    fire([`${SESSIONS}/a.json`]);
+    await settle();
+    expect(desk.sessionRecords).toEqual([]);
+  });
+
+  it('keys insights by task id and treats an unparseable file as absent', async () => {
+    const insight = {
+      version: 1,
+      taskId: 'release-watch-banner',
+      headline: 'Banner built, poll next',
+      notes: {},
+      plan: {},
+      updatedAt: '2026-09-26T10:00:00+05:30',
+    };
+    disk.files.set(`${INSIGHTS}/release-watch-banner.json`, JSON.stringify(insight));
+    disk.files.set(`${INSIGHTS}/optimistic-crud.json`, 'nope');
+    fire([`${INSIGHTS}/release-watch-banner.json`, `${INSIGHTS}/optimistic-crud.json`]);
+    await settle();
+    expect(Object.keys(desk.insights)).toEqual(['release-watch-banner']);
+    expect(desk.insights['release-watch-banner']?.headline).toBe('Banner built, poll next');
+    /* A sidecar event never re-reads a task file. */
+    expect(readsOf(TASK_A_FILE)).toBe(1);
+  });
+
+  /* ---------------------------------------------------------------- weeks */
+
+  const WEEKS = `${LEDGE_HOME}/weeks`;
+  const thisWeek = () => isoWeekOf(todayIso());
+  const weekFile = (week: string) => `${WEEKS}/${week}.md`;
+  const sample = (week: string) => {
+    const [mon, , , thu] = weekDays(week);
+    return `---
+week: ${week}
+updated: 2026-09-27T12:40:00+05:30
+---
+
+## Anytime
+
+- [ ] Renew the domain
+
+## Mon ${mon}
+
+- [x] Call the vendor about invoices
+- [ ] Review the PR {task: release-watch-banner}
+
+## Thu ${thu}
+
+- [ ] Sprint demo prep
+`;
+  };
+
+  it('creates weeks/ at boot, watches it, and reads this week', async () => {
+    expect(disk.dirs.has(WEEKS)).toBe(true);
+    const week = thisWeek();
+    expect(weekFor(week)).toMatchObject({ week, anytime: [], days: {} });
+    disk.files.set(weekFile(week), sample(week));
+    shutdown();
+    await boot();
+    expect(weekFor(week).anytime).toEqual([{ text: 'Renew the domain', done: false }]);
+    expect(weekFor(week).days[weekDays(week)[0]!]?.[1]?.taskId).toBe('release-watch-banner');
+  });
+
+  it('treats a missing week as empty and a garbled one as whatever it can read', async () => {
+    const next = shiftWeek(thisWeek(), 1);
+    browseWeek(next);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(desk.week).toBe(next);
+    expect(weekFor(next)).toMatchObject({ anytime: [], days: {}, extra: '' });
+
+    const prev = shiftWeek(thisWeek(), -1);
+    disk.files.set(weekFile(prev), '\u0000 not a week at all\n## Anytime\n- [ ] still read\n');
+    browseWeek(prev);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(weekFor(prev).anytime).toEqual([{ text: 'still read', done: false }]);
+    expect(weekFor(prev).extra).toContain('not a week at all');
+  });
+
+  it('adds through serializeWeek with a temporary file and a rename', async () => {
+    const week = thisWeek();
+    const today = todayIso();
+    await addWeekItem(week, today, 'Call the bank', 'release-watch-banner');
+    const text = disk.files.get(weekFile(week)) as string;
+    const parsed = parseWeek(text, week);
+    expect(parsed.days[today]).toEqual([
+      { text: 'Call the bank', done: false, taskId: 'release-watch-banner' },
+    ]);
+    expect(serializeWeek(parsed)).toBe(text);
+    expect(parsed.updated).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const renames = (rename as unknown as { mock: { calls: string[][] } }).mock.calls;
+    const last = renames[renames.length - 1]!;
+    expect(last[0]).toMatch(new RegExp(`^${weekFile(week)}\\..+\\.tmp$`));
+    expect(last[1]).toBe(weekFile(week));
+    expect([...disk.files.keys()].some((f) => f.endsWith('.tmp'))).toBe(false);
+    expect(weekFor(week).days[today]).toHaveLength(1);
+  });
+
+  it('edits the file as it is on disk, so a change made in a terminal is kept', async () => {
+    const week = thisWeek();
+    const [mon, tue] = weekDays(week);
+    disk.files.set(weekFile(week), sample(week));
+    /* The desk has not seen this yet: the CLI wrote it a moment ago. */
+    await updateWeekItem(week, { slot: mon!, index: 1 }, { done: true });
+    let w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.days[mon!]!.map((i) => i.done)).toEqual([true, true]);
+    expect(w.anytime).toHaveLength(1);
+
+    await moveWeekItem(week, { slot: 'anytime', index: 0 }, tue!);
+    await removeWeekItem(week, { slot: mon!, index: 0 });
+    await updateWeekItem(week, { slot: mon!, index: 0 }, { taskId: undefined, text: 'Review it' });
+    w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.anytime).toEqual([]);
+    expect(w.days[tue!]).toEqual([{ text: 'Renew the domain', done: false }]);
+    expect(w.days[mon!]).toEqual([{ text: 'Review it', done: true }]);
+  });
+
+  it('lists the week files for the calendar and reads only the weeks it asks for', async () => {
+    desk.weekFiles = null;
+    const a = shiftWeek(thisWeek(), -5);
+    const b = shiftWeek(thisWeek(), -4);
+    const unread = shiftWeek(thisWeek(), -3);
+    disk.files.set(weekFile(a), sample(a));
+    disk.files.set(weekFile(b), sample(b));
+    disk.files.set(`${WEEKS}/${a}.md.123-1.tmp`, 'half');
+    disk.files.set(`${WEEKS}/notes.md`, 'not a week');
+    expect(await listWeekFiles()).toEqual([a, b]);
+    expect(desk.weekFiles).toEqual([a, b]);
+    expect(a in desk.weeks).toBe(false);
+
+    await ensureWeeks([a, unread]);
+    expect(weekFor(a).anytime).toHaveLength(1);
+    expect(b in desk.weeks).toBe(false);
+    expect(unread in desk.weeks).toBe(false);
+
+    /* A week written since joins the listing when the watcher reports it. */
+    disk.files.set(weekFile(unread), sample(unread));
+    fire([weekFile(unread)]);
+    await settle();
+    expect(desk.weekFiles).toEqual([a, b, unread].sort());
+    desk.weekFiles = null;
+  });
+
+  it('runs quick edits one after another so none is lost', async () => {
+    const week = thisWeek();
+    await Promise.all([
+      addWeekItem(week, 'anytime', 'one'),
+      addWeekItem(week, 'anytime', 'two'),
+      addWeekItem(week, 'anytime', 'three'),
+    ]);
+    const w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.anytime.map((i) => i.text)).toEqual(['one', 'two', 'three']);
+  });
+
+  it('puts the old copy back when the write is refused', async () => {
+    const week = thisWeek();
+    (writeTextFile as unknown as { mockRejectedValueOnce: (e: unknown) => void }).mockRejectedValueOnce(
+      'forbidden path',
+    );
+    await expect(addWeekItem(week, 'anytime', 'nope')).rejects.toBe('forbidden path');
+    expect(weekFor(week).anytime).toEqual([]);
+  });
+
+  it('re-reads a week the watcher names, and ignores its temporary files', async () => {
+    const week = thisWeek();
+    disk.files.set(weekFile(week), sample(week));
+    fire([`${weekFile(week)}.123.tmp`]);
+    await settle();
+    expect(weekFor(week).anytime).toEqual([]);
+    fire([weekFile(week)]);
+    await settle();
+    expect(weekFor(week).anytime).toHaveLength(1);
+    disk.files.delete(weekFile(week));
+    fire([WEEKS]);
+    await settle();
+    expect(weekFor(week).anytime).toEqual([]);
+  });
+
+  it('remembers Tasks or To-do per viewer, and survives storage that refuses', () => {
+    setTaskMode('todo');
+    expect(desk.taskMode).toBe('todo');
+    expect(desk.surface).toBe('tasks');
+    expect(localStorage.getItem(TASK_MODE_KEY)).toBe('todo');
+    expect(rememberedTaskMode()).toBe('todo');
+    setTaskMode('tasks');
+    expect(rememberedTaskMode()).toBe('tasks');
+
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect(rememberedTaskMode()).toBe('tasks');
+    expect(() => setTaskMode('todo')).not.toThrow();
+    expect(desk.taskMode).toBe('todo');
+    spy.mockRestore();
+    set.mockRestore();
+    setTaskMode('tasks');
+  });
+
+  it('remembers Notes or Sessions per viewer, and survives storage that refuses', () => {
+    setMemoryMode('sessions');
+    expect(desk.memoryMode).toBe('sessions');
+    expect(desk.surface).toBe('memory');
+    expect(localStorage.getItem(MEMORY_MODE_KEY)).toBe('sessions');
+    expect(rememberedMemoryMode()).toBe('sessions');
+    setMemoryMode('notes');
+    expect(rememberedMemoryMode()).toBe('notes');
+
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked');
+    });
+    expect(rememberedMemoryMode()).toBe('notes');
+    expect(() => setMemoryMode('sessions')).not.toThrow();
+    expect(desk.memoryMode).toBe('sessions');
+    spy.mockRestore();
+    set.mockRestore();
+    setMemoryMode('notes');
+  });
+
+  it('opens the To-do view on this week', () => {
+    browseWeek(shiftWeek(thisWeek(), 3));
+    openWeek();
+    expect(desk.taskMode).toBe('todo');
+    expect(desk.surface).toBe('tasks');
+    expect(desk.week).toBe(thisWeek());
+    setTaskMode('tasks');
   });
 });

@@ -13,6 +13,10 @@
  * The inference layer follows the same split: the Provider contract, the prompt builders and
  * the observed-facts view are pure and exported here, while the one provider that runs a
  * program is exported from `@ledge/core` alone.
+ *
+ * The sidecar records follow it too: the SessionRecord and TaskInsights shapes, their parsers,
+ * `contentKey` and the running and duration helpers are here, so the panel files an insight
+ * under exactly the key the CLI wrote it under. The stores that write them are Node only.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
@@ -65,3 +69,59 @@ export {
   rankByActivity,
   rankWithEvidence,
 } from './activity.ts';
+export type { SessionCommit, SessionRecord, NoteInsight, PlanInsight, TaskInsights } from './sidecars.ts';
+export {
+  contentKey,
+  emptyInsights,
+  isSessionRunning,
+  noteKey,
+  parseInsights,
+  parseSessionRecord,
+  serializeInsights,
+  serializeSessionRecord,
+  sessionDurationMs,
+} from './sidecars.ts';
+export type { DigestEntry, SessionTodo, TranscriptDigest, RenderDigestOptions } from './transcript.ts';
+export { DIGEST_MAX_CHARS, parseTranscript, renderDigest } from './transcript.ts';
+export type {
+  CaptureDecision,
+  CaptureHistory,
+  CaptureParse,
+  CapturePromptInput,
+  CaptureResult,
+} from './capture.ts';
+export {
+  CAPTURE_DEBOUNCE_LINES,
+  CAPTURE_DEBOUNCE_MS,
+  PLAN_STEP_MAX,
+  SESSION_TITLE_MAX,
+  buildCapturePrompt,
+  captureDue,
+  extractJsonObject,
+  matchItem,
+  parseCaptureResult,
+  samePlan,
+} from './capture.ts';
+export { BRIEF_MAX_LINES, buildBrief, firstSentences } from './brief.ts';
+export type { SummaryItem, SummariseParse } from './summarise.ts';
+export {
+  SUMMARISE_MAX_CHARS,
+  buildSummarisePrompt,
+  fitSummaryBatch,
+  missingInsights,
+  parseSummariseResult,
+} from './summarise.ts';
+export type { NumberedWeekItem, WeekFile, WeekItem, WeekSlot } from './week.ts';
+export {
+  WEEKDAY_NAMES,
+  emptyWeek,
+  isIsoWeek,
+  isoWeekOf,
+  itemsFor,
+  numberWeek,
+  parseWeek,
+  serializeWeek,
+  shiftWeek,
+  weekDays,
+  weekdayName,
+} from './week.ts';

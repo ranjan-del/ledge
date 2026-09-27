@@ -1,3 +1,4 @@
+import { createRawSnippet } from 'svelte';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Tasks from '../src/components/Tasks.svelte';
@@ -187,5 +188,38 @@ describe('Tasks, a card dropped on one of the lists', () => {
     dragging(taskA().file);
     await dropOn(screen.getByRole('button', { name: /Pending/ }));
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+});
+
+describe('Tasks, the Tasks and To-do switch', () => {
+  const todo = createRawSnippet(() => ({ render: () => '<p class="todo-stub">the week</p>' }));
+
+  it('is not there unless the panel asks for it', () => {
+    render(Tasks, { props: { ...base, view: 'live' } });
+    expect(screen.queryByRole('group', { name: 'Tasks or to-do' })).toBeNull();
+  });
+
+  it('offers Tasks and To-do above the four lists, and reports a switch', async () => {
+    const onmode = vi.fn();
+    const { container } = render(Tasks, {
+      props: { ...base, view: 'live', mode: 'tasks', onmode, todo },
+    });
+    const group = screen.getByRole('group', { name: 'Tasks or to-do' });
+    const words = [...group.querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(words).toEqual(['Tasks', 'To-do']);
+    expect(screen.getByRole('group', { name: 'Task view' })).toBeTruthy();
+    expect(container.querySelector('.todo-stub')).toBeNull();
+    await fireEvent.click(screen.getByRole('button', { name: 'To-do' }));
+    expect(onmode).toHaveBeenCalledWith('todo');
+  });
+
+  it('shows the week instead of the lists on To-do', () => {
+    const { container } = render(Tasks, {
+      props: { ...base, view: 'live', mode: 'todo', onmode: () => {}, todo },
+    });
+    expect(container.querySelector('.todo-stub')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Task view' })).toBeNull();
+    expect(container.querySelector('.task')).toBeNull();
+    expect(screen.getByRole('button', { name: 'To-do' }).getAttribute('aria-pressed')).toBe('true');
   });
 });

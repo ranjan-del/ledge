@@ -79,6 +79,8 @@ Everything lives under `~/.ledge/` (override with `LEDGE_HOME`):
     2026-09-14-release-watch-banner.md
     2026-09-14-optimistic-crud.md
   archive/            # done tasks are moved here by `ledge done`
+  weeks/
+    2026-W39.md       # this week's to-do list, one file per ISO week
 ```
 
 Each task is one Markdown file with YAML frontmatter and four known headings: `## Requirement`,
@@ -86,6 +88,11 @@ Each task is one Markdown file with YAML frontmatter and four known headings: `#
 other three are optional. There is no database, no server and no daemon. Any editor, any script
 and Claude Code can change the files, and the files are the API. Full format in
 [docs/task-file-format.md](docs/task-file-format.md).
+
+Beside the tasks there is a weekly to-do list: one file per ISO week under `weeks/`, items grouped
+by day plus an Anytime bucket, each a reminder that may link to a task. `ledge week` reads and
+changes it, and `ledge today` and the session start context show today's unticked items. Format
+in [docs/week-file-format.md](docs/week-file-format.md).
 
 ### The CLI is the one thing everyone calls
 
@@ -96,13 +103,21 @@ have one thing to call. Command reference in [docs/getting-started.md](docs/gett
 ### The plugin keeps Claude Code in the loop
 
 The plugin adds one slash command, `/ledge`, with subcommands `start`, `park`, `done`, `todo`,
-`plan`, `note` and `when`, and three hooks:
+`plan`, `note` and `when`, and four hooks:
 
 | Hook | What it does | Token cost |
 |---|---|---|
-| SessionStart | Runs `ledge current --repo "$PWD" --context`. If a task matches the folder, prints its title, planned day, requirement, plan, unchecked items and latest note as context. Otherwise prints one line telling you how to create one | About 200 |
-| Stop | Reads the session id from the hook payload and runs `ledge link` so the task remembers the session. Silent | 0 |
-| PreCompact | Reminds Claude to tick the checklist and append a note before context is compacted, because the note is the part that survives it | Tiny |
+| SessionStart | Runs `ledge current --repo "$PWD" --context`. If a task matches the folder, prints its title, planned day, requirement, plan, unchecked items and latest note as context. Otherwise prints one line telling you how to create one. Then a short block of standing rules, and it writes the session record with `ledge track` | About 350 |
+| Stop | Reads the session id from the hook payload and runs `ledge link` so the task remembers the session, then starts `ledge capture` in the background. Silent | 0 |
+| PreCompact | Reminds Claude to tick the checklist and append a note before context is compacted, because the note is the part that survives it, and starts a final capture | Tiny |
+| SessionEnd | Marks the session record ended and starts a final capture. Silent | 0 |
+
+The capture is the part that keeps a task current without being asked. It reads that session's
+transcript, asks Haiku through `claude -p` which task the work was for (creating one marked
+`origin: auto` when none fits), updates the plan and checklist, appends a short note, and writes
+a title and summary for the session to `~/.ledge/sessions/` and titles for notes to
+`~/.ledge/insights/`. It is debounced, so most turns cost nothing, it writes nothing when the model
+cannot answer, and it logs one line per run to `~/.ledge/capture.log`.
 
 Hooks are shell, exit quickly and never fail the session: any error exits 0 with no output. If
 `ledge` is not on PATH the SessionStart hook prints one hint and stops.
@@ -116,10 +131,11 @@ the end of a session. Notes are for reasoning and dead ends, not a restatement o
 
 | Ledge reads | Ledge does not read |
 |---|---|
-| Task files under `~/.ledge/tasks` and `~/.ledge/archive` (archive only for a count) | Your Claude Code conversation transcripts |
-| `~/.ledge/config.json` | The claude-mem database or any other memory plugin's store ([ADR 0003](docs/adr/0003-no-claude-mem-read.md)) |
-| `git status --porcelain=v2 --branch` output for repositories under your configured roots | Anything under `~/.claude` |
-| The `cwd` and `session_id` fields of the hook payload | Anything over the network |
+| Task files under `~/.ledge/tasks` and `~/.ledge/archive` (archive only for a count) | Any transcript other than the one a hook names for its own session |
+| `~/.ledge/config.json`, `~/.ledge/sessions/` and `~/.ledge/insights/` | The claude-mem database or any other memory plugin's store ([ADR 0003](docs/adr/0003-no-claude-mem-read.md)) |
+| `git status --porcelain=v2 --branch` output for repositories under your configured roots | Claude Code settings or memory under `~/.claude` |
+| The `cwd`, `session_id` and `transcript_path` fields of the hook payload | Anything over the network, apart from the model calls `claude -p` makes for capture and the assistant commands |
+| That session's transcript, during `ledge capture`, and `git log` for its commits | |
 
 The session link is an id and nothing more. Resuming a session later is Claude Code's job, through
 `claude --resume <id>`.
@@ -356,8 +372,15 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge plan <id> "step" "step" ...` | Replace the ordered plan steps |
 | `ledge note <id> "text"` | Append text to today's notes |
 | `ledge when <id> <YYYY-MM-DD\|today\|tomorrow\|none>` | Set or clear the planned day |
-| `ledge today` | Tasks planned for today, overdue ones, then the remaining current tasks |
-| `ledge sessions [--json]` | Every session id the plugin has linked, newest first |
+| `ledge today` | Tasks planned for today, today's week items, overdue ones, then the remaining current tasks |
+| `ledge week [--week W\|--next] [--json]` | This week's to-do list by day, each item numbered |
+| `ledge week add "text" [--day d] [--task id]` | Add a week item; `--day` takes `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun` or `anytime` (the default) |
+| `ledge week tick\|untick\|rm <n>`, `ledge week move <n> --day d` | Change week item n, as `ledge week` numbered it |
+| `ledge sessions [--task id] [--json]` | Sessions newest first with title, duration and what they left; `--json` prints the session records |
+| `ledge capture --session id --transcript path [--cwd dir] [--final] [--force]` | Read a session transcript into its task and the sidecars. The hooks run it |
+| `ledge track --session id [--transcript path] [--cwd dir] [--ended]` | Write the session record skeleton, or mark it ended. The hooks run it |
+| `ledge brief <id>` | The briefing a new session on this task starts from, at most 40 lines |
+| `ledge summarise [<id>] [--all]` | Add AI titles and summaries next to notes and plan steps that have none. Task files are not touched |
 | `ledge memory [query] [--json]` | Dated notes across every task, filtered by every term given |
 | `ledge open <id>` | Print the task file path |
 | `ledge scan` | Run the git scan once and print Pending as JSON |
@@ -366,7 +389,8 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge help [command]` | Print the help screen, or the usage of one command |
 
 `ledge current --context` prints what the SessionStart hook injects: the title, the planned day,
-the requirement, the plan, the unchecked items and the latest note, capped at 40 lines. When it
+the requirement, the plan, the unchecked items, today's unticked week items (at most five lines)
+and the latest note, capped at 40 lines. When it
 does not fit, the note is shortened from its oldest line first and dropped before anything else.
 
 ## Limitations

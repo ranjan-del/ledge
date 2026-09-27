@@ -47,6 +47,22 @@ Each item below is covered by tests in `packages/core/test` and `packages/cli/te
 - [x] `/ledge` gains `plan`, `note` and `when`, and standing rules: plan before editing code, note
   a decision or dead end when it happens, closing note before compaction and at session end
 
+### AI assistant (v3 contract, on top of phase 0)
+
+Core, CLI and plugin half, on the `feat/ai-capture` branch. Each item below is covered by tests
+in `packages/core/test`, `packages/cli/test` and `plugin/test/hooks.test.sh`. The desktop half
+(session cards, note and plan titles, Ask Ledge) is a separate stream.
+
+- [x] Sidecar records: `sessions/<id>.json` and `insights/<task>.json`, `contentKey`, tolerant
+  parsers, atomic stores
+- [x] Transcript digest of Claude Code JSONL, capped at about 12k tokens, newest material first
+- [x] `ledge capture`: debounce, Haiku call, strict answer check, task updates through
+  `TaskStore`, auto-created tasks marked `origin: auto`, commits from git, capture.log
+- [x] Hooks: standing rules and a session record at SessionStart, detached capture at Stop,
+  PreCompact and the new SessionEnd, and the `LEDGE_CAPTURE` guard
+- [x] `ledge sessions --json` over SessionRecords, `ledge brief`, `ledge summarise`
+- [ ] Tried against a week of real sessions, to tune the prompt and the debounce
+
 ## Phase 1: desktop app on macOS
 
 In progress. This is the current phase.

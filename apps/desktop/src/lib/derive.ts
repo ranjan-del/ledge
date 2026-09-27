@@ -121,3 +121,40 @@ export function summaryParts(counts: {
   if (counts.pending > 0) parts.push(plural(counts.pending, 'pending task', 'pending tasks'));
   return parts;
 }
+
+/** One task and the moment it was last worked on, which is what the Assistant's cards show. */
+export interface RecentTask {
+  task: Task;
+  /** ISO 8601: the newer of the task file's `updated` and its newest session activity. */
+  at: string;
+}
+
+/**
+ * The tasks worked on most recently, by activity: the newer of when the task file was last
+ * written and when a session attributed to it was last active. Finished tasks are left out,
+ * because the question the cards answer is "what was I just doing".
+ */
+export function recentByActivity(
+  tasks: Task[],
+  records: { taskId?: string; lastActivity: string }[],
+  limit = 3,
+): RecentTask[] {
+  const latest = new Map<string, number>();
+  for (const r of records) {
+    if (!r.taskId) continue;
+    const t = Date.parse(r.lastActivity);
+    if (!Number.isNaN(t) && t > (latest.get(r.taskId) ?? -Infinity)) latest.set(r.taskId, t);
+  }
+  return tasks
+    .filter((t) => t.status !== 'done')
+    .map((task) => {
+      const own = Date.parse(task.updated);
+      const session = latest.get(task.id) ?? -Infinity;
+      const best = Math.max(Number.isNaN(own) ? -Infinity : own, session);
+      return { task, best, at: best === session ? new Date(session).toISOString() : task.updated };
+    })
+    .filter((e) => e.best > -Infinity)
+    .sort((a, b) => b.best - a.best)
+    .slice(0, limit)
+    .map(({ task, at }) => ({ task, at }));
+}

@@ -1,6 +1,6 @@
 [package]
 name = "ledge-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Ledge desktop: a floating button and a glass panel for Claude Code tasks."
 authors = ["Ranjan G"]
 license = "MIT"

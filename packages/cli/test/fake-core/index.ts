@@ -559,3 +559,8 @@ export function claudeCodeProvider(): import('../../../core/src/ai.ts').Provider
     },
   };
 }
+
+// The weekly to-do list is a file format plus a store over LEDGE_HOME, both honest to run in a
+// test as they are, so the real modules stand in for themselves here too.
+export * from '../../../core/src/week.ts';
+export * from '../../../core/src/week-node.ts';

@@ -15,7 +15,7 @@ trap 'rm -rf "$tmp"' EXIT INT TERM
 # bin/ holds the fake ledge plus the utilities the hooks need. nobin/ holds only the
 # utilities, so a hook run with PATH=nobin sees no ledge at all.
 mkdir -p "$tmp/bin" "$tmp/nobin" "$tmp/pwd"
-for u in sh cat tr awk sed; do
+for u in sh cat tr awk sed nohup sleep; do
   ln -s "$(command -v "$u")" "$tmp/bin/$u"
   ln -s "$(command -v "$u")" "$tmp/nobin/$u"
 done
@@ -48,14 +48,35 @@ assert_empty() {
 }
 
 run_hook() {
-  # run_hook SCRIPT FIXTURE MODE PATHDIR   sets out, rc, logged
+  # run_hook SCRIPT FIXTURE MODE PATHDIR   sets out, rc, logged, elapsed
   # FIXTURE "-" means empty stdin. The hook runs with $tmp/pwd as its working directory.
+  # GUARD=1 runs it as if inside a capture; SLOW=n makes the fake capture take n seconds.
+  wait_for_capture 0
   : >"$log"
+  : >"$log.capture"
   if [ "$2" = "-" ]; then input=/dev/null; else input="$fixtures/$2"; fi
+  t0=$(date +%s)
   out=$(cd "$tmp/pwd" && env PATH="$4" LEDGE_FAKE_MODE="$3" LEDGE_FAKE_LOG="$log" \
+    LEDGE_CAPTURE="${GUARD:-}" LEDGE_FAKE_CAPTURE_SLEEP="${SLOW:-}" \
     "$SH" "$hooks/$1" <"$input" 2>"$tmp/stderr")
   rc=$?
+  elapsed=$(( $(date +%s) - t0 ))
   logged=$(cat "$log")
+  # Some shells keep an assignment written before a function call after it returns, so the
+  # two switches are cleared here rather than trusted to go out of scope.
+  GUARD=
+  SLOW=
+}
+
+wait_for_capture() {
+  # wait_for_capture SECONDS   waits until a detached capture has logged, sets captured
+  n=0
+  captured=$(cat "$log.capture" 2>/dev/null)
+  while [ -z "$captured" ] && [ "$n" -lt "$(( $1 * 10 ))" ]; do
+    sleep 0.1
+    n=$((n + 1))
+    captured=$(cat "$log.capture" 2>/dev/null)
+  done
 }
 
 line_count() { printf '%s' "$1" | awk 'END { print NR + (length($0) > 0 && NR == 0) }'; }
@@ -64,29 +85,44 @@ bin="$tmp/bin"
 nobin="$tmp/nobin"
 
 echo "# syntax"
-for s in session-start.sh stop.sh pre-compact.sh; do
+for s in session-start.sh stop.sh pre-compact.sh session-end.sh; do
   if "$SH" -n "$hooks/$s" 2>/dev/null; then ok "sh -n $s"; else ko "sh -n $s" "syntax error"; fi
 done
 
 echo "# hooks.json"
 hj=$(cat "$hooks/hooks.json")
-for ev in SessionStart Stop PreCompact; do
+for ev in SessionStart Stop PreCompact SessionEnd; do
   assert_contains "hooks.json wires $ev" "\"$ev\"" "$hj"
 done
-for s in session-start.sh stop.sh pre-compact.sh; do
+for s in session-start.sh stop.sh pre-compact.sh session-end.sh; do
   assert_contains "hooks.json references $s" "\${CLAUDE_PLUGIN_ROOT}/hooks/$s" "$hj"
   if [ -f "$hooks/$s" ]; then ok "$s exists"; else ko "$s exists" "missing"; fi
 done
-assert_eq "hooks.json has three 5 second timeouts" 3 "$(grep -c '"timeout": 5' "$hooks/hooks.json")"
+assert_eq "hooks.json has four 5 second timeouts" 4 "$(grep -c '"timeout": 5' "$hooks/hooks.json")"
 
 echo "# session-start.sh"
 run_hook session-start.sh session-start.json task "$bin"
 assert_eq "task: exit 0" 0 "$rc"
 assert_contains "task: prints title" "Release watch banner for stale tabs" "$out"
 assert_contains "task: prints unchecked items" "- [ ] Banner component in the shell" "$out"
-assert_eq "task: arms the intent record, then calls ledge current --context with cwd" \
+assert_eq "task: arms the intent, writes the session record, then asks for the context" \
   "began --repo /home/user/code/demo-app --session b13e8b5e-4c2a-4f1e-9d3b-7a1c2e5f8a90
+track --session b13e8b5e-4c2a-4f1e-9d3b-7a1c2e5f8a90 --cwd /home/user/code/demo-app \
+--transcript /home/user/.claude/projects/-home-user-code-demo-app/b13e8b5e.jsonl
 current --repo /home/user/code/demo-app --context" "$logged"
+assert_contains "task: prints the standing rules" "Ledge standing rules" "$out"
+assert_contains "task: the rules ask for ledge plan" "ledge plan <id>" "$out"
+assert_contains "task: the rules ask for ledge tick" "ledge tick <id> <n>" "$out"
+assert_contains "task: the rules ask for ledge note" "ledge note <id>" "$out"
+assert_contains "task: the rules say how to start a new goal" "ledge add \"title\"" "$out"
+assert_contains "task: the rules say how to add to the week" "ledge week add \"text\" [--day mon]" "$out"
+assert_contains "task: the rules say week items are only added when asked" \
+  "Never add week items unasked." "$out"
+rules=$(printf '%s\n' "$out" | awk '/^Ledge standing rules/ { on = 1 } on { n++ } END { print n }')
+if [ "$rules" -le 12 ]; then ok "task: the rules block is at most 12 lines"; else
+  ko "task: the rules block is at most 12 lines" "it is $rules"; fi
+last=$(printf '%s\n' "$out" | awk 'END { print }')
+assert_contains "task: the rules come last" "reads this session in the background" "$last"
 
 assert_contains "task: prints the planned day" "Planned: 2026-09-18" "$out"
 assert_contains "task: prints the plan" "1. Write version.json at build time" "$out"
@@ -94,8 +130,10 @@ assert_contains "task: prints the latest note" "Notes (2026-09-15):" "$out"
 
 run_hook session-start.sh session-start.json none "$bin"
 assert_eq "none: exit 0" 0 "$rc"
-assert_eq "none: prints the no-task line" \
-  "No Ledge task for this repo. Use /ledge start to create one." "$out"
+first=$(printf '%s\n' "$out" | awk 'NR == 1')
+assert_eq "none: prints the no-task line first" \
+  "No Ledge task for this repo. Use /ledge start to create one." "$first"
+assert_contains "none: then the standing rules" "Ledge standing rules" "$out"
 
 run_hook session-start.sh session-start.json error "$bin"
 assert_eq "error: exit 0" 0 "$rc"
@@ -109,8 +147,9 @@ assert_empty "missing ledge: ledge never called" "$logged"
 
 run_hook session-start.sh windows-path.json task "$bin"
 assert_eq "windows path: exit 0" 0 "$rc"
-assert_eq "windows path: backslashes unescaped" \
+assert_eq "windows path: backslashes unescaped, and no transcript to pass" \
   'began --repo C:\Users\me\code\demo-app --session c9d8e7f6-1a2b-4c3d-8e9f-0a1b2c3d4e5f
+track --session c9d8e7f6-1a2b-4c3d-8e9f-0a1b2c3d4e5f --cwd C:\Users\me\code\demo-app
 current --repo C:\Users\me\code\demo-app --context' "$logged"
 
 run_hook session-start.sh malformed.json task "$bin"
@@ -135,15 +174,27 @@ case "$out" in
   *"No Ledge task for this repo"*) ko "intent: no contradictory no-task line" "found it" ;;
   *) ok "intent: no contradictory no-task line" ;;
 esac
-assert_eq "intent: exactly one line" 1 "$(line_count "$out")"
+first=$(printf '%s\n' "$out" | awk 'NR == 1')
+assert_contains "intent: the nudge is the first line" "is in the backlog" "$first"
+assert_contains "intent: then the standing rules" "Ledge standing rules" "$out"
 
 run_hook session-start.sh session-start.json both "$bin"
 assert_eq "both: exit 0" 0 "$rc"
 assert_contains "both: prints the current task context first" \
   "Ledge task: Release watch banner" "$out"
 assert_contains "both: prints the nudge as well" "ledge start release-watch-banner" "$out"
-last=$(printf '%s\n' "$out" | awk 'END { print }')
-assert_contains "both: the nudge is the last line" "ledge start" "$last"
+nudge_at=$(printf '%s\n' "$out" | awk '/is in the backlog/ { print NR; exit }')
+rules_at=$(printf '%s\n' "$out" | awk '/^Ledge standing rules/ { print NR; exit }')
+if [ -n "$nudge_at" ] && [ -n "$rules_at" ] && [ "$nudge_at" -lt "$rules_at" ]; then
+  ok "both: the nudge comes after the context and before the rules"
+else
+  ko "both: the nudge comes after the context and before the rules" "nudge $nudge_at rules $rules_at"
+fi
+
+GUARD=1 run_hook session-start.sh session-start.json task "$bin"
+assert_eq "inside a capture: exit 0" 0 "$rc"
+assert_empty "inside a capture: prints nothing" "$out"
+assert_empty "inside a capture: ledge never called" "$logged"
 
 echo "# stop.sh"
 run_hook stop.sh stop.json task "$bin"
@@ -196,6 +247,35 @@ assert_eq "kept: exit 0" 0 "$rc"
 assert_empty "kept: says nothing when nothing was promoted" "$out"
 assert_contains "kept: settle still ran" "settle --repo" "$logged"
 
+wait_for_capture 1
+assert_empty "stop without a transcript: no capture started" "$captured"
+
+SLOW=3 run_hook stop.sh stop-transcript.json task "$bin"
+assert_eq "transcript: exit 0" 0 "$rc"
+assert_empty "transcript: prints nothing" "$out"
+if [ "$elapsed" -le 1 ]; then ok "transcript: returns without waiting for the capture"; else
+  ko "transcript: returns without waiting for the capture" "took ${elapsed}s"; fi
+assert_eq "transcript: links and settles as before" \
+  "current --repo /home/user/code/demo-app --json
+link release-watch-banner 071729a1-9f0c-4d7e-8b2a-3c4d5e6f7a81
+settle --repo /home/user/code/demo-app --json" "$logged"
+wait_for_capture 6
+assert_eq "transcript: starts ledge capture detached, marked LEDGE_CAPTURE=1" \
+  "capture --session 071729a1-9f0c-4d7e-8b2a-3c4d5e6f7a81 \
+--transcript /home/user/.claude/projects/-home-user-code-demo-app/071729a1.jsonl \
+--cwd /home/user/code/demo-app LEDGE_CAPTURE=1" "$captured"
+
+run_hook stop.sh stop-transcript.json none "$bin"
+wait_for_capture 5
+assert_contains "no task yet: still captures, so a task can be created" "capture --session" \
+  "$captured"
+
+GUARD=1 run_hook stop.sh stop-transcript.json task "$bin"
+assert_empty "inside a capture: prints nothing" "$out"
+assert_empty "inside a capture: ledge never called" "$logged"
+wait_for_capture 1
+assert_empty "inside a capture: no capture started" "$captured"
+
 echo "# pre-compact.sh"
 run_hook pre-compact.sh pre-compact.json task "$bin"
 assert_eq "task: exit 0" 0 "$rc"
@@ -208,10 +288,17 @@ assert_contains "task: says what the note must cover" \
 assert_eq "task: exactly one line" 1 "$(line_count "$out")"
 assert_eq "task: resolves the task by cwd" \
   "current --repo /home/user/code/demo-app --json" "$logged"
+wait_for_capture 5
+assert_eq "task: starts a final capture detached" \
+  "capture --session b13e8b5e-4c2a-4f1e-9d3b-7a1c2e5f8a90 \
+--transcript /home/user/.claude/projects/-home-user-code-demo-app/b13e8b5e.jsonl \
+--cwd /home/user/code/demo-app --final LEDGE_CAPTURE=1" "$captured"
 
 run_hook pre-compact.sh pre-compact.json none "$bin"
 assert_eq "none: exit 0" 0 "$rc"
 assert_empty "none: prints nothing" "$out"
+wait_for_capture 5
+assert_contains "none: still starts the final capture" "--final" "$captured"
 
 run_hook pre-compact.sh pre-compact.json error "$bin"
 assert_eq "error: exit 0" 0 "$rc"
@@ -221,6 +308,43 @@ run_hook pre-compact.sh pre-compact.json task "$nobin"
 assert_eq "missing ledge: exit 0" 0 "$rc"
 assert_empty "missing ledge: prints nothing" "$out"
 
+GUARD=1 run_hook pre-compact.sh pre-compact.json task "$bin"
+assert_empty "inside a capture: prints nothing" "$out"
+assert_empty "inside a capture: ledge never called" "$logged"
+
+echo "# session-end.sh"
+SLOW=3 run_hook session-end.sh session-end.json task "$bin"
+assert_eq "end: exit 0" 0 "$rc"
+assert_empty "end: prints nothing" "$out"
+if [ "$elapsed" -le 1 ]; then ok "end: returns without waiting for the capture"; else
+  ko "end: returns without waiting for the capture" "took ${elapsed}s"; fi
+assert_eq "end: marks the session ended first" \
+  "track --session b13e8b5e-4c2a-4f1e-9d3b-7a1c2e5f8a90 --cwd /home/user/code/demo-app \
+--transcript /home/user/.claude/projects/-home-user-code-demo-app/b13e8b5e.jsonl --ended" \
+  "$logged"
+wait_for_capture 6
+assert_eq "end: then starts a final capture detached" \
+  "capture --session b13e8b5e-4c2a-4f1e-9d3b-7a1c2e5f8a90 \
+--transcript /home/user/.claude/projects/-home-user-code-demo-app/b13e8b5e.jsonl \
+--cwd /home/user/code/demo-app --final LEDGE_CAPTURE=1" "$captured"
+
+run_hook session-end.sh - task "$bin"
+assert_eq "end, empty stdin: exit 0" 0 "$rc"
+assert_empty "end, empty stdin: nothing to mark without a session id" "$logged"
+
+run_hook session-end.sh session-end.json error "$bin"
+assert_eq "end, broken store: exit 0" 0 "$rc"
+assert_empty "end, broken store: prints nothing" "$out"
+
+run_hook session-end.sh session-end.json task "$nobin"
+assert_eq "end, missing ledge: exit 0" 0 "$rc"
+assert_empty "end, missing ledge: prints nothing" "$out"
+
+GUARD=1 run_hook session-end.sh session-end.json task "$bin"
+assert_empty "end, inside a capture: ledge never called" "$logged"
+wait_for_capture 1
+assert_empty "end, inside a capture: no capture started" "$captured"
+
 echo "# commands/ledge.md"
 cmd="$here/../commands/ledge.md"
 if [ -f "$cmd" ]; then ok "ledge.md exists"; else ko "ledge.md exists" "missing"; fi
@@ -229,6 +353,10 @@ for sub in plan note when; do
   assert_contains "ledge.md documents the $sub subcommand" "### $sub" "$md"
   assert_contains "ledge.md runs ledge $sub" "ledge $sub <id>" "$md"
 done
+assert_contains "ledge.md documents the week subcommand" "### week" "$md"
+assert_contains "ledge.md runs ledge week add" "ledge week add \"<item>\"" "$md"
+assert_contains "ledge.md keeps week items to explicit requests" \
+  "Do not add week items on your" "$md"
 assert_contains "ledge.md documents the planned key" "planned: 2026-09-18" "$md"
 assert_contains "ledge.md documents the Plan section" "## Plan" "$md"
 assert_contains "ledge.md documents dated notes" "### YYYY-MM-DD" "$md"

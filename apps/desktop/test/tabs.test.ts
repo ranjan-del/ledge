@@ -38,3 +38,25 @@ describe('Tabs', () => {
     expect(onchange).toHaveBeenLastCalledWith('current');
   });
 });
+
+describe('Tabs, the panel strip', () => {
+  it('is Assistant, Tasks and Memory, with no count on Assistant', async () => {
+    const onchange = vi.fn();
+    render(Tabs, {
+      props: {
+        tabs: [
+          { id: 'assistant', label: 'Assistant' },
+          { id: 'tasks', label: 'Tasks', count: 4 },
+          { id: 'memory', label: 'Memory', count: 2 },
+        ],
+        active: 'assistant',
+        onchange,
+      },
+    });
+    const items = screen.getAllByRole('tab');
+    expect(items.map((t) => t.querySelector('.label')?.textContent)).toEqual(['Assistant', 'Tasks', 'Memory']);
+    expect(items[0]?.querySelector('.count')).toBeNull();
+    await fireEvent.click(items[2]!);
+    expect(onchange).toHaveBeenCalledWith('memory');
+  });
+});
