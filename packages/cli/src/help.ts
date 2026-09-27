@@ -69,6 +69,10 @@ export const COMMANDS: Record<string, HelpEntry> = {
     usage: 'ledge track --session id [--transcript path] [--cwd dir] [--ended] [--json]',
     summary: 'Write the session record skeleton, or mark it ended (the hooks run this)',
   },
+  summarise: {
+    usage: 'ledge summarise [<id>] [--all] [--json]',
+    summary: 'Add AI titles next to notes and plan steps that have none; files untouched',
+  },
   brief: {
     usage: 'ledge brief <id> [--json]',
     summary: 'Print the briefing a new Claude session on this task starts from',
@@ -125,6 +129,7 @@ export function renderHelp(): string {
     '  --force      With capture: run even when there is nothing new to read',
     '  --ended      With track: mark the session ended',
     '  --task id    With sessions: only that task\'s sessions',
+    '  --all        With summarise: every task in the tasks folder',
     '  -h, --help   Show help; -v, --version prints the version',
     '',
     'ask, standup and handoff send your task files and git state to a model and print what it',

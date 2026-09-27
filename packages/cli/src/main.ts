@@ -29,6 +29,7 @@ import { run as settle } from './commands/settle.ts';
 import { run as sessions } from './commands/sessions.ts';
 import { run as handoff } from './commands/handoff.ts';
 import { run as standup } from './commands/standup.ts';
+import { run as summarise } from './commands/summarise.ts';
 import { run as start } from './commands/start.ts';
 import { run as tick } from './commands/tick.ts';
 import { run as track } from './commands/track.ts';
@@ -76,6 +77,7 @@ const COMMANDS: Record<string, CommandRunner> = {
   capture,
   track,
   brief,
+  summarise,
   memory,
   ask,
   standup,
