@@ -115,6 +115,9 @@ assert_contains "task: the rules ask for ledge plan" "ledge plan <id>" "$out"
 assert_contains "task: the rules ask for ledge tick" "ledge tick <id> <n>" "$out"
 assert_contains "task: the rules ask for ledge note" "ledge note <id>" "$out"
 assert_contains "task: the rules say how to start a new goal" "ledge add \"title\"" "$out"
+assert_contains "task: the rules say how to add to the week" "ledge week add \"text\" [--day mon]" "$out"
+assert_contains "task: the rules say week items are only added when asked" \
+  "Never add week items unasked." "$out"
 rules=$(printf '%s\n' "$out" | awk '/^Ledge standing rules/ { on = 1 } on { n++ } END { print n }')
 if [ "$rules" -le 12 ]; then ok "task: the rules block is at most 12 lines"; else
   ko "task: the rules block is at most 12 lines" "it is $rules"; fi
@@ -350,6 +353,10 @@ for sub in plan note when; do
   assert_contains "ledge.md documents the $sub subcommand" "### $sub" "$md"
   assert_contains "ledge.md runs ledge $sub" "ledge $sub <id>" "$md"
 done
+assert_contains "ledge.md documents the week subcommand" "### week" "$md"
+assert_contains "ledge.md runs ledge week add" "ledge week add \"<item>\"" "$md"
+assert_contains "ledge.md keeps week items to explicit requests" \
+  "Do not add week items on your" "$md"
 assert_contains "ledge.md documents the planned key" "planned: 2026-09-18" "$md"
 assert_contains "ledge.md documents the Plan section" "## Plan" "$md"
 assert_contains "ledge.md documents dated notes" "### YYYY-MM-DD" "$md"

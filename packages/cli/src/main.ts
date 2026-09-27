@@ -36,6 +36,7 @@ import { run as track } from './commands/track.ts';
 import { run as today } from './commands/today.ts';
 import { run as todo } from './commands/todo.ts';
 import { run as untick } from './commands/untick.ts';
+import { run as week } from './commands/week.ts';
 import { run as when } from './commands/when.ts';
 
 /**
@@ -73,6 +74,7 @@ const COMMANDS: Record<string, CommandRunner> = {
   ref,
   when,
   today,
+  week,
   sessions,
   capture,
   track,
@@ -118,7 +120,7 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
   let values: { json?: boolean; context?: boolean; backlog?: boolean; yes?: boolean;
     save?: boolean; repo?: string; session?: string; help?: boolean; version?: boolean;
     final?: boolean; force?: boolean; all?: boolean; ended?: boolean; transcript?: string;
-    cwd?: string; task?: string };
+    cwd?: string; task?: string; day?: string; week?: string; next?: boolean };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -138,6 +140,9 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
         transcript: { type: 'string' },
         cwd: { type: 'string' },
         task: { type: 'string' },
+        day: { type: 'string' },
+        week: { type: 'string' },
+        next: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -183,6 +188,9 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
     transcript: values.transcript,
     dir: values.cwd,
     task: values.task,
+    day: values.day,
+    week: values.week,
+    next: values.next ?? false,
   };
   const ctx: CommandContext = {
     args: positionals.slice(1),

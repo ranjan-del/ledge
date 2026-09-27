@@ -111,3 +111,17 @@ export {
   missingInsights,
   parseSummariseResult,
 } from './summarise.ts';
+export type { NumberedWeekItem, WeekFile, WeekItem, WeekSlot } from './week.ts';
+export {
+  WEEKDAY_NAMES,
+  emptyWeek,
+  isIsoWeek,
+  isoWeekOf,
+  itemsFor,
+  numberWeek,
+  parseWeek,
+  serializeWeek,
+  shiftWeek,
+  weekDays,
+  weekdayName,
+} from './week.ts';

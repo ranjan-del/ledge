@@ -64,7 +64,8 @@ fi
 out=$(ledge current --repo "$cwd" --context 2>/dev/null)
 rc=$?
 
-# standing_rules prints the block that asks the session to keep its task current. Twelve lines
+# standing_rules prints the block that asks the session to keep its task current, and the one
+# line that says how to add to the weekly to-do list when asked. Twelve lines
 # at most, because it is read at the start of every session and paid for on every turn.
 standing_rules() {
   echo ""
@@ -75,6 +76,7 @@ standing_rules() {
   echo "- For a decision or a dead end, run \`ledge note <id> \"...\"\` when it happens, with why."
   echo "- If this is a new goal with no task, run \`ledge add \"title\" --repo \"\$PWD\"\`, then"
   echo "  \`ledge start <id>\`."
+  echo "- Asked to remember something this week: \`ledge week add \"text\" [--day mon]\`. Never add week items unasked."
   echo "- Ledge also reads this session in the background, so a missed step is caught later."
 }
 

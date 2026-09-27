@@ -19,6 +19,9 @@
  * The sidecar records of the AI assistant contract split the same way again: the SessionRecord
  * and TaskInsights shapes, their parsers and `contentKey` are pure and live in both entries,
  * while SessionStore and InsightStore, which write files, are here only.
+ *
+ * The weekly to-do list is the same once more: the week file format and the ISO week helpers
+ * are pure and in both entries, and WeekStore is here only.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
@@ -138,3 +141,18 @@ export {
   missingInsights,
   parseSummariseResult,
 } from './summarise.ts';
+export type { NumberedWeekItem, WeekFile, WeekItem, WeekSlot } from './week.ts';
+export {
+  WEEKDAY_NAMES,
+  emptyWeek,
+  isIsoWeek,
+  isoWeekOf,
+  itemsFor,
+  numberWeek,
+  parseWeek,
+  serializeWeek,
+  shiftWeek,
+  weekDays,
+  weekdayName,
+} from './week.ts';
+export { WeekStore } from './week-node.ts';
