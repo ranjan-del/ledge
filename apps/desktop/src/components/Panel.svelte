@@ -14,12 +14,7 @@
    * reverse before the window is actually hidden: the hide is delayed by exactly as long as the
    * animation, and not at all for someone who asked for less motion.
    */
-  import {
-    collapseTilde,
-    memoryFor,
-    sessionsFor,
-    type Task as CoreTask,
-  } from '@ledge/core/pure';
+  import { collapseTilde, memoryFor, type Task as CoreTask } from '@ledge/core/pure';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-shell';
@@ -46,6 +41,7 @@
   } from '../lib/sizing.ts';
   import { provideInsights } from '../lib/insight-context.ts';
   import { mergeTask } from '../lib/merge.ts';
+  import { groupSessions, sessionCount } from '../lib/session-view.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
@@ -108,17 +104,24 @@
      gives the sheet something to animate from and to. */
   let onScreen = $state(false);
 
+  /* A minute clock, so a session that went quiet stops showing as running without waiting for
+     a file to change. It only ticks while the panel is on screen. */
+  let clock = $state(Date.now());
   const count = $derived(counts());
+  const sessionGroups = $derived(groupSessions(desk.tasks, desk.sessionRecords, new Date(clock)));
+  const sessionTotal = $derived(sessionCount(sessionGroups));
+  const runningTotal = $derived(
+    sessionGroups.reduce((n, g) => n + g.items.filter((i) => i.running).length, 0),
+  );
   const tabs = $derived([
     { id: 'now', label: 'Now', count: count.now },
-    { id: 'sessions', label: 'Sessions', count: count.sessions },
+    { id: 'sessions', label: 'Sessions', count: sessionTotal },
     { id: 'tasks', label: 'Tasks', count: count.tasks },
     { id: 'memory', label: 'Memory', count: count.memory },
   ]);
   const selected = $derived(selectedTask());
   const working = $derived(workingTasks());
   const upNext = $derived(upNextTasks());
-  const sessions = $derived(sessionsFor(desk.tasks));
   const notes = $derived(memoryFor(desk.tasks));
   const summary = $derived(
     summaryParts({
@@ -138,7 +141,7 @@
     working: working.length,
     upNext: upNext.length,
     attention: attentionRepos().length,
-    sessions: sessions.length,
+    sessions: sessionTotal,
     notes: notes.length,
     live: currentTasks().length,
     done: doneCount(),
@@ -171,6 +174,10 @@
     launch = null;
     const result = await openInClaude(task, useResume);
     if (!result.ok) launch = result;
+  }
+
+  async function resumeSession(task: CoreTask, _sessionId: string) {
+    await resume(task, true);
   }
 
   async function openFolder(task: CoreTask) {
@@ -338,6 +345,13 @@
     if (desk.panelVisible || pinned) sizer.update(full);
   });
 
+  $effect(() => {
+    if (!(desk.panelVisible || pinned)) return;
+    clock = Date.now();
+    const tick = setInterval(() => (clock = Date.now()), 60_000);
+    return () => clearInterval(tick);
+  });
+
   onMount(() => {
     let unlisten: (() => void) | undefined;
     const raf = requestAnimationFrame(() => (onScreen = true));
@@ -478,10 +492,11 @@
       />
     {:else if desk.surface === 'sessions'}
       <Sessions
-        {sessions}
-        taskFor={taskById}
+        groups={sessionGroups}
+        now={clock}
+        awake={desk.panelVisible || pinned}
         onselect={(t) => select(t.file)}
-        onresume={(t) => void resume(t, true)}
+        onresume={(t, id) => void resumeSession(t, id)}
       />
     {:else if desk.surface === 'tasks'}
       <Tasks
@@ -548,7 +563,9 @@
              them may still be waiting for its file to be moved. -->
         {today === undefined ? `${doneCount()} finished` : `${today} done today`}
       {:else if desk.surface === 'sessions'}
-        {count.sessions} linked {count.sessions === 1 ? 'session' : 'sessions'}
+        {sessionTotal} {sessionTotal === 1 ? 'session' : 'sessions'}{runningTotal > 0
+          ? `, ${runningTotal} running`
+          : ''}
       {:else if desk.surface === 'memory'}
         {count.memory} {count.memory === 1 ? 'note' : 'notes'}
       {:else}
