@@ -102,6 +102,8 @@ import {
   mergeConfig,
   TASK_MODE_KEY,
   MEMORY_MODE_KEY,
+  ensureWeeks,
+  listWeekFiles,
   rememberedMemoryMode,
   setMemoryMode,
   addWeekItem,
@@ -786,6 +788,32 @@ updated: 2026-09-27T12:40:00+05:30
     expect(w.anytime).toEqual([]);
     expect(w.days[tue!]).toEqual([{ text: 'Renew the domain', done: false }]);
     expect(w.days[mon!]).toEqual([{ text: 'Review it', done: true }]);
+  });
+
+  it('lists the week files for the calendar and reads only the weeks it asks for', async () => {
+    desk.weekFiles = null;
+    const a = shiftWeek(thisWeek(), -5);
+    const b = shiftWeek(thisWeek(), -4);
+    const unread = shiftWeek(thisWeek(), -3);
+    disk.files.set(weekFile(a), sample(a));
+    disk.files.set(weekFile(b), sample(b));
+    disk.files.set(`${WEEKS}/${a}.md.123-1.tmp`, 'half');
+    disk.files.set(`${WEEKS}/notes.md`, 'not a week');
+    expect(await listWeekFiles()).toEqual([a, b]);
+    expect(desk.weekFiles).toEqual([a, b]);
+    expect(a in desk.weeks).toBe(false);
+
+    await ensureWeeks([a, unread]);
+    expect(weekFor(a).anytime).toHaveLength(1);
+    expect(b in desk.weeks).toBe(false);
+    expect(unread in desk.weeks).toBe(false);
+
+    /* A week written since joins the listing when the watcher reports it. */
+    disk.files.set(weekFile(unread), sample(unread));
+    fire([weekFile(unread)]);
+    await settle();
+    expect(desk.weekFiles).toEqual([a, b, unread].sort());
+    desk.weekFiles = null;
   });
 
   it('runs quick edits one after another so none is lost', async () => {

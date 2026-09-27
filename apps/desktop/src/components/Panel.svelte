@@ -60,6 +60,7 @@
     doneCount,
     doneTasks,
     doneToday,
+    ensureWeeks,
     errorText,
     insightsFor,
     lastUpdated,
@@ -614,6 +615,8 @@
             onmove={(ref, to) => moveWeekItem(desk.week, ref, to)}
             onremove={(ref) => removeWeekItem(desk.week, ref)}
             onopentask={openTaskById}
+            weeks={desk.weeks}
+            onloadweeks={(weeks) => ensureWeeks(weeks).catch(() => undefined)}
           />
         {/snippet}
       </Tasks>
