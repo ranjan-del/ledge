@@ -15,6 +15,10 @@
  * The one asymmetry is the inference layer. The provider contract and the prompt builders are
  * pure and live in both entries; `claudeCodeProvider`, which starts a child process, is here
  * only, because a WebView has nothing to start.
+ *
+ * The sidecar records of the AI assistant contract split the same way again: the SessionRecord
+ * and TaskInsights shapes, their parsers and `contentKey` are pure and live in both entries,
+ * while SessionStore and InsightStore, which write files, are here only.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
@@ -89,3 +93,16 @@ export {
 } from './activity.ts';
 export type { ActivityOptions } from './activity-node.ts';
 export { collectActivity } from './activity-node.ts';
+export type { SessionCommit, SessionRecord, NoteInsight, PlanInsight, TaskInsights } from './sidecars.ts';
+export {
+  contentKey,
+  emptyInsights,
+  isSessionRunning,
+  noteKey,
+  parseInsights,
+  parseSessionRecord,
+  serializeInsights,
+  serializeSessionRecord,
+  sessionDurationMs,
+} from './sidecars.ts';
+export { SessionStore, InsightStore } from './sidecars-node.ts';

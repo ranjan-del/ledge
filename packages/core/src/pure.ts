@@ -13,6 +13,10 @@
  * The inference layer follows the same split: the Provider contract, the prompt builders and
  * the observed-facts view are pure and exported here, while the one provider that runs a
  * program is exported from `@ledge/core` alone.
+ *
+ * The sidecar records follow it too: the SessionRecord and TaskInsights shapes, their parsers,
+ * `contentKey` and the running and duration helpers are here, so the panel files an insight
+ * under exactly the key the CLI wrote it under. The stores that write them are Node only.
  */
 export type { TaskStatus, ChecklistItem, NoteEntry, Task, Config, RepoStatus } from './types.ts';
 export type { SessionRef, MemoryEntry, NextAction, SurfaceCounts } from './types.ts';
@@ -65,3 +69,15 @@ export {
   rankByActivity,
   rankWithEvidence,
 } from './activity.ts';
+export type { SessionCommit, SessionRecord, NoteInsight, PlanInsight, TaskInsights } from './sidecars.ts';
+export {
+  contentKey,
+  emptyInsights,
+  isSessionRunning,
+  noteKey,
+  parseInsights,
+  parseSessionRecord,
+  serializeInsights,
+  serializeSessionRecord,
+  sessionDurationMs,
+} from './sidecars.ts';
