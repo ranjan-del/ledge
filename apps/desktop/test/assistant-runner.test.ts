@@ -73,7 +73,7 @@ describe('prompt', () => {
     expect(p).toMatch(/general questions directly and briefly/);
     expect(p).toMatch(/`ledge` command line tool/);
     expect(p).toMatch(/what you did in one line/);
-    expect(p).not.toMatch(/[–—]/);
+    expect(p).not.toMatch(/[\u2013\u2014]/);
   });
 
   it('puts a fresh context block and the date in front of the words, and a replay when asked', () => {

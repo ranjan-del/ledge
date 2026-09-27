@@ -88,7 +88,7 @@ describe('warm session', () => {
     expect(t.child().launch.model).toBe('sonnet');
     expect(t.child().launch.resume).toBeUndefined();
     expect(t.child().launch.systemPrompt).toMatch(/ledge week add/);
-    expect(t.child().launch.systemPrompt).not.toMatch(/—/);
+    expect(t.child().launch.systemPrompt).not.toMatch(/\u2014/);
     expect(t.engine.status()).toBe('ready');
     t.engine.warm();
     expect(t.children).toHaveLength(1);
