@@ -42,7 +42,7 @@ describe('titles', () => {
 
   it('tidies a model-written title', () => {
     expect(cleanTitle('"Vendor call on Thursday."\n')).toBe('Vendor call on Thursday');
-    expect(cleanTitle('Plan — next phase')).toBe('Plan , next phase');
+    expect(cleanTitle('Plan \u2014 next phase')).toBe('Plan , next phase');
     expect(cleanTitle('   ')).toBeUndefined();
   });
 
