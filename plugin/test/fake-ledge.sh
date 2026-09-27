@@ -8,6 +8,15 @@
 #            settle reports a promotion
 #   kept     the same live intent record, but settle found no evidence and promoted nothing
 #   both     a current task and a live intent record for another task in the same folder
+# A capture is started detached, so it may land at any moment after the hook returns. It is
+# logged to a file of its own, with the LEDGE_CAPTURE value it saw, so the ordered log of the
+# synchronous calls stays deterministic. LEDGE_FAKE_CAPTURE_SLEEP makes it slow, which is how
+# the tests prove the hook does not wait for it.
+if [ "$1" = "capture" ]; then
+  [ -n "${LEDGE_FAKE_CAPTURE_SLEEP:-}" ] && sleep "$LEDGE_FAKE_CAPTURE_SLEEP"
+  printf '%s LEDGE_CAPTURE=%s\n' "$*" "${LEDGE_CAPTURE:-}" >>"${LEDGE_FAKE_LOG:-/dev/null}.capture"
+  exit 0
+fi
 printf '%s\n' "$*" >>"${LEDGE_FAKE_LOG:-/dev/null}"
 
 nudge="Ledge: this task is in the backlog (id: release-watch-banner). Run \`ledge start \
