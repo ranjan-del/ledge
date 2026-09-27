@@ -221,6 +221,9 @@
     gap: 3px;
     padding: var(--space-2) var(--space-3);
   }
+  .session p {
+    margin: 0;
+  }
   .session.running {
     border-color: var(--done-bg);
   }
