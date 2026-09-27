@@ -16,6 +16,10 @@
    * One thing comes before the greeting, and only sometimes: the summary of what changed while
    * the panel was closed. It leads because it is the only thing on the surface that will not be
    * true in a minute's time, and it takes itself away once it has been read.
+   *
+   * Under the greeting, when the week holds anything, is Today: the weekly to-do items for this
+   * day that are not ticked yet, tickable where they are, and one line saying how many more the
+   * week holds, which opens the To-do view. A week with nothing in it shows no block at all.
    */
   import type { RepoStatus, Task } from '@ledge/core/pure';
   import { onMount } from 'svelte';
@@ -24,6 +28,8 @@
   import { startStaggerWindow, staggering } from '../lib/motion.svelte.ts';
   import { basename } from '../lib/paths.ts';
   import type { NewTask } from '../lib/store.svelte.ts';
+  import type { WeekItem } from '../lib/week.ts';
+  import type { WeekRef } from '../lib/week-view.ts';
   import { todayIso } from '../lib/time.ts';
   import AddTask from './AddTask.svelte';
   import ReturnToWork from './ReturnToWork.svelte';
@@ -61,6 +67,17 @@
     onselect: (task: Task) => void;
     onadd: (input: NewTask) => unknown;
     onpending?: () => void;
+    /** Today's weekly to-do items that are not ticked, each with where it lives in the file. */
+    weekToday?: { item: WeekItem; ref: WeekRef }[];
+    /** Unticked items elsewhere in this week: Anytime and the other days. */
+    weekMore?: number;
+    /** Ticks one of today's items. */
+    onweektick?: (ref: WeekRef) => unknown;
+    /** Opens the To-do view on this week. */
+    onopenweek?: () => void;
+    /** A linked task's title, or undefined when that task is not on the desk. */
+    taskTitle?: (id: string) => string | undefined;
+    onopentask?: (id: string) => void;
   }
 
   let {
@@ -82,7 +99,23 @@
     onselect,
     onadd,
     onpending,
+    weekToday = [],
+    weekMore = 0,
+    onweektick,
+    onopenweek,
+    taskTitle,
+    onopentask,
   }: Props = $props();
+
+  const showWeek = $derived(weekToday.length + weekMore > 0);
+  let weekError = $state('');
+
+  function tick(ref: WeekRef) {
+    weekError = '';
+    void Promise.resolve()
+      .then(() => onweektick?.(ref))
+      .catch((e: unknown) => (weekError = e instanceof Error ? e.message : String(e)));
+  }
 
   const empty = $derived(working.length + upNext.length === 0);
   /* Read once at render rather than held in state: the panel is short-lived, and a greeting
@@ -105,6 +138,7 @@
     {/if}
 
     {#if empty}
+      {@render todayBlock()}
       <section class="start" aria-labelledby="start-heading">
         <h2 id="start-heading" aria-label={EMPTY_LINE}><Typewriter text={EMPTY_LINE} /></h2>
         <AddTask {onadd} {defaultRepo} open hint={false} />
@@ -119,6 +153,8 @@
           <p class="summary">{summary.join(' · ')}</p>
         {/if}
       </div>
+
+      {@render todayBlock()}
 
       {#if working.length > 0}
         <section class="block" aria-labelledby="working-label">
@@ -185,7 +221,116 @@
   {/if}
 </div>
 
+{#snippet todayBlock()}
+  {#if showWeek}
+    <section class="block week-today" aria-labelledby="today-label">
+      <h3 class="section-label" id="today-label">
+        Today
+        {#if weekToday.length > 0}<span class="count">{weekToday.length}</span>{/if}
+      </h3>
+      {#if weekToday.length > 0}
+        <ul class="today-list">
+          {#each weekToday as entry (`${entry.ref.index}:${entry.item.text}`)}
+            <li>
+              <label class="today-item motion">
+                <input
+                  type="checkbox"
+                  checked={false}
+                  aria-label={`Tick: ${entry.item.text}`}
+                  onchange={() => tick(entry.ref)}
+                />
+                <span class="what">{entry.item.text}</span>
+              </label>
+              {#if entry.item.taskId}
+                {@const title = taskTitle?.(entry.item.taskId)}
+                <button
+                  type="button"
+                  class="chip neutral task-chip motion"
+                  disabled={title === undefined || !onopentask}
+                  title={title === undefined ? 'That task is not on the desk' : 'Open the task'}
+                  onclick={() => entry.item.taskId && onopentask?.(entry.item.taskId)}
+                >
+                  <span class="trunc">{title ?? entry.item.taskId}</span>
+                </button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if weekError}
+        <p class="edit-error" role="alert">{weekError}</p>
+      {/if}
+      {#if weekMore > 0}
+        <button type="button" class="attention-line more-week" onclick={() => onopenweek?.()}>
+          <span class="what">
+            {weekToday.length === 0 ? 'Nothing for today. ' : ''}{weekMore} more this week
+          </span>
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      {/if}
+    </section>
+  {/if}
+{/snippet}
+
 <style>
+  /* Today's reminders are drawn like checklist items: they are things to tick, not tasks. */
+  .today-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .today-list li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+  }
+  .today-item {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: 5px var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    font-size: var(--fs-base);
+    line-height: 1.35;
+  }
+  .today-item:hover {
+    background: var(--surface-hover);
+  }
+  .today-item input {
+    margin: 2px 0 0;
+    accent-color: var(--done-fill);
+  }
+  .today-item .what {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .task-chip {
+    flex: none;
+    max-width: 120px;
+  }
+  .task-chip:hover:not(:disabled) {
+    color: var(--accent);
+  }
+  .task-chip:disabled {
+    cursor: default;
+  }
+  .more-week {
+    margin-top: 2px;
+    padding-top: var(--space-1);
+    padding-bottom: var(--space-1);
+  }
   .pane-scroll {
     gap: var(--space-4);
   }

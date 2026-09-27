@@ -68,6 +68,13 @@ describe('panelContent', () => {
     expect(content.lines).toBe(6);
   });
 
+  it('sizes the To-do view by its sections and items, and NOW by its Today block', () => {
+    const todo = panelContent({ ...base, surface: 'tasks', mode: 'todo', live: 30, weekItems: 6 });
+    expect(todo).toEqual({ detailOpen: false, blocks: 0, lines: 16 });
+    const now = panelContent({ ...base, working: 1, upNext: 0, todayLines: 4 });
+    expect(now.lines).toBe(6);
+  });
+
   it('stops counting when a task detail is open, because that always needs the room', () => {
     const content = panelContent({ ...base, detailOpen: true, working: 9 });
     expect(content).toEqual({ detailOpen: true, blocks: 0, lines: 0 });
