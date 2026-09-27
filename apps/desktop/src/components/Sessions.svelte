@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
-   * SESSIONS: every Claude Code session Ledge knows of, grouped by the task it worked on and
-   * newest first, each one a card that says what the session was rather than which UUID it had.
+   * SESSIONS, inside MEMORY: every Claude Code session Ledge knows of, grouped by the task it
+   * worked on and newest first, each one a card that says what the session was rather than
+   * which UUID it had.
    *
    * A card leads with the session's title, written by capture from the transcript, and falls
    * back to "Untitled session" when capture has not reached it. Under the title: the summary,

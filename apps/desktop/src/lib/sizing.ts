@@ -89,7 +89,7 @@ export interface PanelCounts {
 
 /**
  * What the panel is actually showing, as blocks and lines. Only the visible surface counts: a
- * hundred notes do not make the NOW surface taller, and the window is sized for what is in
+ * hundred notes do not make the ASSISTANT surface taller, and the window is sized for what is in
  * front of the person rather than for what the store happens to hold.
  */
 export function panelContent(counts: PanelCounts): PanelContent {

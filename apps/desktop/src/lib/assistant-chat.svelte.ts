@@ -53,6 +53,8 @@ export class AssistantChat {
   detail = $state('');
   chats = $state<ChatSummary[]>([]);
   model = $state<ModelChoice>('auto');
+  /** What is typed and not sent yet, kept here so it survives a switch to another tab. */
+  draft = $state('');
   /** A send is on its way and the engine has not said busy yet. */
   sending = $state(false);
   /** Why the last send was refused, shown under the input. */

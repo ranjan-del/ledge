@@ -100,7 +100,6 @@
   let phase = $state<'idle' | 'leaving' | 'chat'>(untrack(() => (chat.chatting ? 'chat' : 'idle')));
   let leaveTimer: ReturnType<typeof setTimeout> | undefined;
   let focused = $state(false);
-  let draft = $state('');
   let historyOpen = $state(false);
   let scroller = $state<HTMLElement | null>(null);
   let stick = true;
@@ -147,6 +146,8 @@
   });
 
   async function send(text: string): Promise<boolean> {
+    /* Whatever the person had scrolled to, their own question brings the view back down. */
+    stick = true;
     return chat.send(text);
   }
 
@@ -197,7 +198,7 @@
   {/if}
 
   {#if phase === 'chat'}
-    <div class="conversation" bind:this={scroller} onscroll={onScroll} aria-live="polite">
+    <div class="conversation" role="log" aria-label="Conversation" bind:this={scroller} onscroll={onScroll}>
       {#each chat.messages as message (message.id)}
         <ChatBubble
           {message}
@@ -303,13 +304,13 @@
 {#snippet composer(docked: boolean)}
   <Composer
     {docked}
-    bind:value={draft}
+    bind:value={chat.draft}
     running={chat.running}
     model={chat.model}
     onmodel={(m) => (chat.model = m)}
     onsend={send}
     onstop={() => chat.stop()}
-    autofocus={focused}
+    autofocus={docked || focused}
     focusKey={composerKey}
     onfocuschange={(f) => (focused = f)}
     placeholder={docked ? 'Reply, or ask something else' : undefined}
