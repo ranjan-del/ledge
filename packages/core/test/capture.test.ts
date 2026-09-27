@@ -120,7 +120,7 @@ describe('parseCaptureResult', () => {
   test('accepts the shape, fenced or bare, and trims a trailing period off the title', () => {
     const fenced = '```json\n' + JSON.stringify(ok) + '\n```';
     const parsed = parseCaptureResult(fenced, ['release-watch-banner']);
-    assert.ok(parsed.result, parsed.error);
+    assert.ok(parsed.result, parsed.error ?? 'no result');
     assert.equal(parsed.result.session.title, 'Wire the release banner');
     assert.equal(parsed.result.headline, 'Banner built, reload next');
     assert.equal(parsed.result.newTask, undefined);
