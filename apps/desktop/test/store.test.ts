@@ -165,7 +165,13 @@ describe('store', () => {
     expect(currentTasks().map((t) => t.id)).toEqual(['release-watch-banner']);
     expect(backlogTasks().map((t) => t.id)).toEqual(['optimistic-crud']);
     expect(currentTasks()[0].repo).toBe(`${HOME}/code/app`);
-    expect(disk.state.watchArgs?.paths).toEqual([TASKS_DIR, ARCHIVE_DIR, LEDGE_HOME]);
+    expect(disk.state.watchArgs?.paths).toEqual([
+      TASKS_DIR,
+      ARCHIVE_DIR,
+      LEDGE_HOME,
+      `${LEDGE_HOME}/sessions`,
+      `${LEDGE_HOME}/insights`,
+    ]);
     expect(disk.state.watchArgs?.opts).toMatchObject({ delayMs: 150 });
   });
 
@@ -606,5 +612,72 @@ describe('store', () => {
     const before = disk.files.get(TASK_A_FILE);
     await shiftStatus(currentTasks()[0], 'current');
     expect(disk.files.get(TASK_A_FILE)).toBe(before);
+  });
+
+  /* ---------------------------------------------------------------- sidecars */
+
+  const SESSIONS = `${LEDGE_HOME}/sessions`;
+  const INSIGHTS = `${LEDGE_HOME}/insights`;
+  const record = (id: string, started: string, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      version: 1,
+      id,
+      taskId: 'release-watch-banner',
+      started,
+      lastActivity: started,
+      filesChanged: [],
+      commits: [],
+      todosTicked: [],
+      todosAdded: [],
+      ...extra,
+    });
+
+  it('creates both sidecar folders at boot so they can be watched', () => {
+    expect(disk.dirs.has(SESSIONS)).toBe(true);
+    expect(disk.dirs.has(INSIGHTS)).toBe(true);
+  });
+
+  it('reads session records newest first and leaves out a file that is not one', async () => {
+    disk.files.set(`${SESSIONS}/old.json`, record('old', '2026-09-20T10:00:00+05:30'));
+    disk.files.set(`${SESSIONS}/new.json`, record('new', '2026-09-26T10:00:00+05:30'));
+    disk.files.set(`${SESSIONS}/bad.json`, '{ not json');
+    disk.files.set(`${SESSIONS}/new.json.tmp`, record('tmp', '2026-09-27T10:00:00+05:30'));
+    fire([SESSIONS]);
+    await settle();
+    expect(desk.sessionRecords.map((r) => r.id)).toEqual(['new', 'old']);
+  });
+
+  it('re-reads only the session file the watcher names, and drops one that was removed', async () => {
+    disk.files.set(`${SESSIONS}/a.json`, record('a', '2026-09-20T10:00:00+05:30'));
+    fire([`${SESSIONS}/a.json`]);
+    await settle();
+    expect(desk.sessionRecords.map((r) => r.title)).toEqual([undefined]);
+    disk.files.set(`${SESSIONS}/a.json`, record('a', '2026-09-20T10:00:00+05:30', { title: 'Fix it' }));
+    fire([`${SESSIONS}/a.json`]);
+    await settle();
+    expect(desk.sessionRecords.map((r) => r.title)).toEqual(['Fix it']);
+    disk.files.delete(`${SESSIONS}/a.json`);
+    fire([`${SESSIONS}/a.json`]);
+    await settle();
+    expect(desk.sessionRecords).toEqual([]);
+  });
+
+  it('keys insights by task id and treats an unparseable file as absent', async () => {
+    const insight = {
+      version: 1,
+      taskId: 'release-watch-banner',
+      headline: 'Banner built, poll next',
+      notes: {},
+      plan: {},
+      updatedAt: '2026-09-26T10:00:00+05:30',
+    };
+    disk.files.set(`${INSIGHTS}/release-watch-banner.json`, JSON.stringify(insight));
+    disk.files.set(`${INSIGHTS}/optimistic-crud.json`, 'nope');
+    fire([`${INSIGHTS}/release-watch-banner.json`, `${INSIGHTS}/optimistic-crud.json`]);
+    await settle();
+    expect(Object.keys(desk.insights)).toEqual(['release-watch-banner']);
+    expect(desk.insights['release-watch-banner']?.headline).toBe('Banner built, poll next');
+    /* A sidecar event never re-reads a task file. */
+    expect(readsOf(TASK_A_FILE)).toBe(1);
   });
 });
