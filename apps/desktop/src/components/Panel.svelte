@@ -39,7 +39,10 @@
     panelContent,
     type PanelCounts,
   } from '../lib/sizing.ts';
+  import { renderLedgeContext } from '../lib/ask.ts';
+  import { shellAskRunner } from '../lib/ask-runner.ts';
   import { provideInsights } from '../lib/insight-context.ts';
+  import { todayIso } from '../lib/time.ts';
   import { mergeTask } from '../lib/merge.ts';
   import { groupSessions, sessionCount } from '../lib/session-view.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
@@ -80,6 +83,7 @@
     type TaskView,
   } from '../lib/store.svelte.ts';
   import type { CardAction } from './TaskCard.svelte';
+  import AskLedge from './AskLedge.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Header from './Header.svelte';
   import Memory from './Memory.svelte';
@@ -98,6 +102,9 @@
   let pinned = $state(false);
   let showSettings = $state(false);
   let launch = $state<LaunchResult | null>(null);
+  /* Ask Ledge is open, and the question the palette handed it. */
+  let asking = $state(false);
+  let askInitial = $state('');
   /* Bumped by the add shortcut. Now passes it down; AddTask opens and focuses when it changes. */
   let addKey = $state(0);
   /* False for the first frame and for the 160 ms before the window hides, which is what
@@ -160,6 +167,20 @@
   /* Docked right, the sheet leaves to the right. Docked left, it leaves to the left. */
   const slide = $derived(desk.config.ui.edge === 'left' ? '-10px' : '10px');
   const mac = detectOs() === 'macos';
+  /* Ask Ledge runs Claude Code through /bin/sh, which Windows does not have. */
+  const canAsk = detectOs() !== 'windows';
+
+  /** The context block for one question, built from the desk at the moment it is asked. */
+  function askContext(): string {
+    return renderLedgeContext({
+      day: todayIso(),
+      tasks: desk.tasks,
+      repos: desk.lastScan ? desk.pending : undefined,
+      insights: desk.insights,
+      sessions: desk.sessionRecords,
+      now: new Date(),
+    });
+  }
   const modifier = mac ? '⌘' : 'Ctrl';
 
   function clockTime(iso: string): string {
@@ -267,6 +288,10 @@
     if (command.type === 'open-task') select(command.file);
     else if (command.type === 'surface') setSurface(command.surface);
     else if (command.type === 'rescan') void scanNow();
+    else if (command.type === 'ask') {
+      askInitial = command.question;
+      asking = true;
+    }
     else if (command.type === 'add-task') {
       showSettings = false;
       select(null);
@@ -534,6 +559,20 @@
       {modifier}
       onrun={runCommand}
       onclose={() => setSearching(false)}
+      ask={canAsk}
+    />
+  {/if}
+
+  {#if asking}
+    <AskLedge
+      runner={shellAskRunner}
+      context={askContext}
+      cwd={desk.ledgeHome || undefined}
+      initial={askInitial}
+      onclose={() => {
+        asking = false;
+        askInitial = '';
+      }}
     />
   {/if}
 
