@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ledge windows: read, write and watch the store under $HOME/.ledge, list folders under $HOME to find repositories, run git status, and launch a terminal, ask Claude Code about the desk (ledge commands only), and print a resume brief.",
+  "description": "Ledge windows: read, write and watch the store under $HOME/.ledge, list folders under $HOME to find repositories, run git status, and launch a terminal, ask Claude Code about the desk (ledge commands only), run the assistant as one long-lived Claude Code process over stdin and stdout, and print a resume brief.",
   "windows": [
     "button",
     "panel"
@@ -361,10 +361,29 @@
               "validator": "[\\s\\S]+"
             }
           ]
+        },
+        {
+          "name": "claude-agent",
+          "cmd": "/bin/sh",
+          "args": [
+            "-c",
+            "PATH=\"$HOME/.local/bin:$HOME/.claude/local:/opt/homebrew/bin:/usr/local/bin:$PATH\"; export PATH LEDGE_CAPTURE=1; command -v claude >/dev/null 2>&1 || exit 127; cd \"$HOME/.ledge\" 2>/dev/null || cd \"$HOME\"; sp=\"$2\"; if [ -r \"$HOME/.claude/identity.md\" ]; then sp=\"$sp\n\nWho the person is, from ~/.claude/identity.md:\n$(cat \"$HOME/.claude/identity.md\")\"; fi; exec claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio --permission-mode default --model \"$1\" --append-system-prompt \"$sp\" ${3:+--resume \"$3\"}",
+            "ledge-assistant",
+            {
+              "validator": "(haiku|sonnet|opus)"
+            },
+            {
+              "validator": "[\\s\\S]+"
+            },
+            {
+              "validator": "([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})?"
+            }
+          ]
         }
       ]
     },
     "shell:allow-kill",
+    "shell:allow-stdin-write",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"
