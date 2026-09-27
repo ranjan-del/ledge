@@ -29,8 +29,14 @@ export interface Flags {
   transcript?: string;
   /** With capture and track: the session's working directory, when it is not this one. */
   dir?: string;
-  /** With sessions: only the sessions attributed to this task. */
+  /** With sessions: only the sessions attributed to this task. With week add: the linked task. */
   task?: string;
+  /** With week add and week move: the day, `YYYY-MM-DD`, a word such as `today`, or `anytime`. */
+  day?: string;
+  /** With week: the ISO week to act on, `YYYY-Www`, instead of the current one. */
+  week?: string;
+  /** With week: act on next week instead of the current one. */
+  next: boolean;
 }
 
 /**
