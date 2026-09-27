@@ -14,12 +14,7 @@
    * reverse before the window is actually hidden: the hide is delayed by exactly as long as the
    * animation, and not at all for someone who asked for less motion.
    */
-  import {
-    collapseTilde,
-    memoryFor,
-    sessionsFor,
-    type Task as CoreTask,
-  } from '@ledge/core/pure';
+  import { collapseTilde, memoryFor, type Task as CoreTask } from '@ledge/core/pure';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-shell';
@@ -44,6 +39,12 @@
     panelContent,
     type PanelCounts,
   } from '../lib/sizing.ts';
+  import { renderLedgeContext } from '../lib/ask.ts';
+  import { shellAskRunner } from '../lib/ask-runner.ts';
+  import { provideInsights } from '../lib/insight-context.ts';
+  import { todayIso } from '../lib/time.ts';
+  import { mergeTask } from '../lib/merge.ts';
+  import { groupSessions, sessionCount } from '../lib/session-view.ts';
   import { detectOs, openInClaude, type LaunchResult } from '../lib/platform.ts';
   import {
     addTask,
@@ -56,12 +57,14 @@
     doneTasks,
     doneToday,
     errorText,
+    insightsFor,
     lastUpdated,
     markDone,
     parkTask,
     removeTask,
     reorderTasks,
     saveConfigFile,
+    saveTask,
     saveMarkdown,
     scanNow,
     shiftStatus,
@@ -80,6 +83,7 @@
     type TaskView,
   } from '../lib/store.svelte.ts';
   import type { CardAction } from './TaskCard.svelte';
+  import AskLedge from './AskLedge.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Header from './Header.svelte';
   import Memory from './Memory.svelte';
@@ -91,26 +95,40 @@
   import TaskDetail from './TaskDetail.svelte';
   import Tasks from './Tasks.svelte';
 
+  /* Every card's disclosure finds its task's insights through this, rather than through a prop
+     threaded down every list. */
+  provideInsights(insightsFor);
+
   let pinned = $state(false);
   let showSettings = $state(false);
   let launch = $state<LaunchResult | null>(null);
+  /* Ask Ledge is open, and the question the palette handed it. */
+  let asking = $state(false);
+  let askInitial = $state('');
   /* Bumped by the add shortcut. Now passes it down; AddTask opens and focuses when it changes. */
   let addKey = $state(0);
   /* False for the first frame and for the 160 ms before the window hides, which is what
      gives the sheet something to animate from and to. */
   let onScreen = $state(false);
 
+  /* A minute clock, so a session that went quiet stops showing as running without waiting for
+     a file to change. It only ticks while the panel is on screen. */
+  let clock = $state(Date.now());
   const count = $derived(counts());
+  const sessionGroups = $derived(groupSessions(desk.tasks, desk.sessionRecords, new Date(clock)));
+  const sessionTotal = $derived(sessionCount(sessionGroups));
+  const runningTotal = $derived(
+    sessionGroups.reduce((n, g) => n + g.items.filter((i) => i.running).length, 0),
+  );
   const tabs = $derived([
     { id: 'now', label: 'Now', count: count.now },
-    { id: 'sessions', label: 'Sessions', count: count.sessions },
+    { id: 'sessions', label: 'Sessions', count: sessionTotal },
     { id: 'tasks', label: 'Tasks', count: count.tasks },
     { id: 'memory', label: 'Memory', count: count.memory },
   ]);
   const selected = $derived(selectedTask());
   const working = $derived(workingTasks());
   const upNext = $derived(upNextTasks());
-  const sessions = $derived(sessionsFor(desk.tasks));
   const notes = $derived(memoryFor(desk.tasks));
   const summary = $derived(
     summaryParts({
@@ -130,7 +148,7 @@
     working: working.length,
     upNext: upNext.length,
     attention: attentionRepos().length,
-    sessions: sessions.length,
+    sessions: sessionTotal,
     notes: notes.length,
     live: currentTasks().length,
     done: doneCount(),
@@ -149,6 +167,20 @@
   /* Docked right, the sheet leaves to the right. Docked left, it leaves to the left. */
   const slide = $derived(desk.config.ui.edge === 'left' ? '-10px' : '10px');
   const mac = detectOs() === 'macos';
+  /* Ask Ledge runs Claude Code through /bin/sh, which Windows does not have. */
+  const canAsk = detectOs() !== 'windows';
+
+  /** The context block for one question, built from the desk at the moment it is asked. */
+  function askContext(): string {
+    return renderLedgeContext({
+      day: todayIso(),
+      tasks: desk.tasks,
+      repos: desk.lastScan ? desk.pending : undefined,
+      insights: desk.insights,
+      sessions: desk.sessionRecords,
+      now: new Date(),
+    });
+  }
   const modifier = mac ? '⌘' : 'Ctrl';
 
   function clockTime(iso: string): string {
@@ -159,14 +191,32 @@
     return desk.tasks.find((t) => t.id === id);
   }
 
-  async function resume(task: CoreTask, useResume: boolean) {
+  async function resume(task: CoreTask, useResume: boolean, sessionId?: string) {
     launch = null;
-    const result = await openInClaude(task, useResume);
+    const result = await openInClaude(task, useResume, { sessionId });
     if (!result.ok) launch = result;
+  }
+
+  async function resumeSession(task: CoreTask, sessionId: string) {
+    await resume(task, true, sessionId);
   }
 
   async function openFolder(task: CoreTask) {
     if (task.repo) await open(task.repo).catch(() => undefined);
+  }
+
+  /**
+   * Folds an auto-created task into one the person already has: the target is written first,
+   * and only once that landed is the source deleted, so a failed write loses nothing.
+   */
+  async function merge(source: CoreTask, target: CoreTask) {
+    try {
+      await saveTask(mergeTask(source, target));
+      await removeTask(source.id);
+      select(target.file);
+    } catch (e) {
+      desk.error = `Could not merge: ${errorText(e)}`;
+    }
   }
 
   /** Deletes the task and its file, then returns to the list. */
@@ -238,6 +288,10 @@
     if (command.type === 'open-task') select(command.file);
     else if (command.type === 'surface') setSurface(command.surface);
     else if (command.type === 'rescan') void scanNow();
+    else if (command.type === 'ask') {
+      askInitial = command.question;
+      asking = true;
+    }
     else if (command.type === 'add-task') {
       showSettings = false;
       select(null);
@@ -314,6 +368,13 @@
      focus, because it stays visible. */
   $effect(() => {
     if (desk.panelVisible || pinned) sizer.update(full);
+  });
+
+  $effect(() => {
+    if (!(desk.panelVisible || pinned)) return;
+    clock = Date.now();
+    const tick = setInterval(() => (clock = Date.now()), 60_000);
+    return () => clearInterval(tick);
   });
 
   onMount(() => {
@@ -405,6 +466,9 @@
         onresume={resume}
         onopenfolder={openFolder}
         ondelete={destroy}
+        insights={insightsFor(selected.id)}
+        mergeTargets={desk.tasks}
+        onmerge={(s, t) => void merge(s, t)}
       />
     </div>
   {:else}
@@ -453,10 +517,11 @@
       />
     {:else if desk.surface === 'sessions'}
       <Sessions
-        {sessions}
-        taskFor={taskById}
+        groups={sessionGroups}
+        now={clock}
+        awake={desk.panelVisible || pinned}
         onselect={(t) => select(t.file)}
-        onresume={(t) => void resume(t, true)}
+        onresume={(t, id) => void resumeSession(t, id)}
       />
     {:else if desk.surface === 'tasks'}
       <Tasks
@@ -478,7 +543,12 @@
         onshift={shift}
       />
     {:else}
-      <Memory entries={notes} taskFor={taskById} onselect={(t) => select(t.file)} />
+      <Memory
+        entries={notes}
+        taskFor={taskById}
+        onselect={(t) => select(t.file)}
+        {insightsFor}
+      />
     {/if}
   {/if}
 
@@ -489,6 +559,20 @@
       {modifier}
       onrun={runCommand}
       onclose={() => setSearching(false)}
+      ask={canAsk}
+    />
+  {/if}
+
+  {#if asking}
+    <AskLedge
+      runner={shellAskRunner}
+      context={askContext}
+      cwd={desk.ledgeHome || undefined}
+      initial={askInitial}
+      onclose={() => {
+        asking = false;
+        askInitial = '';
+      }}
     />
   {/if}
 
@@ -518,7 +602,9 @@
              them may still be waiting for its file to be moved. -->
         {today === undefined ? `${doneCount()} finished` : `${today} done today`}
       {:else if desk.surface === 'sessions'}
-        {count.sessions} linked {count.sessions === 1 ? 'session' : 'sessions'}
+        {sessionTotal} {sessionTotal === 1 ? 'session' : 'sessions'}{runningTotal > 0
+          ? `, ${runningTotal} running`
+          : ''}
       {:else if desk.surface === 'memory'}
         {count.memory} {count.memory === 1 ? 'note' : 'notes'}
       {:else}

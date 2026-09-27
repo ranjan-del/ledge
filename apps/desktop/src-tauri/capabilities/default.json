@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Ledge windows: read, write and watch the store under $HOME/.ledge, list folders under $HOME to find repositories, run git status, and launch a terminal.",
+  "description": "Ledge windows: read, write and watch the store under $HOME/.ledge, list folders under $HOME to find repositories, run git status, and launch a terminal, ask Claude Code about the desk (ledge commands only), and print a resume brief.",
   "windows": [
     "button",
     "panel"
@@ -332,9 +332,39 @@
             "ls-files",
             "-z"
           ]
+        },
+        {
+          "name": "ledge-brief",
+          "cmd": "/bin/sh",
+          "args": [
+            "-c",
+            "PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\"; export PATH LEDGE_CAPTURE=1; command -v ledge >/dev/null 2>&1 || exit 127; exec ledge brief \"$1\"",
+            "ledge-brief",
+            {
+              "validator": "[A-Za-z0-9][A-Za-z0-9._-]*"
+            }
+          ]
         }
       ]
     },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "claude-ask",
+          "cmd": "/bin/sh",
+          "args": [
+            "-c",
+            "PATH=\"$HOME/.local/bin:$HOME/.claude/local:/opt/homebrew/bin:/usr/local/bin:$PATH\"; export PATH LEDGE_CAPTURE=1; command -v claude >/dev/null 2>&1 || exit 127; printf '%s' \"$1\" | claude -p --model sonnet --setting-sources '' --strict-mcp-config --no-session-persistence --tools Bash --permission-mode dontAsk --allowedTools 'Bash(ledge:*)' --disallowedTools 'Bash(ledge delete:*)' 'Bash(git:*)' 'Bash(ls:*)' 'Bash(cat:*)' 'Bash(head:*)' 'Bash(tail:*)' 'Bash(find:*)' 'Bash(grep:*)' 'Bash(rg:*)' 'Bash(sed:*)' 'Bash(awk:*)' 'Bash(less:*)' 'Bash(more:*)' 'Bash(tree:*)' 'Bash(stat:*)' 'Bash(file:*)' 'Bash(wc:*)' 'Bash(sort:*)' 'Bash(uniq:*)' 'Bash(cut:*)' 'Bash(xargs:*)' 'Bash(echo:*)' 'Bash(printf:*)' 'Bash(pwd:*)' 'Bash(cd:*)' 'Bash(env:*)' 'Bash(printenv:*)' 'Bash(which:*)' 'Bash(whoami:*)' 'Bash(date:*)' 'Bash(du:*)' 'Bash(df:*)' 'Bash(open:*)' 'Bash(ps:*)' 'Bash(lsof:*)' 'Bash(curl:*)' 'Bash(wget:*)' 'Bash(node:*)' 'Bash(python:*)' 'Bash(python3:*)' 'Bash(npm:*)' 'Bash(npx:*)' --output-format stream-json --verbose --include-partial-messages",
+            "ledge-ask",
+            {
+              "validator": "[\\s\\S]+"
+            }
+          ]
+        }
+      ]
+    },
+    "shell:allow-kill",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"
