@@ -191,14 +191,14 @@
     return desk.tasks.find((t) => t.id === id);
   }
 
-  async function resume(task: CoreTask, useResume: boolean) {
+  async function resume(task: CoreTask, useResume: boolean, sessionId?: string) {
     launch = null;
-    const result = await openInClaude(task, useResume);
+    const result = await openInClaude(task, useResume, { sessionId });
     if (!result.ok) launch = result;
   }
 
-  async function resumeSession(task: CoreTask, _sessionId: string) {
-    await resume(task, true);
+  async function resumeSession(task: CoreTask, sessionId: string) {
+    await resume(task, true, sessionId);
   }
 
   async function openFolder(task: CoreTask) {
