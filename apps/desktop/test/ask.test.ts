@@ -10,11 +10,12 @@ import {
   renderLedgeContext,
   type AskEvent,
 } from '../src/lib/ask.ts';
-import { ASK_PROGRAM, ASK_SCRIPT, askArgs, type AskOutcome, type AskRunner } from '../src/lib/ask-runner.ts';
+import { ASK_DENIED, ASK_PROGRAM, ASK_SCRIPT, askArgs, type AskOutcome, type AskRunner } from '../src/lib/ask-runner.ts';
 import { chat, clearChat } from '../src/lib/ask-state.svelte.ts';
 import { buildPalette } from '../src/lib/palette.ts';
 import capsText from '../src-tauri/capabilities/default.json?raw';
 import { DAY, repoStatus, taskA, taskB, taskC } from './fixtures.ts';
+import { parseWeek } from '../src/lib/week.ts';
 
 vi.mock('@tauri-apps/plugin-shell', () => ({ Command: { create: vi.fn() } }));
 
@@ -124,6 +125,44 @@ describe('the prompt and its context', () => {
     expect(prompt.trimEnd().endsWith('What next?')).toBe(true);
     expect(prompt).toContain('Never delete a task');
     expect(prompt).not.toMatch(/[–—]/);
+  });
+});
+
+describe('the week in Ask Ledge', () => {
+  const base = { day: DAY, tasks: [taskA()], insights: {}, sessions: [], now: new Date(DAY) };
+  const week = parseWeek(
+    '---\nweek: 2026-W38\n---\n\n## Anytime\n\n- [ ] Renew the domain\n\n## Tue 2026-09-15\n\n- [x] Call the vendor {task: release-watch-banner}\n',
+    '2026-W38',
+  );
+
+  it("quotes this week's items numbered as ledge week prints them", () => {
+    const context = renderLedgeContext({ ...base, week });
+    expect(context).toContain("=== THIS WEEK'S TO-DO, 2026-W38");
+    expect(context).toContain('1. [ ] anytime: Renew the domain');
+    expect(context).toContain('2. [x] Tue 2026-09-15: Call the vendor (task release-watch-banner)');
+    expect(context.indexOf('2026-W38')).toBeLessThan(context.indexOf('=== END ==='));
+  });
+
+  it('says so when the week is empty, and says nothing when no week is given', () => {
+    const empty = renderLedgeContext({ ...base, week: parseWeek('', '2026-W38') });
+    expect(empty).toContain('(nothing yet)');
+    expect(renderLedgeContext(base)).not.toContain('TO-DO');
+  });
+
+  it('tells the model to use ledge week for reminders, and ticks by number after --json', () => {
+    const prompt = buildLedgePrompt('Remind me to call the bank on Friday', 'ctx');
+    expect(prompt).toContain('ledge week add "<text>" --day <day>');
+    expect(prompt).toContain('--task <id>');
+    expect(prompt).toContain('ledge week --json');
+    expect(prompt).toContain('ledge week tick <n>');
+    expect(prompt).not.toMatch(/[\u2013\u2014]/);
+  });
+
+  it('is a command the run may use: allowed as ledge, and denied by no entry', () => {
+    expect(ASK_SCRIPT).toContain("--allowedTools 'Bash(ledge:*)'");
+    const denied = ASK_DENIED.filter((c) => 'ledge week add x'.startsWith(`${c} `) || c === 'ledge week');
+    expect(denied).toEqual([]);
+    expect(capsText).not.toContain('Bash(ledge week');
   });
 });
 

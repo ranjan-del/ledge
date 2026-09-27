@@ -41,6 +41,17 @@ import {
 import { basename, expandTilde, isTaskFile, join, ledgeHomeFor } from './paths.ts';
 import { discoverRepos, scanRepoList } from './scan.ts';
 import { nowIso, todayIso } from './time.ts';
+import { isoWeekOf, parseWeek, serializeWeek, type WeekFile } from './week.ts';
+import {
+  addItem,
+  emptyWeek,
+  moveItem,
+  removeItem,
+  updateItem,
+  type WeekItemPatch,
+  type WeekRef,
+  type WeekSlot,
+} from './week-view.ts';
 
 export const WATCH_DEBOUNCE_MS = 150;
 
@@ -58,6 +69,24 @@ export type Surface = 'now' | 'sessions' | 'tasks' | 'memory';
  * `archive/`, a folder that only grows, so it is never parsed at boot.
  */
 export type TaskView = 'live' | 'done' | 'backlog' | 'pending';
+
+/**
+ * The two halves of TASKS: the task lists, and the weekly to-do. The to-do is a list of
+ * reminders for the week, not steps of a task, so it sits beside the lists rather than in them.
+ */
+export type TaskMode = 'tasks' | 'todo';
+
+/** Where the viewer's last choice of Tasks or To-do is kept. Per viewer, so not in config.json. */
+export const TASK_MODE_KEY = 'ledge.tasks.mode';
+
+/** The remembered mode, or Tasks when there is none or storage cannot be read. */
+export function rememberedTaskMode(): TaskMode {
+  try {
+    return globalThis.localStorage?.getItem(TASK_MODE_KEY) === 'todo' ? 'todo' : 'tasks';
+  } catch {
+    return 'tasks';
+  }
+}
 
 export interface BrokenTask {
   file: string;
@@ -81,6 +110,14 @@ export interface Desk {
   sessionsDir: string;
   /** `insights/`: AI titles and summaries per task, written by `ledge capture` and `summarise`. */
   insightsDir: string;
+  /** `weeks/`: one weekly to-do file per ISO week, `2026-W39.md`. */
+  weeksDir: string;
+  /** Week files read so far, keyed by week. A week that is not here has not been read yet. */
+  weeks: Record<string, WeekFile>;
+  /** The week the To-do view is showing. Starts on this week. */
+  week: string;
+  /** Tasks or To-do, inside the TASKS surface. */
+  taskMode: TaskMode;
   config: Config;
   tasks: Task[];
   broken: BrokenTask[];
@@ -116,6 +153,10 @@ export const desk: Desk = $state({
   cachePath: '',
   sessionsDir: '',
   insightsDir: '',
+  weeksDir: '',
+  weeks: {},
+  week: isoWeekOf(todayIso()),
+  taskMode: rememberedTaskMode(),
   config: defaultConfig(),
   tasks: [],
   broken: [],
@@ -356,6 +397,33 @@ export function setView(view: TaskView): void {
   desk.surface = 'tasks';
   desk.selectedFile = null;
   if (view === 'done') void loadArchive();
+}
+
+/**
+ * Switches TASKS between its task lists and the weekly to-do, and remembers the choice for this
+ * viewer. Storage that refuses (a private window, a blocked origin) only costs the memory.
+ */
+export function setTaskMode(mode: TaskMode): void {
+  desk.taskMode = mode;
+  desk.surface = 'tasks';
+  desk.selectedFile = null;
+  try {
+    globalThis.localStorage?.setItem(TASK_MODE_KEY, mode);
+  } catch {
+    /* not remembered, still switched */
+  }
+}
+
+/** Opens the To-do view on a week, this week when none is named. */
+export function openWeek(week: string = isoWeekOf(todayIso())): void {
+  setTaskMode('todo');
+  browseWeek(week);
+}
+
+/** Shows another week in the To-do view, reading its file the first time. */
+export function browseWeek(week: string): void {
+  desk.week = week;
+  if (!(week in desk.weeks)) void loadWeek(week);
 }
 
 /** Opens or closes the header search. Closing it never changes which surface you are on. */
@@ -739,6 +807,121 @@ export async function removeTask(id: string): Promise<void> {
   forgetTask(task.file);
 }
 
+/* ------------------------------------------------------------------ weeks */
+
+const WEEK_FILE = /^\d{4}-W\d{2}\.md$/;
+
+/** The file a week lives in. */
+export function weekPath(week: string): string {
+  return join(desk.weeksDir, `${week}.md`);
+}
+
+/** A week as the panel knows it: what was read, or an empty week when it has not been. */
+export function weekFor(week: string): WeekFile {
+  return desk.weeks[week] ?? emptyWeek(week);
+}
+
+/**
+ * Reads one week file. A missing file is an empty week, as the contract says. A file that
+ * cannot be read is an empty week too, and says so in the log: the to-do is a reminder list,
+ * and it must never be the reason the panel does not open. The parser itself never refuses,
+ * it keeps whatever it does not understand.
+ */
+async function readWeek(week: string): Promise<WeekFile> {
+  const file = weekPath(week);
+  if (desk.weeksDir === '' || !(await pathExists(file))) return emptyWeek(week);
+  try {
+    return parseWeek(await readText(file), week);
+  } catch (e) {
+    report('warn', `week: could not read ${file}: ${errorText(e)}`);
+    return emptyWeek(week);
+  }
+}
+
+/** Reads a week onto the desk, replacing whatever copy was there. */
+export async function loadWeek(week: string): Promise<void> {
+  const read = await readWeek(week);
+  desk.weeks = { ...desk.weeks, [week]: read };
+}
+
+/** Re-reads every week the desk holds, and this week whether or not it was held. */
+async function reloadWeeks(): Promise<void> {
+  const weeks = new Set([...Object.keys(desk.weeks), isoWeekOf(todayIso()), desk.week]);
+  for (const week of weeks) await loadWeek(week);
+}
+
+let tmpCount = 0;
+
+/**
+ * Writes a week file the way the contract asks: to `<file>.<tag>.tmp` first, then a rename over
+ * the real name, so a reader never sees half a file. A WebView has no process id, so the tag is
+ * the time and a counter, which is just as unique for one writer. The watcher sees the `.tmp`
+ * name go by and ignores it, since it is not a week file.
+ */
+async function writeWeekFile(file: string, text: string): Promise<void> {
+  tmpCount += 1;
+  const tmp = `${file}.${Date.now()}-${tmpCount}.tmp`;
+  await writeText(tmp, text);
+  try {
+    await moveFile(tmp, file);
+  } catch (e) {
+    await removeFile(tmp).catch(() => {});
+    throw e;
+  }
+}
+
+let weekWrites: Promise<unknown> = Promise.resolve();
+
+/**
+ * The one door every to-do edit goes through. It reads the file fresh rather than trusting the
+ * copy on the desk, because `ledge week` in a terminal or a Claude session may have written it a
+ * moment ago; applies the edit; stamps `updated`; and writes through `serializeWeek`. The desk
+ * takes the new copy first so a tick shows at once, and gets the old one back if the write is
+ * refused. Edits run one after another, so two quick ticks cannot each undo the other.
+ */
+export function editWeek(week: string, edit: (w: WeekFile) => WeekFile): Promise<WeekFile> {
+  const run = weekWrites.then(async () => {
+    if (desk.weeksDir === '') throw new Error('The weeks folder is not known yet.');
+    const before = desk.weeks[week];
+    const next = { ...edit(await readWeek(week)), updated: nowIso() };
+    desk.weeks = { ...desk.weeks, [week]: next };
+    try {
+      await ensureDir(desk.weeksDir);
+      await writeWeekFile(weekPath(week), serializeWeek(next));
+    } catch (e) {
+      const restored = { ...desk.weeks };
+      if (before) restored[week] = before;
+      else delete restored[week];
+      desk.weeks = restored;
+      throw e;
+    }
+    return next;
+  });
+  weekWrites = run.catch(() => {});
+  return run;
+}
+
+export function addWeekItem(
+  week: string,
+  slot: WeekSlot,
+  text: string,
+  taskId?: string,
+): Promise<WeekFile> {
+  return editWeek(week, (w) => addItem(w, slot, text, taskId));
+}
+
+export function updateWeekItem(week: string, ref: WeekRef, patch: WeekItemPatch): Promise<WeekFile> {
+  return editWeek(week, (w) => updateItem(w, ref, patch));
+}
+
+export function moveWeekItem(week: string, ref: WeekRef, to: WeekSlot): Promise<WeekFile> {
+  return editWeek(week, (w) => moveItem(w, ref, to));
+}
+
+export function removeWeekItem(week: string, ref: WeekRef): Promise<WeekFile> {
+  return editWeek(week, (w) => removeItem(w, ref));
+}
+
 /* ------------------------------------------------------------------ sidecars */
 
 /** True for `<dir>/<name>.json`, not hidden and not a `.tmp` from an atomic write. */
@@ -840,6 +1023,8 @@ export async function applyChanges(paths: string[]): Promise<void> {
   let archiveTouched = false;
   let allSessions = false;
   let allInsights = false;
+  let allWeeks = false;
+  const weekFiles = new Set<string>();
   const files = new Set<string>();
   const sessionFiles = new Set<string>();
   const insightFiles = new Set<string>();
@@ -848,6 +1033,11 @@ export async function applyChanges(paths: string[]): Promise<void> {
     else if (isSidecar(p, desk.sessionsDir)) sessionFiles.add(p);
     else if (desk.insightsDir !== '' && p === desk.insightsDir) allInsights = true;
     else if (isSidecar(p, desk.insightsDir)) insightFiles.add(p);
+    else if (desk.weeksDir !== '' && p === desk.weeksDir) allWeeks = true;
+    else if (desk.weeksDir !== '' && p.startsWith(desk.weeksDir + '/')) {
+      const name = p.slice(desk.weeksDir.length + 1);
+      if (WEEK_FILE.test(name)) weekFiles.add(name.slice(0, -3));
+    }
     else if (basename(p) === 'config.json') reloadConfig = true;
     else if (p === desk.tasksDir) reloadAll = true;
     else if (p.startsWith(desk.tasksDir + '/') && isTaskFile(p)) files.add(p);
@@ -861,6 +1051,8 @@ export async function applyChanges(paths: string[]): Promise<void> {
   else for (const file of sessionFiles) await reloadSessionRecord(file);
   if (allInsights) await reloadInsights();
   else for (const file of insightFiles) await reloadInsight(file);
+  if (allWeeks) await reloadWeeks();
+  else for (const week of weekFiles) await loadWeek(week);
 }
 
 async function startWatching(): Promise<void> {
@@ -868,7 +1060,7 @@ async function startWatching(): Promise<void> {
   /* A sidecar folder that could not be created is left out rather than failing the watch
      on the tasks it would otherwise have taken down with it. */
   const sidecars: string[] = [];
-  for (const dir of [desk.sessionsDir, desk.insightsDir]) {
+  for (const dir of [desk.sessionsDir, desk.insightsDir, desk.weeksDir]) {
     if (await pathExists(dir)) sidecars.push(dir);
   }
   try {
@@ -956,15 +1148,18 @@ export async function boot(homeOverride?: string): Promise<void> {
   desk.cachePath = join(desk.ledgeHome, '.scan-cache.json');
   desk.sessionsDir = join(desk.ledgeHome, 'sessions');
   desk.insightsDir = join(desk.ledgeHome, 'insights');
+  desk.weeksDir = join(desk.ledgeHome, 'weeks');
+  desk.week = isoWeekOf(todayIso());
 
   await ensureDir(desk.tasksDir);
   /* The archive is created here rather than on the first `ledge done`, because the watcher
      cannot subscribe to a folder that does not exist yet. */
   await ensureDir(desk.archiveDir);
-  /* The two sidecar folders are made here for the same reason: capture creates them on its
-     first write, and a folder that does not exist yet cannot be watched. A refusal must not
-     stop the panel booting; the sidecars are an addition to the tasks, not a dependency. */
-  for (const dir of [desk.sessionsDir, desk.insightsDir]) {
+  /* The two sidecar folders and `weeks/` are made here for the same reason: capture and
+     `ledge week` create them on their first write, and a folder that does not exist yet cannot
+     be watched. A refusal must not stop the panel booting; they are additions to the tasks,
+     not dependencies. */
+  for (const dir of [desk.sessionsDir, desk.insightsDir, desk.weeksDir]) {
     try {
       await ensureDir(dir);
     } catch (e) {
@@ -975,6 +1170,7 @@ export async function boot(homeOverride?: string): Promise<void> {
   await reloadTasks();
   await reloadSessionRecords();
   await reloadInsights();
+  await reloadWeeks();
   await loadScanCache();
   await startWatching();
   desk.ready = true;

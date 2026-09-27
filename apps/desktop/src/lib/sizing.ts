@@ -73,6 +73,12 @@ export interface PanelCounts {
   done: number;
   backlog: number;
   pending: number;
+  /** Tasks or To-do inside TASKS. Absent means Tasks. */
+  mode?: 'tasks' | 'todo';
+  /** Items in the week the To-do view is showing. */
+  weekItems?: number;
+  /** Lines the Today block adds to NOW: its label, today's open items, the "more" line. */
+  todayLines?: number;
 }
 
 /**
@@ -87,7 +93,7 @@ export function panelContent(counts: PanelCounts): PanelContent {
       detailOpen: false,
       /* The greeting and the add row are chrome on this surface: both are always there. */
       blocks: counts.working,
-      lines: counts.upNext + (counts.attention > 0 ? 1 : 0) + 2,
+      lines: counts.upNext + (counts.attention > 0 ? 1 : 0) + 2 + (counts.todayLines ?? 0),
     };
   }
   if (counts.surface === 'sessions') {
@@ -95,6 +101,10 @@ export function panelContent(counts: PanelCounts): PanelContent {
   }
   if (counts.surface === 'memory') {
     return { detailOpen: false, blocks: counts.notes, lines: 1 };
+  }
+  if (counts.mode === 'todo') {
+    /* Both switches, the week header, eight section headings, and one line per item. */
+    return { detailOpen: false, blocks: 0, lines: 10 + (counts.weekItems ?? 0) };
   }
   const rows =
     counts.view === 'done'

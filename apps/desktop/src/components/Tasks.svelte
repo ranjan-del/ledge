@@ -18,8 +18,14 @@
    * file, so the card asks before it happens rather than doing it on release. Pending is not a
    * status at all and cannot be dropped into, and this is where that refusal is worded, because
    * this is the component that knows which list is which.
+   *
+   * Above all four sits one more switch, `Tasks | To-do`. The to-do is the week's reminders
+   * rather than a list of tasks, so it is not a fifth pill beside Live and Done: it is the
+   * other half of the surface, and the pills belong to the Tasks half only. The panel hands the
+   * to-do view in as a snippet, so this component stays about tasks.
    */
   import type { RepoStatus, Task } from '@ledge/core/pure';
+  import type { Snippet } from 'svelte';
   import {
     askShift,
     drag,
@@ -27,7 +33,7 @@
     viewStatus,
     type ShiftTo,
   } from '../lib/drag.svelte.ts';
-  import type { NewTask, TaskView } from '../lib/store.svelte.ts';
+  import type { NewTask, TaskMode, TaskView } from '../lib/store.svelte.ts';
   import { todayIso } from '../lib/time.ts';
   import AddTask from './AddTask.svelte';
   import DoneList from './DoneList.svelte';
@@ -37,6 +43,11 @@
 
   interface Props {
     view: TaskView;
+    /** Tasks or To-do. Without `onmode` there is no switch, and this is the task lists only. */
+    mode?: TaskMode;
+    onmode?: (mode: TaskMode) => void;
+    /** The To-do view, drawn when `mode` is `todo`. */
+    todo?: Snippet;
     /** Current tasks in priority order. */
     live: Task[];
     /** Parked tasks, most recently updated first. */
@@ -74,6 +85,9 @@
 
   let {
     view,
+    mode = 'tasks',
+    onmode,
+    todo,
     live,
     backlog,
     done,
@@ -91,6 +105,12 @@
     onreorder,
     onshift,
   }: Props = $props();
+
+  const modes: ViewOption[] = [
+    { id: 'tasks', label: 'Tasks' },
+    { id: 'todo', label: 'To-do' },
+  ];
+  const showTodo = $derived(onmode !== undefined && mode === 'todo');
 
   const options = $derived<ViewOption[]>([
     { id: 'live', label: 'Live', count: live.length },
@@ -123,17 +143,30 @@
 </script>
 
 <div class="views">
-  <ViewSwitch
-    {options}
-    active={view}
-    onchange={(id) => onview(id as TaskView)}
-    dragFile={drag.file}
-    refusalFor={onshift ? refusalFor : undefined}
-    ondropview={dropOnView}
-  />
+  {#if onmode}
+    <ViewSwitch
+      options={modes}
+      active={mode}
+      variant="segmented"
+      label="Tasks or to-do"
+      onchange={(id) => onmode?.(id as TaskMode)}
+    />
+  {/if}
+  {#if !showTodo}
+    <ViewSwitch
+      {options}
+      active={view}
+      onchange={(id) => onview(id as TaskView)}
+      dragFile={drag.file}
+      refusalFor={onshift ? refusalFor : undefined}
+      ondropview={dropOnView}
+    />
+  {/if}
 </div>
 
-{#if view === 'done'}
+{#if showTodo}
+  {@render todo?.()}
+{:else if view === 'done'}
   <DoneList tasks={done} {day} loading={archiveLoading} />
 {:else if view === 'pending'}
   <div class="pane">
@@ -207,6 +240,9 @@
      row: it is its own line, and the eye stops on it once. */
   .views {
     flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
     padding: 0 var(--space-3) var(--space-2);
   }
 </style>

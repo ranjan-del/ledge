@@ -3,7 +3,8 @@
   export interface ViewOption {
     id: string;
     label: string;
-    count: number;
+    /** Left out, the pill is a word on its own. */
+    count?: number;
   }
 </script>
 
@@ -30,6 +31,13 @@
   interface Props {
     options: ViewOption[];
     active: string;
+    /** Accessible name for the group. */
+    label?: string;
+    /**
+     * `segmented` draws the pills on a sunken track, for a switch that ranks above the pills
+     * under it: TASKS uses it for Tasks and To-do, with Live, Done, Backlog and Pending below.
+     */
+    variant?: 'pills' | 'segmented';
     onchange: (id: string) => void;
     /**
      * A drag is in flight and this is the file being dragged, '' when none is. It is what turns
@@ -43,7 +51,16 @@
     ondropview?: (view: string) => void;
   }
 
-  let { options, active, onchange, dragFile = '', refusalFor, ondropview }: Props = $props();
+  let {
+    options,
+    active,
+    label = 'Task view',
+    variant = 'pills',
+    onchange,
+    dragFile = '',
+    refusalFor,
+    ondropview,
+  }: Props = $props();
 
   const dropping = $derived(dragFile !== '' && refusalFor !== undefined);
   /** The pill the pointer is over mid-drag, so it can show whether it will take the drop. */
@@ -82,7 +99,7 @@
 </script>
 
 <div class="wrap">
-  <div class="views" role="group" aria-label="Task view">
+  <div class="views" class:segmented={variant === 'segmented'} role="group" aria-label={label}>
     {#each options as option (option.id)}
       <button
         type="button"
@@ -99,7 +116,9 @@
         }}
       >
         {option.label}
-        <span class="count" aria-label="{option.count} items">{option.count}</span>
+        {#if option.count !== undefined}
+          <span class="count" aria-label="{option.count} items">{option.count}</span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -118,6 +137,22 @@
     display: flex;
     align-items: center;
     gap: var(--space-1);
+  }
+  /* The higher-ranked switch: a sunken track the width of its words, a raised pill on it. */
+  .views.segmented {
+    align-self: flex-start;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--control);
+  }
+  .segmented .view {
+    border-radius: calc(var(--radius-sm) - 1px);
+    color: var(--text-muted);
+  }
+  .segmented .view[aria-pressed="true"] {
+    background: var(--control-active);
+    box-shadow: var(--shadow-card);
   }
   .view {
     display: inline-flex;
