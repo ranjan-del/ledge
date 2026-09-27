@@ -1,6 +1,6 @@
 {
   "name": "ledge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ledge tasks from Claude Code: /ledge start, park, done, todo, plan, note, when.",
   "author": {
     "name": "Ranjan G",

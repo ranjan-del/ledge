@@ -9,13 +9,28 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 | Version | Phase | Contents |
 |---|---|---|
 | v0.1.0 | 0 | `@ledge/core`, the `ledge` CLI, the Claude Code plugin, tests, docs |
-| v0.2.0 | 1 | Desktop app on macOS: button, panel, three tabs, detail, file watch, git scan |
+| v0.2.0 | 1 | Desktop app on macOS, background capture, weekly to-do, the Assistant tab |
 | v0.3.0 | 2 | Open and Resume in Claude, Windows and Linux builds, installers on GitHub Releases |
 | v0.4.0 | 3 | Optional PR status and calendar connectors |
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-27
+
 ### Added
+
+- The Assistant tab, from the assistant tab contract. The panel's tabs are now Assistant, Tasks
+  and Memory. Assistant is a chat with one warm Claude Code process behind it, so a question does
+  not wait for a start-up. Each turn is routed to Haiku, Sonnet or Opus by a local heuristic, or
+  by the model picker. It is a full agent: reads and Ledge edits run at once, and deletes, access
+  grants, pushes, deploys and messages to other people wait on an inline Approve or Cancel card.
+  Chats are kept in `~/.ledge/chats/` with New chat and a searchable History. While idle it shows
+  the recent tasks, today's to-dos and the Pending line that used to be on Now.
+- Memory has a Notes and Sessions switch; the Sessions tab moved there unchanged.
+- The To-do week header has a calendar: a month grid with a dot on days that have items. Clicking
+  a day shows its week and highlights that day.
+- `ledge summarise` prints progress on stderr, one line per task and per batch, and finishes a
+  long task in one run. `--quiet` turns the progress off.
 
 - A weekly to-do list, from the weekly to-do contract. One Markdown file per ISO week in
   `$LEDGE_HOME/weeks/<YYYY>-W<ww>.md`, items under `## Anytime` or a `## <Ddd> <YYYY-MM-DD>`
@@ -89,6 +104,10 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
   the store is empty. The width does not change.
 
 ### Fixed
+
+- CI failed on Linux and Windows since 17 Sep because the lockfile held only the darwin rolldown
+  and esbuild bindings. It is regenerated with every platform.
+- The panel could not read or write `~/.ledge/.news.json`; a dotfile needs its own scope entry.
 
 - The button needed two clicks. macOS spends the first click on an inactive application's window
   activating it, and Ledge is deliberately an accessory application, so every click was being

@@ -1,7 +1,7 @@
 {
   "name": "ledge-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ledge desktop: a floating button and a glass panel showing Current, Backlog and Pending work from plain Markdown task files.",
   "license": "MIT",
   "type": "module",
