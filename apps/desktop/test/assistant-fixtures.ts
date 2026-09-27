@@ -4,6 +4,41 @@
  * --include-partial-messages --permission-prompt-tool stdio`. The shapes (field names and
  * nesting) were copied from a live probe; the ids, text and numbers are made up.
  */
+import type { HistoryFs } from '../src/lib/assistant/history.ts';
+
+/** An in-memory file system for chat history, recording each write, rename and remove. */
+export function memoryFs() {
+  const files = new Map<string, string>();
+  const ops: string[] = [];
+  const fs: HistoryFs = {
+    async readText(p) {
+      const t = files.get(p);
+      if (t === undefined) throw new Error(`ENOENT ${p}`);
+      return t;
+    },
+    async writeText(p, t) {
+      ops.push(`write ${p}`);
+      files.set(p, t);
+    },
+    async rename(a, b) {
+      ops.push(`rename ${a} ${b}`);
+      const t = files.get(a);
+      if (t === undefined) throw new Error('ENOENT');
+      files.set(b, t);
+      files.delete(a);
+    },
+    async remove(p) {
+      ops.push(`remove ${p}`);
+      files.delete(p);
+    },
+    async list(dir) {
+      return [...files.keys()].filter((k) => k.startsWith(`${dir}/`)).map((k) => k.slice(dir.length + 1));
+    },
+    async ensureDir() {},
+  };
+  return { fs, files, ops };
+}
+
 export const SESSION = '11111111-2222-4333-8444-555555555555';
 
 const j = (o: unknown) => JSON.stringify(o);
