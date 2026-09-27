@@ -64,3 +64,26 @@ describe('Memory, with notes', () => {
     expect(onselect).toHaveBeenCalledWith(expect.objectContaining({ id: 'version-file-rollout' }));
   });
 });
+
+describe('Memory, the Notes | Sessions switch', () => {
+  it('has no switch unless the panel wires one', () => {
+    render(Memory, { props: { ...base, entries } });
+    expect(screen.queryByRole('group', { name: 'Notes or sessions' })).toBeNull();
+  });
+
+  it('shows the notes or the Sessions view it was handed, and reports the choice', async () => {
+    const onmode = vi.fn();
+    const { rerender, container } = render(Memory, {
+      props: { ...base, entries, mode: 'notes', onmode, sessionCount: 4 },
+    });
+    const sw = screen.getByRole('group', { name: 'Notes or sessions' });
+    expect(sw.textContent).toContain('Notes');
+    expect(sw.textContent).toContain('4');
+    expect(container.querySelector('.note-card')).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: /Sessions/ }));
+    expect(onmode).toHaveBeenCalledWith('sessions');
+    await rerender({ ...base, entries, mode: 'sessions', onmode, sessionCount: 4 });
+    expect(container.querySelector('.note-card')).toBeNull();
+    expect(screen.getByRole('button', { name: /Sessions/ }).getAttribute('aria-pressed')).toBe('true');
+  });
+});

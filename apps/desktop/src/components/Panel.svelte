@@ -1,10 +1,10 @@
 <script lang="ts">
   /**
-   * The glass sheet, and the only component that knows about the store. It owns the four
+   * The glass sheet, and the only component that knows about the store. It owns the three
    * surfaces, the chrome around them and every action a surface can trigger, so the surfaces
    * themselves take plain data and callbacks and can be rendered in a test without a filesystem.
    *
-   * The shape is fixed: a header that never scrolls, the four-surface tab strip, then exactly
+   * The shape is fixed: a header that never scrolls, the three-surface tab strip, then exactly
    * one region that scrolls, then a footer. Parse warnings and errors sit under the tabs rather
    * than inside a list, so they are visible whichever surface you are on. Settings, a task
    * detail and the search each take the whole scrolling region rather than floating over it,
@@ -18,8 +18,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-shell';
-  import { onMount } from 'svelte';
-  import { personName, summaryParts } from '../lib/derive.ts';
+  import { onMount, untrack } from 'svelte';
+  import { personName, recentByActivity, summaryParts } from '../lib/derive.ts';
   import {
     dismiss as dismissNews,
     dismissAll as dismissAllNews,
@@ -39,8 +39,8 @@
     panelContent,
     type PanelCounts,
   } from '../lib/sizing.ts';
-  import { renderLedgeContext } from '../lib/ask.ts';
-  import { shellAskRunner } from '../lib/ask-runner.ts';
+  import { getAssistantEngine } from '../lib/assistant/index.ts';
+  import { AssistantChat } from '../lib/assistant-chat.svelte.ts';
   import { provideInsights } from '../lib/insight-context.ts';
   import { todayIso } from '../lib/time.ts';
   import { isoWeekOf } from '@ledge/core/pure';
@@ -79,6 +79,7 @@
     select,
     selectedTask,
     setPanelVisible,
+    setMemoryMode,
     setSearching,
     setSurface,
     setTaskMode,
@@ -94,12 +95,11 @@
     type TaskView,
   } from '../lib/store.svelte.ts';
   import type { CardAction } from './TaskCard.svelte';
-  import AskLedge from './AskLedge.svelte';
+  import Assistant from './Assistant.svelte';
   import CommandPalette from './CommandPalette.svelte';
   import Header from './Header.svelte';
   import Memory from './Memory.svelte';
   import Notifications from './Notifications.svelte';
-  import Now from './Now.svelte';
   import Sessions from './Sessions.svelte';
   import Settings from './Settings.svelte';
   import Tabs from './Tabs.svelte';
@@ -114,10 +114,12 @@
   let pinned = $state(false);
   let showSettings = $state(false);
   let launch = $state<LaunchResult | null>(null);
-  /* Ask Ledge is open, and the question the palette handed it. */
-  let asking = $state(false);
-  let askInitial = $state('');
-  /* Bumped by the add shortcut. Now passes it down; AddTask opens and focuses when it changes. */
+  /* The assistant's chat, over the app's one engine. The tab draws it; the palette's Ask row
+     sends through it. */
+  const assistant = new AssistantChat(getAssistantEngine());
+  /* Bumped by the palette's Ask row with nothing typed: the Assistant focuses its field. */
+  let askKey = $state(0);
+  /* Bumped by the add shortcut. Tasks passes it down; AddTask opens and focuses when it changes. */
   let addKey = $state(0);
   /* False for the first frame and for the 160 ms before the window hides, which is what
      gives the sheet something to animate from and to. */
@@ -132,12 +134,13 @@
   const runningTotal = $derived(
     sessionGroups.reduce((n, g) => n + g.items.filter((i) => i.running).length, 0),
   );
+  /* Assistant has no count: a chat is not a list of things waiting. */
   const tabs = $derived([
-    { id: 'now', label: 'Now', count: count.now },
-    { id: 'sessions', label: 'Sessions', count: sessionTotal },
+    { id: 'assistant', label: 'Assistant' },
     { id: 'tasks', label: 'Tasks', count: count.tasks },
     { id: 'memory', label: 'Memory', count: count.memory },
   ]);
+  const recent = $derived(recentByActivity(desk.tasks, desk.sessionRecords, 3));
   /* The weekly to-do. Today follows the minute clock, so the Today block and the highlighted
      day move on at midnight without a file having to change. */
   const today = $derived(todayIso(new Date(clock)));
@@ -199,6 +202,9 @@
     weekItems: weekItemCount,
     todayLines:
       weekToday.length + weekMore > 0 ? 1 + weekToday.length + (weekMore > 0 ? 1 : 0) : 0,
+    recent: recent.length,
+    chatting: assistant.chatting,
+    memoryMode: desk.memoryMode,
   });
   const full = $derived(
     needsFullHeight(
@@ -212,21 +218,8 @@
   /* Docked right, the sheet leaves to the right. Docked left, it leaves to the left. */
   const slide = $derived(desk.config.ui.edge === 'left' ? '-10px' : '10px');
   const mac = detectOs() === 'macos';
-  /* Ask Ledge runs Claude Code through /bin/sh, which Windows does not have. */
+  /* The assistant runs Claude Code through /bin/sh, which Windows does not have. */
   const canAsk = detectOs() !== 'windows';
-
-  /** The context block for one question, built from the desk at the moment it is asked. */
-  function askContext(): string {
-    return renderLedgeContext({
-      day: todayIso(),
-      tasks: desk.tasks,
-      repos: desk.lastScan ? desk.pending : undefined,
-      insights: desk.insights,
-      sessions: desk.sessionRecords,
-      now: new Date(),
-      week: weekFor(isoWeekOf(todayIso())),
-    });
-  }
   const modifier = mac ? '⌘' : 'Ctrl';
 
   function clockTime(iso: string): string {
@@ -332,18 +325,31 @@
   function runCommand(command: PaletteCommand) {
     setSearching(false);
     if (command.type === 'open-task') select(command.file);
-    else if (command.type === 'surface') setSurface(command.surface);
-    else if (command.type === 'rescan') void scanNow();
+    else if (command.type === 'surface') {
+      if (command.memory) setMemoryMode(command.memory);
+      else setSurface(command.surface);
+    } else if (command.type === 'rescan') void scanNow();
     else if (command.type === 'ask') {
-      askInitial = command.question;
-      asking = true;
-    }
-    else if (command.type === 'add-task') {
       showSettings = false;
-      select(null);
-      setSurface('now');
+      setSurface('assistant');
+      if (command.question.trim() === '') askKey += 1;
+      else void assistant.send(command.question);
+    } else if (command.type === 'add-task') {
+      showSettings = false;
+      showLive();
       void addTask({ title: command.title }).catch((e: unknown) => (desk.error = errorText(e)));
     }
+  }
+
+  /** TASKS on its Live list, which is where a new task lands. */
+  function showLive() {
+    if (desk.taskMode !== 'tasks') setTaskMode('tasks');
+    setView('live');
+  }
+
+  /** A link in an answer opens in the system browser, never inside the panel. */
+  function openLink(href: string) {
+    void open(href).catch(() => undefined);
   }
 
   /**
@@ -402,8 +408,7 @@
       event.preventDefault();
       setSearching(false);
       showSettings = false;
-      select(null);
-      if (desk.surface !== 'now' && desk.surface !== 'tasks') setSurface('now');
+      showLive();
       addKey += 1;
     }
   }
@@ -414,6 +419,13 @@
      focus, because it stays visible. */
   $effect(() => {
     if (desk.panelVisible || pinned) sizer.update(full);
+  });
+
+  /* The assistant listens for the life of the panel, and its process is started the moment the
+     panel is on screen, so the first question does not wait for Claude Code to boot. */
+  $effect(() => assistant.attach());
+  $effect(() => {
+    if (canAsk && (desk.panelVisible || pinned)) untrack(() => assistant.warm());
   });
 
   $effect(() => {
@@ -536,23 +548,27 @@
       </div>
     {/if}
 
-    {#if desk.surface === 'now'}
-      <Now
-        {working}
-        {upNext}
+    {#if desk.surface === 'assistant'}
+      <Assistant
+        chat={assistant}
         {name}
         {summary}
-        {addKey}
-        addShortcut="{modifier}N"
-        attention={attentionRepos().length}
+        {recent}
+        day={today}
+        now={clock}
         statusFor={statusForRepo}
-        {actionsFor}
         onselect={(t) => select(t.file)}
-        onadd={addTask}
+        attention={attentionRepos().length}
         onpending={() => {
           setSurface('tasks');
           setView('pending');
         }}
+        {weekToday}
+        {weekMore}
+        {taskTitle}
+        onopentask={openTaskById}
+        onweektick={(ref) => updateWeekItem(currentWeek, ref, { done: true })}
+        onopenweek={() => openWeek()}
         away={news.away}
         onresumeaway={(file) => {
           dismissAway();
@@ -560,21 +576,8 @@
         }}
         ondismissaway={dismissAway}
         onawayseen={markAwaySeen}
-        day={today}
-        {weekToday}
-        {weekMore}
-        {taskTitle}
-        onopentask={openTaskById}
-        onweektick={(ref) => updateWeekItem(currentWeek, ref, { done: true })}
-        onopenweek={() => openWeek()}
-      />
-    {:else if desk.surface === 'sessions'}
-      <Sessions
-        groups={sessionGroups}
-        now={clock}
-        awake={desk.panelVisible || pinned}
-        onselect={(t) => select(t.file)}
-        onresume={(t, id) => void resumeSession(t, id)}
+        onopenlink={openLink}
+        focusKey={askKey}
       />
     {:else if desk.surface === 'tasks'}
       <Tasks
@@ -596,6 +599,8 @@
         onadd={addTask}
         onreorder={moveCurrent}
         onshift={shift}
+        {addKey}
+        addShortcut="{modifier}N"
       >
         {#snippet todo()}
           <WeekView
@@ -618,7 +623,20 @@
         taskFor={taskById}
         onselect={(t) => select(t.file)}
         {insightsFor}
-      />
+        mode={desk.memoryMode}
+        onmode={setMemoryMode}
+        sessionCount={sessionTotal}
+      >
+        {#snippet sessions()}
+          <Sessions
+            groups={sessionGroups}
+            now={clock}
+            awake={desk.panelVisible || pinned}
+            onselect={(t) => select(t.file)}
+            onresume={(t, id) => void resumeSession(t, id)}
+          />
+        {/snippet}
+      </Memory>
     {/if}
   {/if}
 
@@ -630,19 +648,6 @@
       onrun={runCommand}
       onclose={() => setSearching(false)}
       ask={canAsk}
-    />
-  {/if}
-
-  {#if asking}
-    <AskLedge
-      runner={shellAskRunner}
-      context={askContext}
-      cwd={desk.ledgeHome || undefined}
-      initial={askInitial}
-      onclose={() => {
-        asking = false;
-        askInitial = '';
-      }}
     />
   {/if}
 
@@ -666,12 +671,12 @@
 
   <footer class="footer">
     <span>
-      {#if desk.surface === 'now'}
+      {#if desk.surface === 'assistant'}
         {@const today = doneToday()}
         <!-- "Finished", not "archived": the count is of tasks whose status is done, and one of
              them may still be waiting for its file to be moved. -->
         {today === undefined ? `${doneCount()} finished` : `${today} done today`}
-      {:else if desk.surface === 'sessions'}
+      {:else if desk.surface === 'memory' && desk.memoryMode === 'sessions'}
         {sessionTotal} {sessionTotal === 1 ? 'session' : 'sessions'}{runningTotal > 0
           ? `, ${runningTotal} running`
           : ''}

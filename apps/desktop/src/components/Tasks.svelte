@@ -7,7 +7,8 @@
    * It exists because Current, Backlog and Pending were three top-level tabs answering the same
    * question, "which task", while the surfaces that answer different questions, what is on now
    * and what has been learned, had nowhere to be. Folding the four lists into one surface is
-   * what freed the top level to be NOW, SESSIONS, TASKS and MEMORY.
+   * what freed the top level for the surfaces that answer other questions, now ASSISTANT,
+   * TASKS and MEMORY.
    *
    * Nothing was dropped in the fold: the Live and Done switch is the one that already existed,
    * Backlog keeps its add row and its Start and Open actions, and Pending is still computed from
@@ -81,6 +82,10 @@
      * sideways half of the drag is inert and the pills take no drops.
      */
     onshift?: (task: Task, to: ShiftTo) => void;
+    /** Bumping this opens the Live add row and focuses it, which is what the ⌘N shortcut does. */
+    addKey?: number;
+    /** The keyboard hint on the Live add row, already spelled for this platform. */
+    addShortcut?: string;
   }
 
   let {
@@ -104,6 +109,8 @@
     onadd,
     onreorder,
     onshift,
+    addKey = 0,
+    addShortcut,
   }: Props = $props();
 
   const modes: ViewOption[] = [
@@ -230,7 +237,7 @@
       {/if}
     </div>
     <div class="pane-foot">
-      <AddTask {onadd} />
+      <AddTask {onadd} shortcut={addShortcut} focusKey={addKey} />
     </div>
   </div>
 {/if}

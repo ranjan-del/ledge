@@ -56,11 +56,26 @@ import {
 export const WATCH_DEBOUNCE_MS = 150;
 
 /**
- * The four surfaces, in the order the tab strip shows them. They are the whole navigation:
- * NOW is what is in front of you, SESSIONS is what Claude Code has worked on, TASKS is every
- * list of work there is, and MEMORY is the reasoning those sessions left behind.
+ * The three surfaces, in the order the tab strip shows them. They are the whole navigation:
+ * ASSISTANT is what is in front of you and the one you can talk to, TASKS is every list of work
+ * there is, and MEMORY is the reasoning and the sessions that work left behind.
  */
-export type Surface = 'now' | 'sessions' | 'tasks' | 'memory';
+export type Surface = 'assistant' | 'tasks' | 'memory';
+
+/** The two halves of MEMORY: the dated notes, and the Claude Code sessions. */
+export type MemoryMode = 'notes' | 'sessions';
+
+/** Where the viewer's last choice of Notes or Sessions is kept. Per viewer, like the task mode. */
+export const MEMORY_MODE_KEY = 'ledge.memory.mode';
+
+/** The remembered Memory half, or Notes when there is none or storage cannot be read. */
+export function rememberedMemoryMode(): MemoryMode {
+  try {
+    return globalThis.localStorage?.getItem(MEMORY_MODE_KEY) === 'sessions' ? 'sessions' : 'notes';
+  } catch {
+    return 'notes';
+  }
+}
 
 /**
  * The views inside TASKS. Live and Done are the two halves of the work you own; Backlog and
@@ -118,6 +133,10 @@ export interface Desk {
   week: string;
   /** Tasks or To-do, inside the TASKS surface. */
   taskMode: TaskMode;
+  /** Notes or Sessions, inside the MEMORY surface. */
+  memoryMode: MemoryMode;
+  /** The week files in `weeks/`, by week, once the calendar has asked. Null until then. */
+  weekFiles: string[] | null;
   config: Config;
   tasks: Task[];
   broken: BrokenTask[];
@@ -157,6 +176,8 @@ export const desk: Desk = $state({
   weeks: {},
   week: isoWeekOf(todayIso()),
   taskMode: rememberedTaskMode(),
+  memoryMode: rememberedMemoryMode(),
+  weekFiles: null,
   config: defaultConfig(),
   tasks: [],
   broken: [],
@@ -168,7 +189,7 @@ export const desk: Desk = $state({
   archiveReady: false,
   archiveLoading: false,
   selectedFile: null,
-  surface: 'now',
+  surface: 'assistant',
   view: 'live',
   searching: false,
   scanning: false,
@@ -409,6 +430,21 @@ export function setTaskMode(mode: TaskMode): void {
   desk.selectedFile = null;
   try {
     globalThis.localStorage?.setItem(TASK_MODE_KEY, mode);
+  } catch {
+    /* not remembered, still switched */
+  }
+}
+
+/**
+ * Switches MEMORY between its notes and its sessions, and remembers the choice for this viewer,
+ * the same way the task mode is remembered.
+ */
+export function setMemoryMode(mode: MemoryMode): void {
+  desk.memoryMode = mode;
+  desk.surface = 'memory';
+  desk.selectedFile = null;
+  try {
+    globalThis.localStorage?.setItem(MEMORY_MODE_KEY, mode);
   } catch {
     /* not remembered, still switched */
   }
@@ -844,6 +880,38 @@ export async function loadWeek(week: string): Promise<void> {
   desk.weeks = { ...desk.weeks, [week]: read };
 }
 
+/**
+ * Lists `weeks/*.md` by name, without reading any of them, so the calendar knows which weeks
+ * have a file at all. Boot only reads the week it started in, and a week is otherwise read
+ * the first time it is shown, so this is what lets a month grid mark weeks nobody has opened.
+ */
+export async function listWeekFiles(): Promise<string[]> {
+  if (desk.weeksDir === '') return [];
+  let names: string[] = [];
+  try {
+    names = (await listDir(desk.weeksDir))
+      .filter((e) => e.isFile && WEEK_FILE.test(e.name))
+      .map((e) => e.name.slice(0, -3))
+      .sort();
+  } catch (e) {
+    report('warn', `week: could not list ${desk.weeksDir}: ${errorText(e)}`);
+  }
+  desk.weekFiles = names;
+  return names;
+}
+
+/**
+ * Reads the named weeks that have a file and are not on the desk yet. The calendar passes the
+ * weeks its month grid shows, so opening it reads five or six small files at most.
+ */
+export async function ensureWeeks(weeks: string[]): Promise<void> {
+  const files = desk.weekFiles ?? (await listWeekFiles());
+  const have = new Set(files);
+  for (const week of weeks) {
+    if (have.has(week) && !(week in desk.weeks)) await loadWeek(week);
+  }
+}
+
 /** Re-reads every week the desk holds, and this week whether or not it was held. */
 async function reloadWeeks(): Promise<void> {
   const weeks = new Set([...Object.keys(desk.weeks), isoWeekOf(todayIso()), desk.week]);
@@ -1053,6 +1121,11 @@ export async function applyChanges(paths: string[]): Promise<void> {
   else for (const file of insightFiles) await reloadInsight(file);
   if (allWeeks) await reloadWeeks();
   else for (const week of weekFiles) await loadWeek(week);
+  /* The calendar's listing, once there is one, learns of a week file written since. */
+  if (desk.weekFiles !== null && (allWeeks || weekFiles.size > 0)) {
+    if (allWeeks) await listWeekFiles();
+    else desk.weekFiles = [...new Set([...desk.weekFiles, ...weekFiles])].sort();
+  }
 }
 
 async function startWatching(): Promise<void> {
