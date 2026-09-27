@@ -13,8 +13,8 @@
    * browse; nothing is carried over, because carrying it over is a decision the person makes by
    * moving or re-adding an item, not one the panel makes for them.
    */
-  import type { WeekFile } from '../lib/week.ts';
-  import { isoWeekOf, weekDays } from '../lib/week.ts';
+  import type { WeekFile } from '@ledge/core/pure';
+  import { isoWeekOf, weekDays } from '@ledge/core/pure';
   import {
     ANYTIME,
     dayHeading,

@@ -121,7 +121,7 @@ import {
   toggleChecklist,
 } from '../src/lib/store.svelte.ts';
 import { todayIso } from '../src/lib/time.ts';
-import { isoWeekOf, parseWeek, serializeWeek, shiftWeek, weekDays } from '../src/lib/week.ts';
+import { isoWeekOf, parseWeek, serializeWeek, shiftWeek, weekDays } from '@ledge/core/pure';
 
 const readsOf = (file: string) =>
   (readTextFile as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter((c) => c[0] === file)

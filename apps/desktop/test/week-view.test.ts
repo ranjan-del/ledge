@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import WeekView from '../src/components/WeekView.svelte';
-import { parseWeek } from '../src/lib/week.ts';
+import { parseWeek } from '@ledge/core/pure';
 
 const W39 = `---
 week: 2026-W39

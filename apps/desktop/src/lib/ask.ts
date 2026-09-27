@@ -19,7 +19,7 @@ import {
   type TaskInsights,
 } from '@ledge/core/pure';
 import { numberedLines } from './week-view.ts';
-import type { WeekFile } from './week.ts';
+import type { WeekFile } from '@ledge/core/pure';
 
 /** How many earlier turns are quoted back to the model. */
 export const HISTORY_TURNS = 4;

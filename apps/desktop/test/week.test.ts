@@ -7,7 +7,7 @@ import {
   shiftWeek,
   weekDays,
   type WeekFile,
-} from '../src/lib/week.ts';
+} from '@ledge/core/pure';
 import {
   addItem,
   dayHeading,
@@ -122,7 +122,7 @@ Anything goes here.
 - [ ] next week, wrongly filed
 `;
     const w = parseWeek(text, '2026-W39');
-    expect(w.meta).toEqual({ owner: 'ranjan', tags: '\n  - home' });
+    expect(w.meta).toEqual({ owner: 'ranjan', tags: ['home'] });
     expect(w.days['2026-09-22']).toHaveLength(1);
     expect(Object.keys(w.days)).toEqual(['2026-09-22']);
     expect(w.extra).toContain('## Notes\n\nAnything goes here.');

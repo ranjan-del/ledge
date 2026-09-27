@@ -4,7 +4,7 @@
  * one WeekFile to the next. The store applies them to the file on disk; the views only call the
  * store. The file format itself belongs to core (./week.ts until the merge).
  */
-import { isoWeekOf, shiftWeek, weekDays, type WeekFile, type WeekItem } from './week.ts';
+import { isoWeekOf, shiftWeek, weekDays, type WeekFile, type WeekItem } from '@ledge/core/pure';
 
 /** Where an item lives: `anytime`, or a `YYYY-MM-DD` day inside the week. */
 export type WeekSlot = 'anytime' | string;
