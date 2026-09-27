@@ -46,7 +46,7 @@ export function shortPanelHeight(availHeight: number, ratio = 1): number {
   return Math.min(Math.max(wanted, SHORT_MIN_PX), SHORT_MAX_PX) / dpr;
 }
 
-export type SizingSurface = 'now' | 'sessions' | 'tasks' | 'memory';
+export type SizingSurface = 'assistant' | 'tasks' | 'memory';
 export type SizingView = 'live' | 'done' | 'backlog' | 'pending';
 
 /** What is on the surface, in the two shapes a surface is built from. */
@@ -77,30 +77,39 @@ export interface PanelCounts {
   mode?: 'tasks' | 'todo';
   /** Items in the week the To-do view is showing. */
   weekItems?: number;
-  /** Lines the Today block adds to NOW: its label, today's open items, the "more" line. */
+  /** Lines the Today block adds to ASSISTANT: its label, today's open items, the "more" line. */
   todayLines?: number;
+  /** Recent task cards on the idle ASSISTANT. */
+  recent?: number;
+  /** ASSISTANT has a conversation on it, which always wants the whole height. */
+  chatting?: boolean;
+  /** Notes or Sessions inside MEMORY. Absent means Notes. */
+  memoryMode?: 'notes' | 'sessions';
 }
 
 /**
  * What the panel is actually showing, as blocks and lines. Only the visible surface counts: a
- * hundred notes do not make the NOW surface taller, and the window is sized for what is in
+ * hundred notes do not make the ASSISTANT surface taller, and the window is sized for what is in
  * front of the person rather than for what the store happens to hold.
  */
 export function panelContent(counts: PanelCounts): PanelContent {
   if (counts.detailOpen) return { detailOpen: true, blocks: 0, lines: 0 };
-  if (counts.surface === 'now') {
+  if (counts.surface === 'assistant') {
+    /* A conversation grows as it goes, so it gets the room from the first message. */
+    if (counts.chatting) return { detailOpen: true, blocks: 0, lines: 0 };
     return {
       detailOpen: false,
-      /* The greeting and the add row are chrome on this surface: both are always there. */
-      blocks: counts.working,
-      lines: counts.upNext + (counts.attention > 0 ? 1 : 0) + 2 + (counts.todayLines ?? 0),
+      /* The greeting, the input (two lines) and the suggestion chips are always there; a
+         compact card is about two lines tall. */
+      blocks: 0,
+      lines:
+        4 + 2 * (counts.recent ?? 0) + (counts.attention > 0 ? 1 : 0) + (counts.todayLines ?? 0),
     };
   }
-  if (counts.surface === 'sessions') {
-    return { detailOpen: false, blocks: counts.sessions, lines: 1 };
-  }
   if (counts.surface === 'memory') {
-    return { detailOpen: false, blocks: counts.notes, lines: 1 };
+    /* The Notes | Sessions switch is one more line. */
+    const blocks = counts.memoryMode === 'sessions' ? counts.sessions : counts.notes;
+    return { detailOpen: false, blocks, lines: 2 };
   }
   if (counts.mode === 'todo') {
     /* Both switches, the week header, eight section headings, and one line per item. */
