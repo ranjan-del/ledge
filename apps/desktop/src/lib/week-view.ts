@@ -117,6 +117,35 @@ export function moveItem(w: WeekFile, ref: WeekRef, to: WeekSlot): WeekFile {
   return withSlot(removed, to, [...slotItems(removed, to), item]);
 }
 
+/** One item and where it lives in the file. */
+export interface WeekEntry {
+  item: WeekItem;
+  ref: WeekRef;
+}
+
+/**
+ * Every item in the week as one list, in file order: Anytime first, then any day sections. The
+ * panel shows a week as a single list of things to get done this week, not as seven days, so an
+ * item written to a day by an older Ledge or by `ledge week add --day` still shows here.
+ */
+export function weekEntries(w: WeekFile): WeekEntry[] {
+  const out: WeekEntry[] = w.anytime.map((item, index) => ({ item, ref: { slot: ANYTIME, index } }));
+  for (const day of weekDays(w.week)) {
+    (w.days[day] ?? []).forEach((item, index) => out.push({ item, ref: { slot: day, index } }));
+  }
+  return out;
+}
+
+/** The week's items that are not ticked yet, the list at the top of the To-do view. */
+export function openEntries(w: WeekFile): WeekEntry[] {
+  return weekEntries(w).filter((e) => !e.item.done);
+}
+
+/** The week's ticked items, the Completed list under the open ones. */
+export function doneEntries(w: WeekFile): WeekEntry[] {
+  return weekEntries(w).filter((e) => e.item.done);
+}
+
 /** Today's items that are not ticked yet, each with where it lives. */
 export function openToday(w: WeekFile, day: string): { item: WeekItem; ref: WeekRef }[] {
   return slotItems(w, day)

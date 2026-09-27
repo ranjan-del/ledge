@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
-   * Adding to one day of the week, in one interaction: type, press Enter. The field stays open
-   * afterwards, because reminders arrive in groups, and Escape (or leaving it empty) closes it.
+   * Adding to the week, in one interaction: type, press Enter. The field stays open afterwards,
+   * because reminders arrive in groups. Opened on demand, Escape (or leaving it empty) closes it;
+   * `persistent` is the always-visible row at the top of the To-do view, which never closes.
    * The task picker beside it is optional; left on `No task`, the item is only words.
    */
   import type { TaskChoice } from './WeekItemRow.svelte';
@@ -11,10 +12,12 @@
     label: string;
     tasks: TaskChoice[];
     onadd: (text: string, taskId?: string) => unknown;
-    onclose: () => void;
+    onclose?: () => void;
+    /** Always shown: no focus on mount, and Escape or blur only clear the error. */
+    persistent?: boolean;
   }
 
-  let { label, tasks, onadd, onclose }: Props = $props();
+  let { label, tasks, onadd, onclose, persistent = false }: Props = $props();
 
   let text = $state('');
   let taskId = $state('');
@@ -24,7 +27,7 @@
   let root = $state<HTMLElement | null>(null);
 
   $effect(() => {
-    field?.focus();
+    if (!persistent) field?.focus();
   });
 
   async function submit(event: SubmitEvent) {
@@ -49,14 +52,15 @@
     if (event.key !== 'Escape') return;
     event.preventDefault();
     event.stopPropagation();
-    onclose();
+    if (persistent) field?.blur();
+    else onclose?.();
   }
 
   /* Walking away from an empty field is the same as Escape. A half-typed one stays. */
   function onfocusout(event: FocusEvent) {
     const next = event.relatedTarget;
     if (next instanceof Node && root?.contains(next)) return;
-    if (text.trim() === '') onclose();
+    if (!persistent && text.trim() === '') onclose?.();
   }
 </script>
 

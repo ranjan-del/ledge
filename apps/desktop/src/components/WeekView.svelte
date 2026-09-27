@@ -1,31 +1,22 @@
 <script lang="ts">
   /**
-   * TO-DO: the week, as a list of reminders. A header that names the week and steps through
-   * weeks, then `Anytime this week` and the seven days, Monday first. It is separate from task
-   * checklists on purpose: an item is something to remember this week, though it may point at a
-   * task, and ticking it changes nothing on that task.
+   * TO-DO: the week, as one list of things to get done this week. There are no day sections: the
+   * person picks up these items whenever they work, so the week is the only date that matters.
+   * A header names the week and steps through weeks; the calendar jumps further. Under it, one
+   * add row, then the open items, then the ticked ones in a Completed list, so ticking an item
+   * moves it down out of the way while keeping it for the week's record.
    *
-   * Today is highlighted and the days of this week that have passed are muted, so the eye lands
-   * on what is still ahead. A day with nothing on it is one line, its name and a quiet Add, not
-   * an empty box; seven empty boxes would be a calendar, and this is a list.
-   *
-   * Each week keeps its own items. A new week starts empty and the old one is still there to
-   * browse; nothing is carried over, because carrying it over is a decision the person makes by
-   * moving or re-adding an item, not one the panel makes for them.
-   *
-   * The calendar button in the header opens a month grid for jumping further than a week at a
-   * time. Choosing a day shows its week, scrolls to that day and lights it up for a moment.
+   * It is separate from task checklists on purpose: an item may point at a task, and ticking it
+   * changes nothing on that task. Each week keeps its own items; a new week starts empty and the
+   * old one is still there to browse.
    */
   import type { WeekFile } from '@ledge/core/pure';
-  import { isoWeekOf, weekDays } from '@ledge/core/pure';
-  import { tick } from 'svelte';
-  import { reducedMotion } from '../lib/motion.svelte.ts';
+  import { isoWeekOf } from '@ledge/core/pure';
   import {
     ANYTIME,
-    dayHeading,
-    dayName,
+    doneEntries,
     neighbours,
-    slotItems,
+    openEntries,
     weekLabel,
     type WeekItemPatch,
     type WeekRef,
@@ -33,7 +24,7 @@
   import { todayIso } from '../lib/time.ts';
   import MonthPicker from './MonthPicker.svelte';
   import WeekAdd from './WeekAdd.svelte';
-  import WeekItemRow, { type SlotChoice, type TaskChoice } from './WeekItemRow.svelte';
+  import WeekItemRow, { type TaskChoice } from './WeekItemRow.svelte';
 
   interface Props {
     week: WeekFile;
@@ -70,65 +61,28 @@
     onloadweeks,
   }: Props = $props();
 
-  /** How long a day picked in the calendar stays lit. */
-  const FLASH_MS = 1200;
-
   let calendarOpen = $state(false);
-  let flash = $state<string | null>(null);
-  let flashTimer: ReturnType<typeof setTimeout> | undefined;
-  let scroller = $state<HTMLElement | null>(null);
   let toggle = $state<HTMLButtonElement | null>(null);
 
-  /** Shows the week a day is in, scrolls to the day and lights it briefly. */
-  async function pickDay(d: string) {
+  /** Shows the week a day picked in the calendar is in. */
+  function pickDay(d: string) {
     calendarOpen = false;
     toggle?.focus();
     const target = isoWeekOf(d);
     if (target !== week.week) onbrowse(target);
-    await tick();
-    const el = scroller?.querySelector<HTMLElement>(`[data-day="${d}"]`);
-    el?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
-    clearTimeout(flashTimer);
-    flash = d;
-    flashTimer = setTimeout(() => (flash = null), FLASH_MS);
   }
-
-  $effect(() => () => clearTimeout(flashTimer));
 
   const thisWeek = $derived(isoWeekOf(day));
   const current = $derived(week.week === thisWeek);
   const around = $derived(neighbours(week.week));
-
-  interface Section {
-    slot: string;
-    title: string;
-    /** How the add row names it: `Add to Wednesday`. */
-    name: string;
-    today: boolean;
-    past: boolean;
-  }
-
-  const sections = $derived<Section[]>([
-    { slot: ANYTIME, title: 'Anytime this week', name: 'Add for anytime this week', today: false, past: false },
-    ...weekDays(week.week).map((d) => ({
-      slot: d,
-      title: dayHeading(d),
-      name: `Add to ${dayName(d)}`,
-      today: d === day,
-      past: current && d < day,
-    })),
-  ]);
-
-  const slots = $derived<SlotChoice[]>(
-    sections.map((s) => ({ slot: s.slot, label: s.slot === ANYTIME ? 'Anytime' : s.title })),
-  );
-
-  /** The section whose add row is open, if one is. */
-  let adding = $state<string | null>(null);
+  const open = $derived(openEntries(week));
+  const done = $derived(doneEntries(week));
+  /** The Completed list starts open, so a tick visibly lands somewhere. */
+  let showDone = $state(true);
 </script>
 
 <div class="pane">
-  <div class="pane-scroll week" bind:this={scroller}>
+  <div class="pane-scroll week">
     <div class="week-head">
       <button
         type="button"
@@ -161,10 +115,10 @@
           class="drop step cal motion"
           bind:this={toggle}
           data-calendar-toggle
-          aria-label="Pick a day"
+          aria-label="Pick a week"
           aria-haspopup="dialog"
           aria-expanded={calendarOpen}
-          title="Pick a day"
+          title="Pick a week"
           onclick={() => (calendarOpen = !calendarOpen)}
         >
           <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true">
@@ -190,70 +144,75 @@
           week={week.week}
           {weeks}
           onmonth={onloadweeks}
-          onpick={(d) => void pickDay(d)}
+          onpick={(d) => pickDay(d)}
           onclose={() => (calendarOpen = false)}
         />
       {/if}
     </div>
 
-    {#each sections as section (section.slot)}
-      {@const items = slotItems(week, section.slot)}
-      {@const open = items.filter((i) => !i.done).length}
-      <section
-        class="day"
-        class:today={section.today}
-        class:past={section.past}
-        class:empty={items.length === 0}
-        class:flash={flash === section.slot}
-        data-day={section.slot === ANYTIME ? undefined : section.slot}
-        aria-label={section.today ? `Today, ${section.title}` : section.title}
-      >
-        <div class="day-head">
-          <h3 class="day-title">{section.title}</h3>
-          {#if section.today}
-            <span class="chip info">Today</span>
-          {/if}
-          {#if open > 0}
-            <span class="day-count" aria-label="{open} open">{open}</span>
-          {/if}
-          {#if adding !== section.slot}
-            <button
-              type="button"
-              class="add-line day-add motion"
-              aria-label={section.name}
-              onclick={() => (adding = section.slot)}
-            >
-              + Add
-            </button>
-          {/if}
-        </div>
-        {#if items.length > 0}
-          <ul class="items">
-            {#each items as item, index (`${section.slot}:${index}:${item.text}`)}
+    <WeekAdd
+      label={current ? 'Add something for this week' : `Add to ${weekLabel(week.week)}`}
+      {tasks}
+      onadd={(text, taskId) => onadd(ANYTIME, text, taskId)}
+      persistent
+    />
+
+    {#if open.length > 0}
+      <ul class="items" aria-label="To do this week">
+        {#each open as entry (`${entry.ref.slot}:${entry.ref.index}:${entry.item.text}`)}
+          <WeekItemRow
+            item={entry.item}
+            slot={entry.ref.slot}
+            slots={[]}
+            {tasks}
+            taskTitle={entry.item.taskId ? taskTitle?.(entry.item.taskId) : undefined}
+            onupdate={(patch) => onupdate(entry.ref, patch)}
+            onmove={(to) => onmove(entry.ref, to)}
+            onremove={() => onremove(entry.ref)}
+            {onopentask}
+          />
+        {/each}
+      </ul>
+    {:else}
+      <p class="empty-note">
+        {done.length > 0 ? 'Everything for this week is done.' : 'Nothing planned for this week yet.'}
+      </p>
+    {/if}
+
+    {#if done.length > 0}
+      <section class="completed" aria-label="Completed">
+        <button
+          type="button"
+          class="completed-head motion"
+          aria-expanded={showDone}
+          onclick={() => (showDone = !showDone)}
+        >
+          <svg class="chev" class:open={showDone} width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>Completed</span>
+          <span class="count">{done.length}</span>
+        </button>
+        {#if showDone}
+          <ul class="items done-items">
+            {#each done as entry (`${entry.ref.slot}:${entry.ref.index}:${entry.item.text}`)}
               <WeekItemRow
-                {item}
-                slot={section.slot}
-                {slots}
-                {tasks}
-                taskTitle={item.taskId ? taskTitle?.(item.taskId) : undefined}
-                onupdate={(patch) => onupdate({ slot: section.slot, index }, patch)}
-                onmove={(to) => onmove({ slot: section.slot, index }, to)}
-                onremove={() => onremove({ slot: section.slot, index })}
-                {onopentask}
-              />
+            item={entry.item}
+            slot={entry.ref.slot}
+            slots={[]}
+            {tasks}
+            taskTitle={entry.item.taskId ? taskTitle?.(entry.item.taskId) : undefined}
+            onupdate={(patch) => onupdate(entry.ref, patch)}
+            onmove={(to) => onmove(entry.ref, to)}
+            onremove={() => onremove(entry.ref)}
+            {onopentask}
+          />
             {/each}
           </ul>
         {/if}
-        {#if adding === section.slot}
-          <WeekAdd
-            label={section.name}
-            {tasks}
-            onadd={(text, taskId) => onadd(section.slot, text, taskId)}
-            onclose={() => (adding = null)}
-          />
-        {/if}
       </section>
-    {/each}
+    {/if}
   </div>
 </div>
 
@@ -293,83 +252,59 @@
     font-size: var(--fs-xs);
   }
 
-  .day {
-    display: flex;
-    flex-direction: column;
-    padding: var(--space-1) var(--space-2) var(--space-1);
-    border-radius: var(--radius-sm);
-    border: 1px solid transparent;
-  }
-  .day:not(.empty) {
-    padding-bottom: var(--space-2);
-  }
-  /* Today is the one section drawn as a card, with the accent down its side. */
-  .day.today {
-    background: var(--surface);
-    border-color: var(--surface-border);
-    box-shadow: inset 2px 0 0 var(--accent), var(--shadow-card);
-  }
-  .day.past {
-    opacity: 0.55;
-  }
-  /* A day just picked in the calendar: lit for a moment so the eye finds it. */
-  .day.flash {
-    opacity: 1;
-    background: var(--info-bg);
-    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  @media (prefers-reduced-motion: no-preference) {
-    .day {
-      transition:
-        background-color 400ms ease,
-        border-color 400ms ease;
-    }
-  }
-  .day.past:hover,
-  .day.past:focus-within {
-    opacity: 1;
-  }
-  .day-head {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-height: 22px;
-  }
-  .day-title {
-    margin: 0;
+  .empty-note {
+    margin: var(--space-2) var(--space-2) 0;
     font-size: var(--fs-sm);
-    font-weight: 700;
-    color: var(--text-muted);
-  }
-  .today .day-title {
-    color: var(--text);
-  }
-  .day-count {
-    font-size: var(--fs-xs);
-    font-variant-numeric: tabular-nums;
     color: var(--text-faint);
-  }
-  .day-add {
-    margin: 0 0 0 auto;
-    padding: 2px 0 2px var(--space-2);
-  }
-  /* An empty day's Add is quieter still until the row is pointed at or reached by Tab. */
-  .empty .day-add {
-    opacity: 0.7;
-  }
-  .empty:hover .day-add,
-  .day-add:focus-visible {
-    opacity: 1;
   }
   .items {
     list-style: none;
-    margin: 2px 0 0;
+    margin: var(--space-1) 0 0;
     padding: 0;
     display: flex;
     flex-direction: column;
     gap: 1px;
   }
-  .day .items {
-    margin-left: calc(-1 * var(--space-2));
+  .completed {
+    margin-top: var(--space-3);
+    border-top: 1px solid var(--surface-border);
+    padding-top: var(--space-2);
+  }
+  .completed-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    padding: 2px var(--space-2);
+    border: 0;
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+  }
+  .completed-head:hover {
+    background: var(--control);
+  }
+  .completed-head .count {
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-faint);
+  }
+  .chev {
+    transition: transform 150ms ease;
+  }
+  .chev.open {
+    transform: rotate(90deg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chev {
+      transition: none;
+    }
+  }
+  .done-items {
+    opacity: 0.7;
   }
 </style>

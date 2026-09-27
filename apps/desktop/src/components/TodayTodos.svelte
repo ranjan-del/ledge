@@ -1,18 +1,18 @@
 <script lang="ts">
   /**
-   * Today: the weekly to-do items for this day that are not ticked yet, tickable where they
+   * This week: the first few weekly to-do items that are not ticked yet, tickable where they
    * are, and one line saying how many more the week holds, which opens the To-do view. A week
-   * with nothing in it shows no block at all. It sits on the idle Assistant, where Now had it.
+   * with nothing open shows no block at all. It sits on the idle Assistant, where Now had it.
    */
   import type { WeekItem } from '@ledge/core/pure';
   import type { WeekRef } from '../lib/week-view.ts';
 
   interface Props {
-    /** Today's weekly to-do items that are not ticked, each with where it lives in the file. */
+    /** The first few unticked items of this week's to-do, each with where it lives in the file. */
     items?: { item: WeekItem; ref: WeekRef }[];
     /** Unticked items elsewhere in this week: Anytime and the other days. */
     more?: number;
-    /** Ticks one of today's items. */
+    /** Ticks one of the items. */
     ontick?: (ref: WeekRef) => unknown;
     /** Opens the To-do view on this week. */
     onopenweek?: () => void;
@@ -37,7 +37,7 @@
 {#if show}
   <section class="block week-today" aria-labelledby="today-label">
     <h3 class="section-label" id="today-label">
-      Today
+      This week
       {#if items.length > 0}<span class="count">{items.length}</span>{/if}
     </h3>
     {#if items.length > 0}
@@ -75,7 +75,7 @@
     {#if more > 0}
       <button type="button" class="more-week motion" onclick={() => onopenweek?.()}>
         <span class="what">
-          {items.length === 0 ? 'Nothing for today. ' : ''}{more} more this week
+          {more} more this week
         </span>
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
           <path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5"
