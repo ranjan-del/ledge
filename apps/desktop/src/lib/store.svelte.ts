@@ -37,7 +37,7 @@ import {
   parseSessionRecord,
   type SessionRecord,
   type TaskInsights,
-} from './insights.ts';
+} from '@ledge/core/pure';
 import { basename, expandTilde, isTaskFile, join, ledgeHomeFor } from './paths.ts';
 import { discoverRepos, scanRepoList } from './scan.ts';
 import { nowIso, todayIso } from './time.ts';

@@ -34,7 +34,7 @@ import {
   buildBrief,
   chooseLaunch,
 } from '../src/lib/brief.ts';
-import type { SessionRecord } from '../src/lib/insights.ts';
+import type { SessionRecord } from '@ledge/core/pure';
 import { launchCommand, openInClaude } from '../src/lib/platform.ts';
 import { desk } from '../src/lib/store.svelte.ts';
 import { taskA, taskC } from './fixtures.ts';

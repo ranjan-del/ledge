@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import Sessions from '../src/components/Sessions.svelte';
-import type { SessionRecord } from '../src/lib/insights.ts';
+import type { SessionRecord } from '@ledge/core/pure';
 import { formatDuration, groupSessions, sessionCount } from '../src/lib/session-view.ts';
 import { taskA, taskB, taskC } from './fixtures.ts';
 

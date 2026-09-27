@@ -10,7 +10,7 @@
  * is simply not shown rather than shown against words it no longer describes.
  */
 import type { NoteEntry } from '@ledge/core/pure';
-import { contentKey, type TaskInsights } from './insights.ts';
+import { contentKey, type TaskInsights } from '@ledge/core/pure';
 
 /** Longest title the fallback produces, ellipsis included. */
 export const TITLE_CHARS = 60;
