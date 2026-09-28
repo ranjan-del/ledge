@@ -141,7 +141,7 @@
     { id: 'tasks', label: 'Tasks', count: count.tasks },
     { id: 'memory', label: 'Memory', count: count.memory },
   ]);
-  const recent = $derived(recentByActivity(desk.tasks, desk.sessionRecords, 3));
+  const recent = $derived(recentByActivity(desk.tasks, desk.sessionRecords, 5));
   /* The weekly to-do. Today follows the minute clock, so the Today block and the highlighted
      day move on at midnight without a file having to change. */
   const today = $derived(todayIso(new Date(clock)));

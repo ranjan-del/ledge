@@ -70,9 +70,11 @@ describe('prompt', () => {
   it('carries the rules and the date, with no em or en dashes', () => {
     const p = systemPrompt('Saturday 27 September 2026, 10:00');
     expect(p).toContain('Today is Saturday 27 September 2026');
-    expect(p).toMatch(/general questions directly and briefly/);
+    expect(p).toMatch(/general questions directly/);
+    expect(p).toMatch(/Work in silence/);
+    expect(p).toContain('/workspaces/{workspace}/permissions');
     expect(p).toMatch(/`ledge` command line tool/);
-    expect(p).toMatch(/what you did in one line/);
+    expect(p).toMatch(/one line saying what is now true/);
     expect(p).not.toMatch(/[\u2013\u2014]/);
   });
 

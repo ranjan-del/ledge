@@ -52,7 +52,7 @@ export class AssistantChat {
   status = $state<EngineStatus>('ready');
   detail = $state('');
   chats = $state<ChatSummary[]>([]);
-  model = $state<ModelChoice>('auto');
+  model = $state<ModelChoice>('opus');
   /** What is typed and not sent yet, kept here so it survives a switch to another tab. */
   draft = $state('');
   /** A send is on its way and the engine has not said busy yet. */

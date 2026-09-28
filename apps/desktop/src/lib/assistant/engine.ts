@@ -160,7 +160,7 @@ export class ClaudeAssistantEngine implements AssistantEngine {
     }
     if (this.proc && !this.proc.closed) return;
     const record = this.current ? this.records.get(this.current) : undefined;
-    this.spawn(record, 'sonnet');
+    this.spawn(record, 'opus');
   }
 
   newChat(): string {
@@ -172,7 +172,7 @@ export class ClaudeAssistantEngine implements AssistantEngine {
     // so the first question does not wait for it.
     if (this.wanted && !this.turn && this.proc && this.proc.chatId !== undefined) {
       this.kill(this.proc);
-      this.spawn(undefined, 'sonnet');
+      this.spawn(undefined, 'opus');
     }
     return id;
   }
@@ -275,7 +275,7 @@ export class ClaudeAssistantEngine implements AssistantEngine {
     if (this.current === id) this.current = undefined;
     if (this.proc && this.proc.chatId === id) {
       this.kill(this.proc);
-      if (this.wanted) this.spawn(undefined, 'sonnet');
+      if (this.wanted) this.spawn(undefined, 'opus');
     }
     await this.opts.history.remove(id);
     await this.emitChats();
@@ -485,6 +485,10 @@ export class ClaudeAssistantEngine implements AssistantEngine {
     switch (ev.kind) {
       case 'message_start':
         if (msg.text !== '') turn.needBreak = true;
+        if (ev.model && ev.model !== msg.modelId) {
+          msg.modelId = ev.model;
+          this.emitMessage(turn);
+        }
         return;
       case 'text':
         if (turn.needBreak && !msg.text.endsWith('\n\n')) msg.text += msg.text.endsWith('\n') ? '\n' : '\n\n';
@@ -657,7 +661,7 @@ export class ClaudeAssistantEngine implements AssistantEngine {
       this.restartTimer = undefined;
       if (this.disposed || this.proc) return;
       const record = this.current ? this.records.get(this.current) : undefined;
-      this.spawn(record, 'sonnet');
+      this.spawn(record, 'opus');
     }, wait);
   }
 
