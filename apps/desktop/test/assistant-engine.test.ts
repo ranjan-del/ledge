@@ -85,7 +85,7 @@ describe('warm session', () => {
     expect(t.engine.status()).toBe('starting');
     await t.ready();
     expect(t.children).toHaveLength(1);
-    expect(t.child().launch.model).toBe('sonnet');
+    expect(t.child().launch.model).toBe('opus');
     expect(t.child().launch.resume).toBeUndefined();
     expect(t.child().launch.systemPrompt).toMatch(/ledge week add/);
     expect(t.child().launch.systemPrompt).not.toMatch(/\u2014/);
@@ -111,9 +111,9 @@ describe('warm session', () => {
     expect(text.trim().endsWith('what is an llm')).toBe(true);
     expect(w.indexOf(setModel!)).toBeLessThan(w.indexOf(user!));
 
-    t.child().out(fx.controlOk(setModel!.request_id), fx.init('claude-haiku-4-5'), fx.messageStart(), fx.textDelta('A large '));
+    t.child().out(fx.controlOk(setModel!.request_id), fx.init('claude-haiku-4-5'), fx.messageStart('claude-haiku-4-5-20251001'), fx.textDelta('A large '));
     await flush();
-    expect(t.lastMessage().message).toMatchObject({ role: 'assistant', text: 'A large ', model: 'haiku' });
+    expect(t.lastMessage().message).toMatchObject({ role: 'assistant', text: 'A large ', model: 'haiku', modelId: 'claude-haiku-4-5-20251001' });
     t.child().out(fx.textDelta('language model.'), fx.result('A large language model.'));
     await flush();
     expect(t.lastMessage().message.text).toBe('A large language model.');
@@ -123,6 +123,7 @@ describe('warm session', () => {
     expect(saved?.sessionId).toBe(SESSION);
     expect(saved?.chat.title).toBe('what is an llm');
     expect(saved?.chat.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(saved?.chat.messages[1]?.modelId).toBe('claude-haiku-4-5-20251001');
     expect(t.events.some((e) => e.type === 'chats' && e.chats[0]?.id === chatId)).toBe(true);
     t.engine.dispose();
   });
@@ -135,9 +136,9 @@ describe('warm session', () => {
     expect(t.child().written.some((x) => x.request?.subtype === 'set_model')).toBe(false);
     t.child().out(fx.result('Added.'));
     await flush();
-    await t.engine.send(id, 'what is an llm', 'opus');
+    await t.engine.send(id, 'what is an llm', 'sonnet');
     const models = t.child().written.filter((x) => x.request?.subtype === 'set_model').map((x) => x.request.model);
-    expect(models).toEqual(['opus']);
+    expect(models).toEqual(['sonnet']);
     t.engine.dispose();
   });
 

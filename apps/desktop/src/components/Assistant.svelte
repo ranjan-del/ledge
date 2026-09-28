@@ -92,7 +92,7 @@
   }: Props = $props();
 
   const hello = $derived(name === '' ? greeting() : `${greeting()}, ${name}`);
-  const cards = $derived(recent.slice(0, 3));
+  const cards = $derived(recent.slice(0, 5));
   const problem = $derived(problemFor(chat.status, chat.detail));
   const lastId = $derived(chat.messages[chat.messages.length - 1]?.id);
 
@@ -167,6 +167,12 @@
     focusBump += 1;
   }
 
+  /* Home is the idle desk. The chat on screen is already saved, so it waits in history. */
+  function goHome() {
+    historyOpen = false;
+    chat.newChat();
+  }
+
   let focusBump = $state(0);
   const composerKey = $derived(focusKey + focusBump);
 </script>
@@ -174,6 +180,12 @@
 <div class="assistant" class:chatting={phase === 'chat'}>
   {#if phase === 'chat'}
     <header class="chat-head">
+      <button type="button" class="head-btn icon motion" onclick={goHome} title="Home" aria-label="Home">
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+          <path d="M2 6.6 7 2.4l5 4.2M3.4 5.6v5.9h2.6V8.6h2v2.9h2.6V5.6" fill="none" stroke="currentColor"
+            stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
       <h2 class="chat-title trunc" title={chat.title}>{chat.title}</h2>
       <button type="button" class="head-btn motion" onclick={newChat} title="Start a new chat">
         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
