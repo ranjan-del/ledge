@@ -27,6 +27,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string; // for assistant, the full text so far
   model?: ResolvedModel;
+  modelId?: string; // the full id Claude Code reported, such as claude-opus-5-5
   tools: ToolActivity[];
   approvals: (ApprovalRequest & { decision?: 'approved' | 'denied' })[];
   at: string; // ISO

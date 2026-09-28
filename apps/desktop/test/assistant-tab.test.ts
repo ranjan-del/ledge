@@ -17,7 +17,14 @@ function setup(options: FakeOptions = {}, props: Record<string, unknown> = {}) {
       chat,
       day: DAY,
       name: 'Ranjan',
-      recent: [taskA(), taskB(), taskC(), { ...taskA(), file: 'x.md', id: 'x', title: 'Fourth' }].map((task) => ({
+      recent: [
+        taskA(),
+        taskB(),
+        taskC(),
+        { ...taskA(), file: 'x.md', id: 'x', title: 'Fourth' },
+        { ...taskA(), file: 'y.md', id: 'y', title: 'Fifth' },
+        { ...taskA(), file: 'z.md', id: 'z', title: 'Sixth' },
+      ].map((task) => ({
         task,
         at: task.updated,
       })),
@@ -35,14 +42,15 @@ async function ask(text: string) {
 }
 
 describe('Assistant, idle', () => {
-  it('greets, offers the field and suggestions, and shows three recent tasks as compact cards', () => {
+  it('greets, offers the field and suggestions, and shows five recent tasks as compact cards', () => {
     const { container } = setup();
     expect(screen.getByRole('heading', { level: 2 }).textContent).toMatch(/^Good (morning|afternoon|evening), Ranjan/);
     expect(screen.getByLabelText(FIELD)).toBeTruthy();
     const chips = within(screen.getByRole('group', { name: 'Suggestions' })).getAllByRole('button');
     expect(chips.map((c) => c.textContent?.trim())).toEqual(SUGGESTIONS);
-    expect(container.querySelectorAll('.mini')).toHaveLength(3);
-    expect(screen.queryByText('Fourth')).toBeNull();
+    expect(container.querySelectorAll('.mini')).toHaveLength(5);
+    expect(screen.getByText('Fifth')).toBeTruthy();
+    expect(screen.queryByText('Sixth')).toBeNull();
     expect(container.querySelector('.chat-head')).toBeNull();
   });
 
@@ -86,17 +94,29 @@ describe('Assistant, chatting', () => {
     const { container, engine } = setup();
     await ask('what is an LLM');
     await waitFor(() => expect(container.querySelector('.chat-head')).toBeTruthy());
+    expect(screen.getByRole('button', { name: 'Home' })).toBeTruthy();
     expect(container.querySelector('.mini')).toBeNull();
     expect(container.querySelector('.dock')?.querySelector('textarea')).toBeTruthy();
     expect(container.querySelector('.msg.user .bubble')?.textContent).toBe('what is an LLM');
     await waitFor(() => expect(container.querySelector('.msg.assistant')?.textContent).toContain('You asked'));
-    expect(container.querySelector('.msg.assistant .model')?.textContent).toBe('Haiku');
+    await waitFor(() => expect(container.querySelector('.msg.assistant .model')?.textContent).toBe('Opus 5.5'));
     expect(screen.getByRole('heading', { name: 'what is an LLM' })).toBeTruthy();
     expect(engine.sent).toHaveLength(1);
 
     await fireEvent.click(screen.getByRole('button', { name: 'New chat' }));
     expect(container.querySelector('.chat-head')).toBeNull();
-    expect(container.querySelectorAll('.mini')).toHaveLength(3);
+    expect(container.querySelectorAll('.mini')).toHaveLength(5);
+  });
+
+  it('goes back to the home screen from a chat, keeping the chat in history', async () => {
+    const { container, chat } = setup();
+    await ask('what is an LLM');
+    await waitFor(() => expect(chat.running).toBe(false));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Home' }));
+    expect(container.querySelector('.chat-head')).toBeNull();
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toMatch(/^Good (morning|afternoon|evening), Ranjan/);
+    await chat.refreshChats();
+    expect(chat.chats.map((c) => c.title)).toContain('what is an LLM');
   });
 
   it('sends a suggestion chip as it is written', async () => {
@@ -113,13 +133,15 @@ describe('Assistant, chatting', () => {
     expect(engine.sent).toHaveLength(0);
   });
 
-  it('lists what the assistant did under its answer, collapsed until asked', async () => {
-    const { container } = setup();
+  it('shows only the answer and the model, not what the assistant ran', async () => {
+    const { container, chat } = setup();
     await ask('add a to-do for thursday');
-    const toggle = await screen.findByRole('button', { name: /Did 1 thing/ });
+    await waitFor(() => expect(chat.running).toBe(false));
+    expect(screen.queryByRole('button', { name: /Did \d+ thing/ })).toBeNull();
     expect(container.querySelector('.tools')).toBeNull();
-    await fireEvent.click(toggle);
-    expect(container.querySelector('.tools')?.textContent).toContain('ledge week add "Example" --day thu');
+    await waitFor(() => expect(container.querySelector('.msg.assistant .model')?.textContent).toBe('Opus 5.5'));
+    expect(container.textContent).toContain('Added it to Thursday.');
+    expect(container.textContent).not.toContain('ledge week add');
   });
 
   it('shows Stop while a turn runs, and Escape in the field stops it too', async () => {
@@ -144,9 +166,10 @@ describe('Assistant, chatting', () => {
     expect(card.textContent).toContain('Deletes a task for good.');
     await fireEvent.click(within(card).getByLabelText('Always allow this for this chat'));
     await fireEvent.click(within(card).getByRole('button', { name: 'Approve' }));
-    await waitFor(() => expect(container.querySelector('.decided')?.textContent).toContain('Approved'));
+    await waitFor(() => expect(screen.queryByRole('group', { name: /Approval needed/ })).toBeNull());
     expect(engine.decisions[0]).toMatchObject({ decision: 'approved', always: true });
     await waitFor(() => expect(container.textContent).toContain('Done, deleted it.'));
+    expect(container.textContent).not.toContain('Approved:');
   });
 
   it('cancels a risky action', async () => {
@@ -160,11 +183,11 @@ describe('Assistant, chatting', () => {
 
   it('sends the model picked by the field', async () => {
     const { engine } = setup();
-    await fireEvent.click(screen.getByRole('button', { name: 'Model: Auto' }));
-    await fireEvent.click(screen.getByRole('menuitemradio', { name: /Opus/ }));
-    expect(screen.getByRole('button', { name: 'Model: Opus' })).toBeTruthy();
+    await fireEvent.click(screen.getByRole('button', { name: 'Model: Opus 5.5' }));
+    await fireEvent.click(screen.getByRole('menuitemradio', { name: /Sonnet 5/ }));
+    expect(screen.getByRole('button', { name: 'Model: Sonnet 5' })).toBeTruthy();
     await ask('hello');
-    expect(engine.sent[0]?.model).toBe('opus');
+    expect(engine.sent[0]?.model).toBe('sonnet');
   });
 
   it('shows a failed answer with Retry', async () => {
