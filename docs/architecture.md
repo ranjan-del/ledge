@@ -95,7 +95,7 @@ The full signatures are Contract 2 in the
 | Sidecars (v3) | `contentKey`, `noteKey`, `parseSessionRecord`, `parseInsights`, `isSessionRunning`, `sessionDurationMs`, `emptyInsights`; `SessionStore`, `InsightStore` | all but the two stores |
 | Capture (v3) | `parseTranscript`, `renderDigest`, `captureDue`, `buildCapturePrompt`, `parseCaptureResult`, `matchItem`; `runCapture`, `trackSession`, `mergeInsights` | all but the last three |
 | Briefing and backfill (v3) | `buildBrief`, `missingInsights`, `buildSummarisePrompt`, `parseSummariseResult` | yes |
-| Week (to-do) | `isoWeekOf`, `weekDays`, `shiftWeek`, `isIsoWeek`, `parseWeek`, `serializeWeek`, `itemsFor`, `numberWeek`, `emptyWeek`; `WeekStore` | all but the store |
+| Week (to-do) | `isoWeekOf`, `weekDays`, `shiftWeek`, `isIsoWeek`, `parseWeek`, `serializeWeek`, `itemsFor`, `numberWeek`, `emptyWeek`, `moveWeekItem`, `setWeekItemDescription`, `moveWeekItemToWeek`; `WeekStore` | all but the store |
 | Types | `Task`, `TaskStatus`, `ChecklistItem`, `NoteEntry`, `Config`, `RepoStatus`, `TaskPaths`, `SessionRecord`, `TaskInsights` | yes |
 
 ### The planning helpers

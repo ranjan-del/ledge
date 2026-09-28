@@ -44,9 +44,13 @@ import { nowIso, todayIso } from './time.ts';
 import { isoWeekOf, parseWeek, serializeWeek, type WeekFile } from '@ledge/core/pure';
 import {
   addItem,
+  appendAnytime,
   emptyWeek,
+  locateItem,
   moveItem,
   removeItem,
+  reorderItem,
+  slotItems,
   updateItem,
   type WeekItemPatch,
   type WeekRef,
@@ -988,6 +992,30 @@ export function moveWeekItem(week: string, ref: WeekRef, to: WeekSlot): Promise<
 
 export function removeWeekItem(week: string, ref: WeekRef): Promise<WeekFile> {
   return editWeek(week, (w) => removeItem(w, ref));
+}
+
+/** Moves the open item at `from` to where the open item at `to` is, counting open items only. */
+export function reorderWeekItem(week: string, from: number, to: number): Promise<WeekFile> {
+  return editWeek(week, (w) => reorderItem(w, from, to));
+}
+
+/**
+ * Moves an item to the end of Anytime in another week. Two files change, and the order is the
+ * whole safety of it: the target is written first, then the source. A refusal on the target
+ * leaves the source as it was, and a refusal on the source leaves the item in both weeks,
+ * which is a duplicate to tidy rather than a reminder lost.
+ */
+export async function moveWeekItemToWeek(week: string, ref: WeekRef, toWeek: string): Promise<void> {
+  if (toWeek === week) return;
+  /* Any edit still queued lands first, so the item read here is the one on disk. */
+  await weekWrites;
+  const item = slotItems(await readWeek(week), ref.slot)[ref.index];
+  if (!item) throw new Error('That item is not in the week any more.');
+  await editWeek(toWeek, (w) => appendAnytime(w, item));
+  await editWeek(week, (w) => {
+    const at = locateItem(w, ref, item);
+    return at ? removeItem(w, at) : w;
+  });
 }
 
 /* ------------------------------------------------------------------ sidecars */

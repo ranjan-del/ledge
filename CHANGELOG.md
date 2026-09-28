@@ -15,6 +15,17 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ## [Unreleased]
 
+### Added
+
+- Week items can carry a description: indented `  > ` lines under the item in the week file,
+  read before the wrapped-line rule so they never join the title. `@ledge/core` adds
+  `moveWeekItem`, `setWeekItemDescription` and `moveWeekItemToWeek`, and `WeekStore.moveItem`
+  writes both weeks of a move between weeks.
+- `ledge week describe <n> "text"` (`""` clears), `ledge week add --desc "text"`,
+  `ledge week move <n> <to>` to reorder, and `ledge week move <n> --next` or `--prev` to move an
+  item to another week. `--prev` also picks last week wherever `--next` picks next week.
+  `ledge week` prints a description under its item and `--json` carries `description`.
+
 ## [0.2.0] - 2026-09-27
 
 ### Added

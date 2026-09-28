@@ -14,13 +14,14 @@ interface NumberedJson {
   text: string;
   done: boolean;
   taskId?: string;
+  description?: string;
 }
 
 interface WeekJson {
   week: string;
   today: string;
-  anytime: { text: string; done: boolean; taskId?: string }[];
-  days: Record<string, { text: string; done: boolean; taskId?: string }[]>;
+  anytime: { text: string; done: boolean; taskId?: string; description?: string }[];
+  days: Record<string, { text: string; done: boolean; taskId?: string; description?: string }[]>;
   numbered: NumberedJson[];
 }
 
@@ -172,6 +173,88 @@ describe('ledge week', () => {
     assert.equal((await run(['week', '--week', 'soon'])).code, 1);
     assert.equal((await run(['week', '--day', 'mon'])).code, 1, '--day is not for printing');
     assert.ok(existsSync(join(home, 'weeks', `${next}.md`)));
+  });
+
+  test('describe sets and clears a description, and add --desc sets one', async () => {
+    await run(['week', 'add', 'Call Divya', '--desc', 'Ask about repo access.']);
+    await run(['week', 'add', 'Plain']);
+    let json = await weekJson();
+    assert.equal(json.numbered[0]!.description, 'Ask about repo access.');
+    assert.equal('description' in json.numbered[1]!, false, 'no key when there is none');
+
+    const d = await run(['week', 'describe', '2', 'line one\nline two']);
+    assert.equal(d.code, 0, d.stderr);
+    assert.equal(d.stdout, `Described item 2 in ${thisWeek}: Plain\n`);
+    const file = readFileSync(join(home, 'weeks', `${thisWeek}.md`), 'utf8');
+    assert.match(file, /^- \[ \] Plain\n {2}> line one\n {2}> line two$/m);
+    const text = await run(['week']);
+    assert.match(text.stdout, /^ {3}2 {2}\[ \] Plain\n {10}line one\n {10}line two$/m);
+
+    const c = await run(['week', 'describe', '1', '', '--json']);
+    assert.equal(c.code, 0, c.stderr);
+    json = JSON.parse(c.stdout) as WeekJson;
+    assert.equal(json.anytime[0]!.description, undefined);
+    assert.equal(json.anytime[1]!.description, 'line one\nline two');
+
+    assert.equal((await run(['week', 'describe', '1'])).code, 1, 'describe needs text or ""');
+    assert.equal((await run(['week', 'describe', '9', 'x'])).code, 2);
+    assert.equal((await run(['week', 'tick', '1', '--desc', 'x'])).code, 1, '--desc is for add');
+  });
+
+  test('move <n> <to> reorders within the week and takes the target day', async () => {
+    await run(['week', 'add', 'A']);
+    await run(['week', 'add', 'B']);
+    await run(['week', 'add', 'C', '--day', 'wed']);
+    const m = await run(['week', 'move', '1', '3']);
+    assert.equal(m.code, 0, m.stderr);
+    assert.equal(m.stdout, `Moved "A" to item 3, Wed ${days[2]}, in ${thisWeek}\n`);
+    let json = await weekJson();
+    assert.deepEqual(json.numbered.map((i) => [i.text, i.day]), [
+      ['B', 'anytime'],
+      ['C', days[2]],
+      ['A', days[2]],
+    ]);
+    await run(['week', 'move', '3', '1']);
+    json = await weekJson();
+    assert.deepEqual(json.numbered.map((i) => [i.text, i.day]), [
+      ['A', 'anytime'],
+      ['B', 'anytime'],
+      ['C', days[2]],
+    ]);
+    const same = await run(['week', 'move', '2', '2']);
+    assert.equal(same.code, 0);
+    assert.match(same.stdout, /already there/);
+    assert.equal((await run(['week', 'move', '1', '9'])).code, 2);
+    assert.equal((await run(['week', 'move', '1', 'x'])).code, 1);
+    assert.equal((await run(['week', 'move', '1', '2', '--day', 'mon'])).code, 1, 'not both');
+  });
+
+  test('move <n> --next and --prev move the item to Anytime in another week', async () => {
+    const next = shiftWeek(thisWeek, 1);
+    const prev = shiftWeek(thisWeek, -1);
+    await run(['week', 'add', 'Keep']);
+    await run(['week', 'add', 'Carry', '--day', 'fri', '--desc', 'notes go too']);
+    const m = await run(['week', 'move', '2', '--next']);
+    assert.equal(m.code, 0, m.stderr);
+    assert.equal(m.stdout, `Moved "Carry" from ${thisWeek} to ${next}, Anytime\n`);
+    assert.deepEqual((await weekJson()).numbered.map((i) => i.text), ['Keep']);
+    assert.deepEqual((await weekJson('--next')).anytime, [{ text: 'Carry', done: false, description: 'notes go too' }]);
+
+    const back = await run(['week', 'move', '1', '--prev', '--week', next, '--json']);
+    assert.equal(back.code, 0, back.stderr);
+    assert.equal((JSON.parse(back.stdout) as WeekJson).week, next, 'prints the source week');
+    assert.deepEqual((await weekJson()).numbered.map((i) => i.text), ['Keep', 'Carry']);
+    await run(['week', 'move', '1', '--prev']);
+    assert.deepEqual((await weekJson('--prev')).numbered.map((i) => i.text), ['Keep']);
+    assert.equal((await weekJson('--prev')).week, prev);
+
+    assert.equal((await run(['week', 'move', '5', '--next'])).code, 2);
+    assert.equal((await run(['week', 'move', '1', '--next', '--prev'])).code, 1);
+    // With --day, --next still picks the week the number is read in, as it did before.
+    await run(['week', 'add', 'Later', '--next']);
+    const onDay = await run(['week', 'move', '1', '--day', 'mon', '--next']);
+    assert.equal(onDay.code, 0, onDay.stderr);
+    assert.deepEqual((await weekJson('--next')).days[weekDays(next)[0]!]!.map((i) => i.text), ['Later']);
   });
 
   test('help lists the week command', async () => {

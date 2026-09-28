@@ -67,11 +67,13 @@
     loadWeek,
     markDone,
     moveWeekItem,
+    moveWeekItemToWeek,
     openWeek,
     parkTask,
     removeTask,
     removeWeekItem,
     reorderTasks,
+    reorderWeekItem,
     saveConfigFile,
     saveTask,
     saveMarkdown,
@@ -572,6 +574,7 @@
         {taskTitle}
         onopentask={openTaskById}
         onweektick={(ref) => updateWeekItem(currentWeek, ref, { done: true })}
+        onweekupdate={(ref, patch) => updateWeekItem(currentWeek, ref, patch)}
         onopenweek={() => openWeek()}
         away={news.away}
         onresumeaway={(file) => {
@@ -617,6 +620,8 @@
             onupdate={(ref, patch) => updateWeekItem(desk.week, ref, patch)}
             onmove={(ref, to) => moveWeekItem(desk.week, ref, to)}
             onremove={(ref) => removeWeekItem(desk.week, ref)}
+            onreorder={(from, to) => reorderWeekItem(desk.week, from, to)}
+            onweekmove={(ref, to) => moveWeekItemToWeek(desk.week, ref, to)}
             onopentask={openTaskById}
             weeks={desk.weeks}
             onloadweeks={(weeks) => ensureWeeks(weeks).catch(() => undefined)}

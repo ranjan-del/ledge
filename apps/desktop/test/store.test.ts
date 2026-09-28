@@ -109,10 +109,12 @@ import {
   addWeekItem,
   browseWeek,
   moveWeekItem,
+  moveWeekItemToWeek,
   openWeek,
   rememberedTaskMode,
   removeTask,
   removeWeekItem,
+  reorderWeekItem,
   reorderTasks,
   select,
   setTaskMode,
@@ -788,6 +790,52 @@ updated: 2026-09-27T12:40:00+05:30
     expect(w.anytime).toEqual([]);
     expect(w.days[tue!]).toEqual([{ text: 'Renew the domain', done: false }]);
     expect(w.days[mon!]).toEqual([{ text: 'Review it', done: true }]);
+  });
+
+  it('reorders open items through core numbering, counting open items only', async () => {
+    const week = thisWeek();
+    const [mon, , , thu] = weekDays(week);
+    disk.files.set(weekFile(week), sample(week));
+    /* Open items: Renew (anytime), Review (Mon), Sprint (Thu). The ticked vendor call stays. */
+    await reorderWeekItem(week, 0, 2);
+    const w = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(w.anytime).toEqual([]);
+    expect(w.days[mon!]!.map((i) => i.text)).toEqual(['Call the vendor about invoices', 'Review the PR']);
+    expect(w.days[thu!]!.map((i) => i.text)).toEqual(['Sprint demo prep', 'Renew the domain']);
+  });
+
+  it('moves an item to another week by writing the target first, then the source', async () => {
+    const week = thisWeek();
+    const next = shiftWeek(week, 1);
+    const [, , , thu] = weekDays(week);
+    disk.files.set(weekFile(week), sample(week));
+    disk.files.delete(weekFile(next));
+    const renames = (rename as unknown as { mock: { calls: string[][] } }).mock.calls;
+    const before = renames.length;
+
+    await moveWeekItemToWeek(week, { slot: thu!, index: 0 }, next);
+
+    expect(renames.slice(before).map((c) => c[1])).toEqual([weekFile(next), weekFile(week)]);
+    const target = parseWeek(disk.files.get(weekFile(next)) as string, next);
+    const source = parseWeek(disk.files.get(weekFile(week)) as string, week);
+    expect(target.anytime).toEqual([{ text: 'Sprint demo prep', done: false }]);
+    expect(source.days[thu!]).toBeUndefined();
+    expect(weekFor(next).anytime).toHaveLength(1);
+    disk.files.delete(weekFile(next));
+  });
+
+  it('keeps the item in its own week when the target write is refused', async () => {
+    const week = thisWeek();
+    const prev = shiftWeek(week, -1);
+    const [, , , thu] = weekDays(week);
+    disk.files.set(weekFile(week), sample(week));
+    const text = disk.files.get(weekFile(week));
+    (writeTextFile as unknown as { mockRejectedValueOnce: (e: unknown) => void }).mockRejectedValueOnce(
+      'forbidden path',
+    );
+    await expect(moveWeekItemToWeek(week, { slot: thu!, index: 0 }, prev)).rejects.toBe('forbidden path');
+    expect(disk.files.get(weekFile(week))).toBe(text);
+    expect(disk.files.has(weekFile(prev))).toBe(false);
   });
 
   it('lists the week files for the calendar and reads only the weeks it asks for', async () => {

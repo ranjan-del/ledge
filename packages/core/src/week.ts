@@ -22,6 +22,11 @@ export interface WeekItem {
   done: boolean;
   /** Id of a task the item links to, written as a trailing ` {task: <id>}` in the file. */
   taskId?: string;
+  /**
+   * Plain text notes under the item, lines joined with `\n`, written as `  > ` lines right
+   * below it. Absent or empty means the item has none.
+   */
+  description?: string;
 }
 
 /**
@@ -65,6 +70,12 @@ const DAY_HEADING = /^##\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{4}-\d{2}-\d{2})$/
 const ITEM = /^\s*[-*]\s+\[([ xX])\]\s?(.*)$/;
 /** The link suffix. It is taken off the text only when it ends the line. */
 const TASK_LINK = /\s*\{task:\s*([^\s{}]+)\s*\}$/;
+/**
+ * An indented `>` line under an item, one line of its description. It is tested before
+ * CONTINUATION, which would otherwise join it onto the title. One space after `>` is the
+ * separator and is not part of the text.
+ */
+const DESCRIPTION = /^\s+> ?(.*)$/;
 /** An indented line that starts no new item, so it is the wrapped tail of the item above. */
 const CONTINUATION = /^\s+\S/;
 const KNOWN_KEYS = new Set(['week', 'updated']);
@@ -162,6 +173,17 @@ export function emptyWeek(week: string): WeekFile {
   return { week, anytime: [], days: {}, extra: '' };
 }
 
+/**
+ * A description as it is kept: Windows newlines made plain, trailing space off every line and
+ * blank lines off both ends. What is left is `''` when there was nothing to say.
+ */
+function tidyDescription(text: string): string {
+  const lines = text.replace(/\r\n?/g, '\n').split('\n').map((line) => line.trimEnd());
+  while (lines.length > 0 && lines[0] === '') lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines.join('\n');
+}
+
 /** Reads one item line, taking a trailing `{task: <id>}` off the text into `taskId`. */
 function readItem(mark: string, rest: string): WeekItem {
   let text = rest.trim();
@@ -185,11 +207,21 @@ function readItem(mark: string, rest: string): WeekItem {
 function readItems(lines: string[], into: WeekItem[], extra: string[]): void {
   let last: WeekItem | undefined;
   const stray: string[] = [];
+  let notes: string[] = [];
+  const endNotes = () => {
+    const description = tidyDescription(notes.join('\n'));
+    if (last !== undefined && description !== '') last.description = description;
+    notes = [];
+  };
   for (const line of lines) {
     const m = ITEM.exec(line);
+    const note = last !== undefined ? DESCRIPTION.exec(line) : null;
     if (m) {
+      endNotes();
       last = readItem(m[1]!, m[2]!);
       into.push(last);
+    } else if (note) {
+      notes.push(note[1]!);
     } else if (last !== undefined && CONTINUATION.test(line)) {
       // The link suffix, when there is one, is on the line that ends the item, so the text is
       // joined first and the suffix read again from the whole of it.
@@ -197,12 +229,14 @@ function readItems(lines: string[], into: WeekItem[], extra: string[]): void {
       if (joined.taskId === undefined && last.taskId !== undefined) joined.taskId = last.taskId;
       Object.assign(last, joined);
     } else if (line.trim() !== '') {
+      endNotes();
       stray.push(line);
       last = undefined;
     } else if (stray.length > 0) {
       stray.push(line);
     }
   }
+  endNotes();
   while (stray.length > 0 && stray[stray.length - 1]!.trim() === '') stray.pop();
   extra.push(...stray);
 }
@@ -276,12 +310,20 @@ export function parseWeek(text: string, week: string): WeekFile {
   return file;
 }
 
-/** One item as a task-list line. A line break in the text would end the item, so it is folded. */
-function itemLine(item: WeekItem): string {
+/**
+ * One item as a task-list line, then a `  > ` line per line of its description, or a bare
+ * `  >` for a blank one. A line break in the text would end the item, so it is folded.
+ */
+function itemLines(item: WeekItem): string[] {
   const text = item.text.replace(/\s*\n\s*/g, ' ').trim();
   const id = item.taskId?.trim() ?? '';
   const link = id !== '' ? ` {task: ${id}}` : '';
-  return `- [${item.done ? 'x' : ' '}] ${text}${link}`;
+  const description = tidyDescription(item.description ?? '');
+  const notes = description === '' ? [] : description.split('\n');
+  return [
+    `- [${item.done ? 'x' : ' '}] ${text}${link}`,
+    ...notes.map((line) => (line === '' ? '  >' : `  > ${line}`)),
+  ];
 }
 
 /**
@@ -304,7 +346,7 @@ export function serializeWeek(w: WeekFile): string {
 
   const section = (heading: string, items: WeekItem[]) => {
     if (items.length === 0) return;
-    parts.push(heading, '', ...items.map(itemLine), '');
+    parts.push(heading, '', ...items.flatMap(itemLines), '');
   };
   section(ANYTIME_HEADING, w.anytime);
   const inWeek = isIsoWeek(w.week) ? weekDays(w.week) : [];
@@ -338,4 +380,89 @@ export function numberWeek(w: WeekFile): NumberedWeekItem[] {
   const outside = Object.keys(w.days).filter((day) => !inWeek.includes(day)).sort();
   for (const day of [...inWeek, ...outside]) push(day, w.days[day] ?? []);
   return numbered;
+}
+
+/** A copy whose lists and items can be changed without touching the week it came from. */
+function copyWeek(w: WeekFile): WeekFile {
+  const days: Record<string, WeekItem[]> = {};
+  for (const [day, items] of Object.entries(w.days)) days[day] = items.map((i) => ({ ...i }));
+  return { ...w, anytime: w.anytime.map((i) => ({ ...i })), days };
+}
+
+/** The list a slot names, created on the WeekFile when a day has no list yet. */
+function listFor(w: WeekFile, slot: WeekSlot): WeekItem[] {
+  if (slot === 'anytime') return w.anytime;
+  w.days[slot] ??= [];
+  return w.days[slot]!;
+}
+
+/** Drops day lists that have become empty, so a written file carries only real days. */
+function pruneDays(w: WeekFile): void {
+  for (const [day, items] of Object.entries(w.days)) {
+    if (items.length === 0) delete w.days[day];
+  }
+}
+
+/** The numbered item `n` names, or a RangeError that says how many items the week has. */
+function numbered(w: WeekFile, n: number): NumberedWeekItem {
+  const all = numberWeek(w);
+  const item = Number.isInteger(n) ? all[n - 1] : undefined;
+  if (!item) {
+    const count = all.length === 0 ? 'no items' : `items 1 to ${all.length}`;
+    throw new RangeError(`No item ${n} in ${w.week}, which has ${count}`);
+  }
+  return item;
+}
+
+/**
+ * Moves item `n` to where item `to` is, both numbered as numberWeek numbers them, and returns
+ * the new week; `w` is not changed. The item takes `to`'s slot, Anytime or a day, and ends up
+ * numbered `to`: moving down it lands just after that item, moving up just before it. `n` equal
+ * to `to` gives `w` back as it is. Throws a RangeError when either number names no item.
+ */
+export function moveWeekItem(w: WeekFile, n: number, to: number): WeekFile {
+  const from = numbered(w, n);
+  const target = numbered(w, to);
+  if (n === to) return w;
+  const file = copyWeek(w);
+  const [item] = listFor(file, from.day).splice(from.index, 1);
+  // Taking the item out shifts the target up by one when both sit in one list, source first.
+  const shift = from.day === target.day && from.index < target.index ? 1 : 0;
+  const at = target.index - shift + (n < to ? 1 : 0);
+  listFor(file, target.day).splice(at, 0, item!);
+  pruneDays(file);
+  return file;
+}
+
+/**
+ * Sets the description of item `n` and returns the new week; `w` is not changed. Text that is
+ * empty or only whitespace removes the description. Throws a RangeError when `n` names no item.
+ */
+export function setWeekItemDescription(w: WeekFile, n: number, description: string): WeekFile {
+  const found = numbered(w, n);
+  const file = copyWeek(w);
+  const list = listFor(file, found.day);
+  const item = { ...list[found.index]! };
+  const tidy = tidyDescription(description);
+  if (tidy === '') delete item.description;
+  else item.description = tidy;
+  list[found.index] = item;
+  return file;
+}
+
+/**
+ * Moves item `n` of week `from` to the end of Anytime in week `to` and returns both weeks as
+ * they should now be written; neither argument is changed. Text, done, task link and
+ * description all go with it. Throws a RangeError when `n` names no item or both are one week,
+ * since writing the two results would then lose one of them.
+ */
+export function moveWeekItemToWeek(from: WeekFile, n: number, to: WeekFile): { from: WeekFile; to: WeekFile } {
+  if (from.week === to.week) throw new RangeError(`Item ${n} is already in ${from.week}`);
+  const found = numbered(from, n);
+  const source = copyWeek(from);
+  const target = copyWeek(to);
+  const [item] = listFor(source, found.day).splice(found.index, 1);
+  target.anytime.push(item!);
+  pruneDays(source);
+  return { from: source, to: target };
 }

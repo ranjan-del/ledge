@@ -120,7 +120,8 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
   let values: { json?: boolean; context?: boolean; backlog?: boolean; yes?: boolean;
     save?: boolean; repo?: string; session?: string; help?: boolean; version?: boolean;
     final?: boolean; force?: boolean; all?: boolean; ended?: boolean; transcript?: string;
-    cwd?: string; task?: string; day?: string; week?: string; next?: boolean; quiet?: boolean };
+    cwd?: string; task?: string; day?: string; week?: string; next?: boolean; prev?: boolean;
+    desc?: string; quiet?: boolean };
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
@@ -143,6 +144,8 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
         day: { type: 'string' },
         week: { type: 'string' },
         next: { type: 'boolean' },
+        prev: { type: 'boolean' },
+        desc: { type: 'string' },
         quiet: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -192,6 +195,8 @@ export async function main(argv: string[], io: Partial<MainIo> = {}): Promise<nu
     day: values.day,
     week: values.week,
     next: values.next ?? false,
+    prev: values.prev ?? false,
+    desc: values.desc,
     quiet: values.quiet ?? false,
   };
   const ctx: CommandContext = {

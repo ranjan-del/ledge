@@ -140,7 +140,7 @@ describe('To-do, the week', () => {
     const p = props();
     render(WeekView, { props: p });
     await fireEvent.click(screen.getByRole('button', { name: 'Sprint demo prep' }));
-    const field = screen.getByLabelText('Edit: Sprint demo prep');
+    const field = screen.getByLabelText('Title');
     await fireEvent.input(field, { target: { value: 'Sprint demo slides' } });
     await fireEvent.keyDown(field, { key: 'Enter' });
     expect(p.onupdate).toHaveBeenCalledWith({ slot: '2026-09-24', index: 0 }, { text: 'Sprint demo slides' });

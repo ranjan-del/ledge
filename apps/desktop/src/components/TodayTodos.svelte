@@ -1,11 +1,14 @@
 <script lang="ts">
   /**
-   * This week: the first few weekly to-do items that are not ticked yet, tickable where they
-   * are, and one line saying how many more the week holds, which opens the To-do view. A week
-   * with nothing open shows no block at all. It sits on the idle Assistant, where Now had it.
+   * This week: the first few weekly to-do items that are not ticked yet, as the same cards the
+   * To-do view draws, tickable where they are and opened in place to edit their words and
+   * description. One line says how many more the week holds, which opens the To-do view. A
+   * week with nothing open shows no block at all. It sits on the idle Assistant, where Now had
+   * it. The cards do not drag here: this is a preview of the week, not the place to plan it.
    */
   import type { WeekItem } from '@ledge/core/pure';
-  import type { WeekRef } from '../lib/week-view.ts';
+  import type { WeekItemPatch, WeekRef } from '../lib/week-view.ts';
+  import WeekItemRow from './WeekItemRow.svelte';
 
   interface Props {
     /** The first few unticked items of this week's to-do, each with where it lives in the file. */
@@ -14,6 +17,8 @@
     more?: number;
     /** Ticks one of the items. */
     ontick?: (ref: WeekRef) => unknown;
+    /** Changes an item's words or description. Without it the cards only tick. */
+    onupdate?: (ref: WeekRef, patch: WeekItemPatch) => unknown;
     /** Opens the To-do view on this week. */
     onopenweek?: () => void;
     /** A linked task's title, or undefined when that task is not on the desk. */
@@ -21,16 +26,18 @@
     onopentask?: (id: string) => void;
   }
 
-  let { items = [], more = 0, ontick, onopenweek, taskTitle, onopentask }: Props = $props();
+  let { items = [], more = 0, ontick, onupdate, onopenweek, taskTitle, onopentask }: Props = $props();
 
   const show = $derived(items.length + more > 0);
-  let error = $state('');
+  /** Which card is open, by where its item is. One at a time. */
+  let expanded = $state<string | null>(null);
+  const refKey = (ref: WeekRef) => `${ref.slot}:${ref.index}`;
 
-  function tick(ref: WeekRef) {
-    error = '';
-    void Promise.resolve()
-      .then(() => ontick?.(ref))
-      .catch((e: unknown) => (error = e instanceof Error ? e.message : String(e)));
+  /** A tick is the one edit this block always had; anything else goes to the full update. */
+  function update(ref: WeekRef, patch: WeekItemPatch): unknown {
+    if (patch.done === true && Object.keys(patch).length === 1) return ontick?.(ref);
+    if (!onupdate) throw new Error('This item can only be ticked here.');
+    return onupdate(ref, patch);
   }
 </script>
 
@@ -42,35 +49,22 @@
     </h3>
     {#if items.length > 0}
       <ul class="today-list">
-        {#each items as entry (`${entry.ref.index}:${entry.item.text}`)}
-          <li>
-            <label class="today-item motion">
-              <input
-                type="checkbox"
-                checked={false}
-                aria-label={`Tick: ${entry.item.text}`}
-                onchange={() => tick(entry.ref)}
-              />
-              <span class="what">{entry.item.text}</span>
-            </label>
-            {#if entry.item.taskId}
-              {@const title = taskTitle?.(entry.item.taskId)}
-              <button
-                type="button"
-                class="chip neutral task-chip motion"
-                disabled={title === undefined || !onopentask}
-                title={title === undefined ? 'That task is not on the desk' : 'Open the task'}
-                onclick={() => entry.item.taskId && onopentask?.(entry.item.taskId)}
-              >
-                <span class="trunc">{title ?? entry.item.taskId}</span>
-              </button>
-            {/if}
-          </li>
+        {#each items as entry (`${entry.ref.slot}:${entry.ref.index}:${entry.item.text}`)}
+          <WeekItemRow
+            item={entry.item}
+            slot={entry.ref.slot}
+            taskTitle={entry.item.taskId ? taskTitle?.(entry.item.taskId) : undefined}
+            onupdate={(patch) => update(entry.ref, patch)}
+            {onopentask}
+            expanded={expanded === refKey(entry.ref)}
+            onexpand={(open) => {
+              const key = refKey(entry.ref);
+              if (open) expanded = key;
+              else if (expanded === key) expanded = null;
+            }}
+          />
         {/each}
       </ul>
-    {/if}
-    {#if error}
-      <p class="edit-error" role="alert">{error}</p>
     {/if}
     {#if more > 0}
       <button type="button" class="more-week motion" onclick={() => onopenweek?.()}>
@@ -87,55 +81,13 @@
 {/if}
 
 <style>
-  /* Today's reminders are drawn like checklist items: they are things to tick, not tasks. */
   .today-list {
     list-style: none;
     margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
-  }
-  .today-list li {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    min-width: 0;
-  }
-  .today-item {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-2);
-    padding: 5px var(--space-2);
-    border-radius: var(--radius-sm);
-    background: var(--surface);
-    border: 1px solid var(--surface-border);
-    font-size: var(--fs-base);
-    line-height: 1.35;
-  }
-  .today-item:hover {
-    background: var(--surface-hover);
-  }
-  .today-item input {
-    margin: 2px 0 0;
-    accent-color: var(--done-fill);
-  }
-  .today-item .what {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-  .task-chip {
-    flex: none;
-    max-width: 120px;
-  }
-  .task-chip:hover:not(:disabled) {
-    color: var(--accent);
-  }
-  .task-chip:disabled {
-    cursor: default;
+    gap: var(--space-1);
   }
   .more-week {
     display: flex;

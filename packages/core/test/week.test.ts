@@ -11,9 +11,12 @@ import {
   isIsoWeek,
   isoWeekOf,
   itemsFor,
+  moveWeekItem,
+  moveWeekItemToWeek,
   numberWeek,
   parseWeek,
   serializeWeek,
+  setWeekItemDescription,
   shiftWeek,
   weekDays,
 } from '../src/index.ts';
@@ -288,9 +291,197 @@ describe('numberWeek', () => {
   });
 });
 
+describe('item descriptions', () => {
+  const WITH_NOTES = [
+    '---',
+    'week: 2026-W39',
+    '---',
+    '',
+    '## Anytime',
+    '',
+    '- [ ] Call Divya {task: abc}',
+    '  > Ask about platform repo access.',
+    '  >',
+    '  > Second paragraph.',
+    '- [x] No notes here',
+    '',
+  ].join('\n');
+
+  test('are read from the > lines, not merged into the title, and round trip', () => {
+    const w = parseWeek(WITH_NOTES, '2026-W39');
+    assert.deepEqual(w.anytime, [
+      {
+        text: 'Call Divya',
+        done: false,
+        taskId: 'abc',
+        description: 'Ask about platform repo access.\n\nSecond paragraph.',
+      },
+      { text: 'No notes here', done: true },
+    ]);
+    assert.equal(serializeWeek(w), WITH_NOTES);
+  });
+
+  test('are written under their item, a blank line as a bare >', () => {
+    const text = serializeWeek({
+      week: '2026-W39',
+      anytime: [],
+      days: { '2026-09-22': [{ text: 'Plan', done: false, description: 'one  \r\ntwo\n\n  indented\n\n' }] },
+      extra: '',
+    });
+    assert.match(text, /^- \[ \] Plan\n {2}> one\n {2}> two\n {2}>\n {2}> {3}indented\n$/m);
+    assert.equal(itemsFor(parseWeek(text, '2026-W39'), '2026-09-22')[0]!.description, 'one\ntwo\n\n  indented');
+  });
+
+  test('an empty description is not written and not read back', () => {
+    const text = serializeWeek({
+      week: '2026-W39',
+      anytime: [{ text: 'A', done: false, description: ' \n ' }],
+      days: {},
+      extra: '',
+    });
+    assert.ok(!text.includes('>'));
+    assert.deepEqual(parseWeek('## Anytime\n- [ ] A\n  >\n  >   \n', '2026-W39').anytime, [{ text: 'A', done: false }]);
+  });
+
+  test('Windows newlines and trailing space are handled, and a wrapped title still joins', () => {
+    const text = ['## Anytime', '- [ ] wrapped', '  title {task: t}', '  > note   ', '- [ ] next'].join('\r\n');
+    assert.deepEqual(parseWeek(text, '2026-W39').anytime, [
+      { text: 'wrapped title', done: false, taskId: 't', description: 'note' },
+      { text: 'next', done: false },
+    ]);
+  });
+
+  test('a > line with no item above it is prose and is kept in extra', () => {
+    const w = parseWeek('## Anytime\n  > floating quote\n- [ ] item\n', '2026-W39');
+    assert.deepEqual(w.anytime, [{ text: 'item', done: false }]);
+    assert.match(w.extra, /> floating quote/);
+  });
+
+  test('numberWeek carries the description', () => {
+    const w = parseWeek(WITH_NOTES, '2026-W39');
+    assert.equal(numberWeek(w)[0]!.description, 'Ask about platform repo access.\n\nSecond paragraph.');
+  });
+
+  test('setWeekItemDescription sets, tidies and clears without changing its argument', () => {
+    const w = parseWeek(CONTRACT_EXAMPLE, '2026-W39');
+    const set = setWeekItemDescription(w, 3, '  first\r\nsecond  \n');
+    assert.equal(numberWeek(set)[2]!.description, '  first\nsecond');
+    assert.equal(numberWeek(set)[2]!.taskId, 'teacher-corner-web-consolidation');
+    assert.equal(numberWeek(w)[2]!.description, undefined, 'the argument is not changed');
+    const cleared = setWeekItemDescription(set, 3, '   \n ');
+    assert.equal('description' in numberWeek(cleared)[2]!, false);
+    assert.equal(serializeWeek(cleared), serializeWeek(w));
+    assert.throws(() => setWeekItemDescription(w, 9, 'x'), /No item 9 in 2026-W39, which has items 1 to 4/);
+  });
+});
+
+describe('moveWeekItem', () => {
+  // 1 Renew the domain (anytime), 2 Call the vendor (Mon), 3 Review PR (Mon), 4 Sprint demo (Thu)
+  const order = (w: WeekFile) => numberWeek(w).map((i) => [i.n, i.day, i.text.split(' ')[0]]);
+
+  test('moving down lands just after the target, in the same list', () => {
+    const w = parseWeek(CONTRACT_EXAMPLE, '2026-W39');
+    const moved = moveWeekItem(w, 2, 3);
+    assert.deepEqual(order(moved), [
+      [1, 'anytime', 'Renew'],
+      [2, '2026-09-21', 'Review'],
+      [3, '2026-09-21', 'Call'],
+      [4, '2026-09-24', 'Sprint'],
+    ]);
+    assert.deepEqual(order(w)[1], [2, '2026-09-21', 'Call'], 'the argument is not changed');
+  });
+
+  test('moving up lands just before the target, in the same list', () => {
+    const moved = moveWeekItem(parseWeek(CONTRACT_EXAMPLE, '2026-W39'), 3, 2);
+    assert.deepEqual(order(moved).slice(1, 3), [
+      [2, '2026-09-21', 'Review'],
+      [3, '2026-09-21', 'Call'],
+    ]);
+  });
+
+  test('across slots the item adopts the target slot and takes its number', () => {
+    const w = parseWeek(CONTRACT_EXAMPLE, '2026-W39');
+    const down = moveWeekItem(w, 1, 4);
+    assert.deepEqual(order(down), [
+      [1, '2026-09-21', 'Call'],
+      [2, '2026-09-21', 'Review'],
+      [3, '2026-09-24', 'Sprint'],
+      [4, '2026-09-24', 'Renew'],
+    ]);
+    const up = moveWeekItem(w, 4, 1);
+    assert.deepEqual(order(up), [
+      [1, 'anytime', 'Sprint'],
+      [2, 'anytime', 'Renew'],
+      [3, '2026-09-21', 'Call'],
+      [4, '2026-09-21', 'Review'],
+    ]);
+    assert.deepEqual(Object.keys(up.days), ['2026-09-21'], 'the emptied day is dropped');
+    const mid = moveWeekItem(w, 3, 1);
+    assert.deepEqual(order(mid).slice(0, 2), [
+      [1, 'anytime', 'Review'],
+      [2, 'anytime', 'Renew'],
+    ]);
+    assert.equal(numberWeek(mid)[0]!.taskId, 'teacher-corner-web-consolidation', 'the link goes with it');
+  });
+
+  test('the description goes with the item', () => {
+    const w = setWeekItemDescription(parseWeek(CONTRACT_EXAMPLE, '2026-W39'), 1, 'note');
+    assert.equal(numberWeek(moveWeekItem(w, 1, 4))[3]!.description, 'note');
+  });
+
+  test('the same number is a no-op and a bad number throws', () => {
+    const w = parseWeek(CONTRACT_EXAMPLE, '2026-W39');
+    assert.equal(moveWeekItem(w, 2, 2), w);
+    assert.throws(() => moveWeekItem(w, 5, 1), RangeError);
+    assert.throws(() => moveWeekItem(w, 1, 0), RangeError);
+    assert.throws(() => moveWeekItem(w, 1.5, 2), RangeError);
+    assert.throws(() => moveWeekItem(emptyWeek('2026-W39'), 1, 1), /which has no items/);
+  });
+});
+
+describe('moveWeekItemToWeek', () => {
+  test('moves the item to the end of Anytime in the other week, keeping everything', () => {
+    const from = setWeekItemDescription(parseWeek(CONTRACT_EXAMPLE, '2026-W39'), 3, 'bring notes');
+    const to = emptyWeek('2026-W40');
+    to.anytime.push({ text: 'Already there', done: false });
+    const moved = moveWeekItemToWeek(from, 3, to);
+    assert.deepEqual(moved.to.anytime, [
+      { text: 'Already there', done: false },
+      { text: 'Review Teacher Corner PR', done: false, taskId: 'teacher-corner-web-consolidation', description: 'bring notes' },
+    ]);
+    assert.deepEqual(numberWeek(moved.from).map((i) => i.text), [
+      'Renew the domain',
+      'Call the vendor about invoices',
+      'Sprint demo prep',
+    ]);
+    assert.equal(numberWeek(from).length, 4, 'the source argument is not changed');
+    assert.equal(to.anytime.length, 1, 'the target argument is not changed');
+  });
+
+  test('an emptied day is dropped, done is kept, and bad input throws', () => {
+    const moved = moveWeekItemToWeek(parseWeek(CONTRACT_EXAMPLE, '2026-W39'), 4, emptyWeek('2026-W38'));
+    assert.deepEqual(Object.keys(moved.from.days), ['2026-09-21']);
+    const done = moveWeekItemToWeek(parseWeek(CONTRACT_EXAMPLE, '2026-W39'), 2, emptyWeek('2026-W40'));
+    assert.equal(done.to.anytime[0]!.done, true);
+    const w = parseWeek(CONTRACT_EXAMPLE, '2026-W39');
+    assert.throws(() => moveWeekItemToWeek(w, 1, emptyWeek('2026-W39')), /already in 2026-W39/);
+    assert.throws(() => moveWeekItemToWeek(w, 7, emptyWeek('2026-W40')), RangeError);
+  });
+});
+
 describe('the pure entry', () => {
   test('exports the week API under the same names', () => {
-    for (const name of ['isoWeekOf', 'weekDays', 'shiftWeek', 'parseWeek', 'serializeWeek', 'itemsFor']) {
+    for (const name of [
+      'isoWeekOf',
+      'weekDays',
+      'shiftWeek',
+      'parseWeek',
+      'serializeWeek',
+      'itemsFor',
+      'moveWeekItem',
+      'moveWeekItemToWeek',
+      'setWeekItemDescription',
+    ]) {
       assert.equal(typeof (pure as Record<string, unknown>)[name], 'function', name);
     }
     assert.equal((pure as Record<string, unknown>).WeekStore, undefined, 'the store is Node only');
@@ -330,6 +521,30 @@ describe('WeekStore', () => {
       const text = readFileSync(store.path('2026-W39'), 'utf8');
       assert.equal(text, serializeWeek(saved));
       assert.deepEqual(store.get('2026-W39'), saved);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  test('moveItem moves an item into another week and writes both files', () => {
+    const home = tempHome();
+    try {
+      mkdirSync(join(home, 'weeks'));
+      writeFileSync(join(home, 'weeks', '2026-W39.md'), CONTRACT_EXAMPLE);
+      const store = new WeekStore(home);
+      store.put(setWeekItemDescription(store.get('2026-W39'), 3, 'bring notes'));
+      const moved = store.moveItem('2026-W39', 3, '2026-W40', new Date('2026-09-27T07:10:00Z'));
+      assert.deepEqual(store.get('2026-W40'), moved.to);
+      assert.deepEqual(store.get('2026-W39'), moved.from);
+      assert.deepEqual(moved.to.anytime, [
+        { text: 'Review Teacher Corner PR', done: false, taskId: 'teacher-corner-web-consolidation', description: 'bring notes' },
+      ]);
+      assert.equal(numberWeek(moved.from).length, 3);
+      assert.deepEqual(readdirSync(join(home, 'weeks')).sort(), ['2026-W39.md', '2026-W40.md']);
+      assert.throws(() => store.moveItem('2026-W39', 1, '2026-W39'), RangeError);
+      assert.throws(() => store.moveItem('2026-W39', 9, '2026-W40'), RangeError);
+      assert.throws(() => store.moveItem('2026-W39', 1, '2025-W53'), RangeError);
+      assert.equal(numberWeek(store.get('2026-W39')).length, 3, 'a refused move writes nothing');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
