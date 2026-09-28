@@ -219,9 +219,11 @@ ledge current --repo "$PWD" --context    # what the SessionStart hook injects
 | `ledge note <id> "text"` | Append the text to today's `### YYYY-MM-DD` notes subsection | 0, 1, 2 |
 | `ledge when <id> <day>` | Set or clear the planned day. `<day>` is `YYYY-MM-DD`, `today`, `tomorrow`, `yesterday`, or `none` (`clear` also works) | 0, 1, 2 |
 | `ledge today` | Tasks planned for today, today's week items, overdue ones, then the remaining current tasks | 0 |
-| `ledge week [--week W\|--next]` | This week's to-do list by day, each item numbered | 0, 1, 2 |
+| `ledge week [--week W\|--next\|--prev]` | This week's to-do list by day, each item numbered | 0, 1, 2 |
 | `ledge week add "text" [--day d] [--task id]` | Add a week item. `d` is `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun`, or `anytime` (the default); `--task` must name an existing task | 0, 1, 2 |
 | `ledge week tick\|untick\|rm <n>`, `ledge week move <n> --day d` | Change week item `n`, as `ledge week` numbered it | 0, 1, 2 |
+| `ledge week describe <n> "text"` | Set item `n`'s description, shown under it; `""` clears it. `add` takes `--desc "text"` too | 0, 1, 2 |
+| `ledge week move <n> <to>`, `ledge week move <n> --next\|--prev` | Put item `n` where item `to` is, taking its day, or move it to Anytime in the next or previous week | 0, 1, 2 |
 | `ledge open <id>` | Print the task file path | 0, 1, 2 |
 | `ledge scan` | Run the git scan once, print Pending as JSON | 0 |
 | `ledge init` | Create the store, a default config and a sample task | 0 |

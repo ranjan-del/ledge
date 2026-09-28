@@ -373,9 +373,11 @@ Phase 0 is complete, and the planning and session memory additions are on `main`
 | `ledge note <id> "text"` | Append text to today's notes |
 | `ledge when <id> <YYYY-MM-DD\|today\|tomorrow\|none>` | Set or clear the planned day |
 | `ledge today` | Tasks planned for today, today's week items, overdue ones, then the remaining current tasks |
-| `ledge week [--week W\|--next] [--json]` | This week's to-do list by day, each item numbered |
-| `ledge week add "text" [--day d] [--task id]` | Add a week item; `--day` takes `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun` or `anytime` (the default) |
+| `ledge week [--week W\|--next\|--prev] [--json]` | This week's to-do list by day, each item numbered |
+| `ledge week add "text" [--day d] [--task id] [--desc t]` | Add a week item; `--day` takes `YYYY-MM-DD`, `today`, `tomorrow`, `mon` to `sun` or `anytime` (the default) |
 | `ledge week tick\|untick\|rm <n>`, `ledge week move <n> --day d` | Change week item n, as `ledge week` numbered it |
+| `ledge week describe <n> "text"` | Set item n's description; `""` clears it |
+| `ledge week move <n> <to>`, `ledge week move <n> --next\|--prev` | Put item n where item to is, or move it to Anytime in the next or previous week |
 | `ledge sessions [--task id] [--json]` | Sessions newest first with title, duration and what they left; `--json` prints the session records |
 | `ledge capture --session id --transcript path [--cwd dir] [--final] [--force]` | Read a session transcript into its task and the sidecars. The hooks run it |
 | `ledge track --session id [--transcript path] [--cwd dir] [--ended]` | Write the session record skeleton, or mark it ended. The hooks run it |

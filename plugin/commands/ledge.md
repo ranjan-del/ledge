@@ -126,6 +126,9 @@ Rules that keep the file valid:
 | `ledge week add "text" [--day <day>] [--task <id>]` | Add an item; the day defaults to Anytime |
 | `ledge week tick <n>` / `untick <n>` / `rm <n>` | Change item n, as `ledge week` numbered it |
 | `ledge week move <n> --day <day>` | Move item n to another day of the same week |
+| `ledge week move <n> <to>` | Put item n where item to is, taking its day |
+| `ledge week move <n> --next` / `--prev` | Move item n to Anytime in the next or previous week |
+| `ledge week describe <n> "text"` | Set item n's description; `""` clears it |
 
 Exit codes: 0 ok, 1 usage error, 2 not found, 3 parse error (prints file and line). If
 `ledge` is not on PATH, say so and point to the plugin README; do not try to recreate the

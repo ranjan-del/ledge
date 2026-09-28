@@ -37,6 +37,9 @@ updated: 2026-09-27T12:40:00+05:30
 
 - [x] Call the vendor about invoices
 - [ ] Review Teacher Corner PR {task: teacher-corner-web-consolidation}
+  > Ask about platform repo access.
+  >
+  > Second paragraph.
 
 ## Thu 2026-09-24
 
@@ -62,8 +65,11 @@ known ones. As with task files, YAML comments are not written back.
 | Any other heading or text | Kept verbatim in `extra` and written after the known sections |
 
 An item is a GitHub task list line, `- [ ] text` or `- [x] text`. A trailing ` {task: <task-id>}`
-links it to a task and is not part of the text. A wrapped, indented line continues the item above
-it.
+links it to a task and is not part of the text. Indented `>` lines right under an item are its
+description, plain text over as many lines as it needs: two spaces, `> `, then the line, and a
+blank line of it as a bare `  >`. Any other wrapped, indented line continues the item's text.
+Trailing space and blank lines at either end of a description are dropped, and an item with an
+empty description is written with none.
 
 Ledge writes Anytime first, then the days in calendar order, and leaves out a day with no items.
 
@@ -80,6 +86,7 @@ few lines moved to the end.
 | `## anytime` or any other spelling | Not a known heading, kept in `extra` |
 | Prose under a known heading | Moved to `extra`, with its own paragraph breaks |
 | A heading inside a fenced code block | Content of the block, never a section |
+| An indented `>` line with no item above it | Prose, moved to `extra` |
 | Frontmatter that is not valid YAML or not a mapping | Read as body text and kept in `extra` |
 | No frontmatter at all | Read as an empty header; the body is parsed as usual |
 
@@ -96,8 +103,8 @@ the file is parsed.
 ## Numbering
 
 `ledge week` prints each item with a 1-based number: Anytime first, then Monday to Sunday, items
-in file order. The numbers are stable for a given file, and `ledge week tick`, `untick`, `rm` and
-`move` take them. `numberWeek` in core gives the same numbers to any other reader.
+in file order. The numbers are stable for a given file, and `ledge week tick`, `untick`, `rm`,
+`describe` and `move` take them. `numberWeek` in core gives the same numbers to any other reader.
 
 ## ISO weeks
 
@@ -129,12 +136,19 @@ Pure, exported from `@ledge/core/pure` and `@ledge/core`:
 | `serializeWeek(w)` | `WeekFile` to text |
 | `itemsFor(w, day)` | That day's items, not Anytime |
 | `numberWeek(w)` | Every item with its number, its slot and its index in that slot |
+| `moveWeekItem(w, n, to)` | Item `n` moved to where item `to` is, taking its slot and its number |
+| `setWeekItemDescription(w, n, text)` | Item `n` with that description; empty text removes it |
+| `moveWeekItemToWeek(from, n, to)` | Item `n` moved to the end of Anytime in week `to`; both weeks back |
 | `emptyWeek(week)`, `weekdayName(day)` | An empty week; `Mon` to `Sun` for a day |
 
 `WeekFile.days` holds only days that have items, so ask `itemsFor` rather than indexing it.
 
-Node only, from `@ledge/core`: `WeekStore`, with `get(week)`, `put(file)` and `path(week)`, bound
-to `ledgeHome()` unless given a home.
+The three that change a week return a new one and leave the argument alone, and throw a
+RangeError for a number that names no item.
+
+Node only, from `@ledge/core`: `WeekStore`, with `get(week)`, `put(file)`, `path(week)` and
+`moveItem(from, n, to)`, which writes both weeks, the target first, bound to `ledgeHome()` unless
+given a home.
 
 ## Who writes it
 

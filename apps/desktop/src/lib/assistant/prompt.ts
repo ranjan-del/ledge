@@ -20,6 +20,8 @@ const LEDGE_COMMANDS = [
   '  ledge when <id> <YYYY-MM-DD|today|tomorrow|none>   ledge list --json',
   '  ledge week --json   ledge week add "text" [--next] [--task <id>]',
   '  ledge week tick <n>   ledge week untick <n>   ledge week rm <n>',
+  '  ledge week describe <n> "text"   ledge week add "text" --desc "text"',
+  '  ledge week move <n> <to>   ledge week move <n> --next|--prev   (to next or last week)',
   '  (the week is one list with no days: add without --day unless the person names a day)',
 ];
 

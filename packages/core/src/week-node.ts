@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { expandTilde, ledgeHome } from './config.ts';
 import { writeAtomic } from './sidecars-node.ts';
 import { formatIso } from './task-file.ts';
-import { emptyWeek, isIsoWeek, parseWeek, serializeWeek } from './week.ts';
+import { emptyWeek, isIsoWeek, moveWeekItemToWeek, parseWeek, serializeWeek } from './week.ts';
 import type { WeekFile } from './week.ts';
 
 /**
@@ -65,5 +65,18 @@ export class WeekStore {
     mkdirSync(this.dir, { recursive: true });
     writeAtomic(target, serializeWeek(saved));
     return saved;
+  }
+
+  /**
+   * Moves item `n` of week `from` to the end of Anytime in week `to`, as moveWeekItemToWeek
+   * does, and writes both files. Returns both as written. The target is written first, so a
+   * failure between the two writes leaves the item in both weeks rather than in neither. Throws
+   * a RangeError for a week that is not one, the same week twice, or an `n` that names no item.
+   */
+  moveItem(from: string, n: number, to: string, now: Date = new Date()): { from: WeekFile; to: WeekFile } {
+    const moved = moveWeekItemToWeek(this.get(from), n, this.get(to));
+    const target = this.put(moved.to, now);
+    const source = this.put(moved.from, now);
+    return { from: source, to: target };
   }
 }
