@@ -4,7 +4,9 @@ import {
   isIsoWeek,
   isoDay,
   isoWeekOf,
+  moveWeekItem,
   numberWeek,
+  setWeekItemDescription,
   shiftDay,
   shiftWeek,
   weekDays,
@@ -50,24 +52,32 @@ export function parseDayArg(value: string, today: string): DayArg | undefined {
   return index === -1 ? undefined : { kind: 'weekday', index };
 }
 
+/** Reads `--week`, accepting `2026W40` as well as `2026-W40`, or undefined when it is not given. */
+function weekFlag(ctx: CommandContext, name: string): string | undefined {
+  const { week } = ctx.flags;
+  if (week === undefined) return undefined;
+  const spelled = week.trim().toUpperCase().replace(/^(\d{4})W/, '$1-W');
+  if (!isIsoWeek(spelled)) {
+    throw new UsageError(`"${week}" is not a week: use YYYY-Www, e.g. 2026-W40`, name);
+  }
+  return spelled;
+}
+
 /**
- * The week a command acts on: `--week`, or next week with `--next`, or the current one. With
- * neither flag, a `--day` that is a fixed date picks its own week, so `ledge week add "x" --day
- * 2026-10-02` lands in the week that holds 2 October without the person working out its number.
+ * The week a command acts on: `--week`, or next week with `--next`, or last week with `--prev`,
+ * or the current one. With none of them, a `--day` that is a fixed date picks its own week, so
+ * `ledge week add "x" --day 2026-10-02` lands in the week that holds 2 October without the
+ * person working out its number.
  */
 function targetWeek(ctx: CommandContext, name: string, today: string, day?: DayArg): string {
-  const { week, next } = ctx.flags;
-  if (week !== undefined && next) {
-    throw new UsageError('--week and --next are exclusive', name);
+  const { week, next, prev } = ctx.flags;
+  if ([week !== undefined, next, prev].filter(Boolean).length > 1) {
+    throw new UsageError('--week, --next and --prev are exclusive', name);
   }
-  if (week !== undefined) {
-    const spelled = week.trim().toUpperCase().replace(/^(\d{4})W/, '$1-W');
-    if (!isIsoWeek(spelled)) {
-      throw new UsageError(`"${week}" is not a week: use YYYY-Www, e.g. 2026-W40`, name);
-    }
-    return spelled;
-  }
+  const spelled = weekFlag(ctx, name);
+  if (spelled !== undefined) return spelled;
   if (next) return shiftWeek(isoWeekOf(today), 1);
+  if (prev) return shiftWeek(isoWeekOf(today), -1);
   if (day?.kind === 'date') return isoWeekOf(day.day);
   return isoWeekOf(today);
 }
@@ -157,10 +167,10 @@ export function todaysWeekItems(day: string, store: WeekStore = new WeekStore())
 }
 
 /**
- * `ledge week [add|tick|untick|rm|move]`: the personal list of things to do this week, one file
- * per ISO week under `$LEDGE_HOME/weeks/`. Bare, it prints the week grouped by day with each
- * item's number; the subcommands change one item by that number and print the result. Items
- * are only ever added here, when someone asks: the capture engine never writes a week file.
+ * `ledge week [add|tick|untick|rm|move|describe]`: the personal list of things to do this week,
+ * one file per ISO week under `$LEDGE_HOME/weeks/`. Bare, it prints the week grouped by day with
+ * each item's number; the subcommands change one item by that number and print the result.
+ * Items are only ever added here, when someone asks: the capture engine never writes a week file.
  */
 export async function run(ctx: CommandContext): Promise<number> {
   const [sub, ...rest] = ctx.args;
@@ -172,6 +182,10 @@ export async function run(ctx: CommandContext): Promise<number> {
     ctx.out(ctx.flags.json ? toJson(weekJson(file, today)) : message);
     return EXIT.ok;
   };
+
+  if (ctx.flags.desc !== undefined && sub !== 'add') {
+    throw new UsageError('--desc is for week add', 'week');
+  }
 
   if (sub === undefined || sub === 'show') {
     if (ctx.flags.day !== undefined) {
@@ -195,6 +209,8 @@ export async function run(ctx: CommandContext): Promise<number> {
     const file = copyWeek(weeks.get(week));
     const item: WeekItem = { text, done: false };
     if (taskId) item.taskId = requireTask(store, taskId).id;
+    const description = ctx.flags.desc?.trim() ?? '';
+    if (description !== '') item.description = description;
     const list = listFor(file, slot);
     list.push(item);
     const saved = weeks.put(file);
@@ -221,10 +237,59 @@ export async function run(ctx: CommandContext): Promise<number> {
     return done(weeks.put(file), `${verb} item ${n} in ${week}: ${found.text}`);
   }
 
+  if (sub === 'describe') {
+    if (ctx.flags.day !== undefined) {
+      throw new UsageError('--day is for week add and week move', 'week');
+    }
+    const n = itemNumber(rest[0], 'describe');
+    if (rest.length < 2) {
+      throw new UsageError('week describe needs the text, or "" to clear it', 'week');
+    }
+    const week = targetWeek(ctx, 'week', today);
+    const file = weeks.get(week);
+    const found = findItem(file, n);
+    const saved = weeks.put(setWeekItemDescription(file, n, rest.slice(1).join(' ')));
+    const verb = numberWeek(saved)[n - 1]!.description ? 'Described' : 'Cleared the description of';
+    return done(saved, `${verb} item ${n} in ${week}: ${found.text}`);
+  }
+
+  if (sub === 'move' && rest[1] !== undefined) {
+    // `move <n> <to>` reorders inside one week, so --next and --prev pick that week as they do
+    // for tick and rm.
+    if (ctx.flags.day !== undefined) {
+      throw new UsageError('week move takes a position or --day, not both', 'week');
+    }
+    const n = itemNumber(rest[0], 'move');
+    const to = itemNumber(rest[1], 'move');
+    const week = targetWeek(ctx, 'week', today);
+    const file = weeks.get(week);
+    const found = findItem(file, n);
+    const target = findItem(file, to);
+    if (n === to) return done(file, `Item ${n} in ${week} is already there: ${found.text}`);
+    const saved = weeks.put(moveWeekItem(file, n, to));
+    return done(saved, `Moved "${found.text}" to item ${to}, ${weekItemLabel(target.day)}, in ${week}`);
+  }
+
+  if (sub === 'move' && ctx.flags.day === undefined && (ctx.flags.next || ctx.flags.prev)) {
+    // With no position and no day, --next and --prev say where the item goes, and the item is
+    // numbered in the week --week names, or in this one.
+    if (ctx.flags.next && ctx.flags.prev) {
+      throw new UsageError('--next and --prev are exclusive', 'week');
+    }
+    const n = itemNumber(rest[0], 'move');
+    const from = weekFlag(ctx, 'week') ?? isoWeekOf(today);
+    const to = shiftWeek(from, ctx.flags.next ? 1 : -1);
+    const found = findItem(weeks.get(from), n);
+    const moved = weeks.moveItem(from, n, to);
+    return done(moved.from, `Moved "${found.text}" from ${from} to ${to}, Anytime`);
+  }
+
   if (sub === 'move') {
     const n = itemNumber(rest[0], 'move');
     const day = dayFlag(ctx, 'week', today);
-    if (day === undefined) throw new UsageError(`week move needs --day: ${DAY_HELP}`, 'week');
+    if (day === undefined) {
+      throw new UsageError(`week move needs a position <to>, --next, --prev or --day: ${DAY_HELP}`, 'week');
+    }
     // The item is found by its number in the week being shown, so a fixed date never picks the
     // week here: it has to be inside the week the number came from.
     const week = targetWeek(ctx, 'week', today);

@@ -35,8 +35,12 @@ export interface Flags {
   day?: string;
   /** With week: the ISO week to act on, `YYYY-Www`, instead of the current one. */
   week?: string;
-  /** With week: act on next week instead of the current one. */
+  /** With week: act on next week instead of the current one. With week move: move to it. */
   next: boolean;
+  /** With week: act on the previous week instead of the current one. With week move: move to it. */
+  prev: boolean;
+  /** With week add: the item's description. */
+  desc?: string;
   /** With summarise: no progress lines on stderr. */
   quiet: boolean;
 }
