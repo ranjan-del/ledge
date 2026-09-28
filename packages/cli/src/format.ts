@@ -206,10 +206,16 @@ export function weekItemLabel(slot: string): string {
   return slot === 'anytime' ? 'Anytime' : `${weekdayName(slot)} ${slot}`;
 }
 
-/** One numbered item as a line: number, box, text, and the linked task when there is one. */
+/**
+ * One numbered item as an indented line: number, box, text, and the linked task when there is one. A
+ * description follows on its own lines, lined up under the text, so the number stays the only
+ * thing in the left margin.
+ */
 function weekItemLine(item: NumberedWeekItem): string {
   const link = item.taskId ? `  (task: ${item.taskId})` : '';
-  return `${String(item.n).padStart(2)}  [${item.done ? 'x' : ' '}] ${item.text}${link}`;
+  const line = `${String(item.n).padStart(2)}  [${item.done ? 'x' : ' '}] ${item.text}${link}`;
+  const notes = item.description ? item.description.split('\n') : [];
+  return [`  ${line}`, ...notes.map((note) => (note === '' ? '' : `          ${note}`))].join('\n');
 }
 
 /**
@@ -240,12 +246,12 @@ export function renderWeek(file: WeekFile, today: string): string {
     const items = numbered.filter((item) => item.day === slot);
     if (items.length === 0 && slot !== 'anytime') continue;
     const title = weekItemLabel(slot) + (slot === today ? ' (today)' : '');
-    const body = items.length === 0 ? '  (none)' : items.map((i) => `  ${weekItemLine(i)}`).join('\n');
+    const body = items.length === 0 ? '  (none)' : items.map(weekItemLine).join('\n');
     blocks.push(`${title}\n${body}`);
   }
   const outside = numbered.filter((item) => item.day !== 'anytime' && !days.includes(item.day));
   if (outside.length > 0) {
-    blocks.push(`Outside this week\n${outside.map((i) => `  ${weekItemLine(i)}`).join('\n')}`);
+    blocks.push(`Outside this week\n${outside.map(weekItemLine).join('\n')}`);
   }
   if (file.extra.trim() !== '') blocks.push('Other text in the file is kept; see ledge week --json.');
   return blocks.join('\n\n');

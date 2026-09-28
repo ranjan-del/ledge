@@ -26,7 +26,7 @@
   import { reducedMotion, startStaggerWindow, staggering } from '../lib/motion.svelte.ts';
   import { basename } from '../lib/paths.ts';
   import { relativeTime } from '../lib/time.ts';
-  import type { WeekRef } from '../lib/week-view.ts';
+  import type { WeekItemPatch, WeekRef } from '../lib/week-view.ts';
   import ChatBubble from './ChatBubble.svelte';
   import ChatHistory from './ChatHistory.svelte';
   import Composer from './Composer.svelte';
@@ -53,6 +53,8 @@
     weekToday?: { item: WeekItem; ref: WeekRef }[];
     weekMore?: number;
     onweektick?: (ref: WeekRef) => unknown;
+    /** Changes a to-do item's words or description from its card. */
+    onweekupdate?: (ref: WeekRef, patch: WeekItemPatch) => unknown;
     onopenweek?: () => void;
     taskTitle?: (id: string) => string | undefined;
     onopentask?: (id: string) => void;
@@ -80,6 +82,7 @@
     weekToday = [],
     weekMore = 0,
     onweektick,
+    onweekupdate,
     onopenweek,
     taskTitle,
     onopentask,
@@ -289,6 +292,7 @@
           items={weekToday}
           more={weekMore}
           ontick={onweektick}
+          onupdate={onweekupdate}
           {onopenweek}
           {taskTitle}
           {onopentask}
