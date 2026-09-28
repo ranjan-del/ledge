@@ -79,6 +79,7 @@ export function parseChatFile(text: string): ChatRecord | undefined {
         role: m.role === 'assistant' ? 'assistant' : 'user',
         text: typeof m.text === 'string' ? m.text : '',
         ...(m.model === 'haiku' || m.model === 'sonnet' || m.model === 'opus' ? { model: m.model } : {}),
+        ...(typeof m.modelId === 'string' && m.modelId !== '' ? { modelId: m.modelId } : {}),
         tools: Array.isArray(m.tools) ? (m.tools as ChatMessage['tools']) : [],
         approvals: Array.isArray(m.approvals) ? (m.approvals as ChatMessage['approvals']) : [],
         at: typeof m.at === 'string' ? m.at : '',

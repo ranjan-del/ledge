@@ -40,8 +40,8 @@ describe('route', () => {
     'tick the second to-do',
     'what should I focus on today',
     'please add "review PR" to friday',
-  ])('sends the desk question or action %j to Sonnet', (text) => {
-    expect(route(text)).toBe('sonnet');
+  ])('sends the desk question or action %j to Opus', (text) => {
+    expect(route(text)).toBe('opus');
   });
 
   it.each([
@@ -62,11 +62,11 @@ describe('route', () => {
   });
 
   it('does not count a review inside a quoted to-do as analysis', () => {
-    expect(route('add "review the architecture doc" to thursday')).toBe('sonnet');
+    expect(route('add "review the architecture doc" to thursday')).toBe('opus');
   });
 
   it('treats names on the desk as desk questions', () => {
-    expect(route('how is Helios doing', [], { deskTerms: ['Helios rollout', 'helios'] })).toBe('sonnet');
+    expect(route('how is Helios doing', [], { deskTerms: ['Helios rollout', 'helios'] })).toBe('opus');
     expect(route('how is Helios doing')).toBe('haiku');
   });
 
@@ -75,7 +75,7 @@ describe('route', () => {
       { role: 'user' as const, text: 'what is pending' },
       { role: 'assistant' as const, text: 'Two things.', model: 'sonnet' as const },
     ];
-    expect(route('and why is that?', history)).toBe('sonnet');
+    expect(route('and why is that?', history)).toBe('opus');
     expect(route('why is the sky blue?', history)).toBe('haiku');
     const chat = [{ role: 'assistant' as const, text: 'Paris.', model: 'haiku' as const }];
     expect(route('and why is that?', chat)).toBe('haiku');
@@ -87,10 +87,16 @@ describe('resolveModel', () => {
     expect(resolveModel('opus', 'what is an llm')).toBe('opus');
     expect(resolveModel('haiku', 'add call vendor to thursday')).toBe('haiku');
     expect(resolveModel('auto', 'what is an llm')).toBe('haiku');
-    expect(resolveModel(undefined, 'add call vendor to thursday')).toBe('sonnet');
+    expect(resolveModel(undefined, 'add call vendor to thursday')).toBe('opus');
   });
 
   it('labels models for the UI', () => {
-    expect([modelLabel('haiku'), modelLabel('sonnet'), modelLabel('opus')]).toEqual(['Haiku', 'Sonnet', 'Opus']);
+    expect([modelLabel('haiku'), modelLabel('sonnet'), modelLabel('opus')]).toEqual(['Haiku 4.5', 'Sonnet 5', 'Opus 5.5']);
+    expect(modelLabel('opus', 'claude-opus-5-5')).toBe('Opus 5.5');
+    expect(modelLabel('opus', 'claude-opus-5-5[1m]')).toBe('Opus 5.5');
+    expect(modelLabel('haiku', 'claude-haiku-4-5-20251001')).toBe('Haiku 4.5');
+    expect(modelLabel('sonnet', 'claude-sonnet-5')).toBe('Sonnet 5');
+    expect(modelLabel('sonnet', 'claude-fable-5-1')).toBe('Fable 5.1');
+    expect(modelLabel('opus', 'not-a-model')).toBe('Opus 5.5');
   });
 });

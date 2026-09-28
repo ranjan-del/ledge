@@ -18,7 +18,7 @@ describe('AssistantChat', () => {
     await settle(chat);
     expect(chat.messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(chat.messages[1]?.text).toContain('You asked: what is an LLM.');
-    expect(chat.messages[1]?.model).toBe('haiku');
+    expect(chat.messages[1]?.model).toBe('opus');
     expect(chat.chatting).toBe(true);
     expect(chat.title).toBe('what is an LLM');
   });

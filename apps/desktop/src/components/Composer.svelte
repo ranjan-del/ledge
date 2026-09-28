@@ -1,11 +1,12 @@
 <script module lang="ts">
   import type { ModelChoice } from '../lib/assistant/types.ts';
+  import { MODEL_NAMES } from '../lib/assistant/router.ts';
 
   export const MODEL_CHOICES: { id: ModelChoice; label: string; hint: string }[] = [
-    { id: 'auto', label: 'Auto', hint: 'Picks per question' },
-    { id: 'haiku', label: 'Haiku', hint: 'Quick general questions' },
-    { id: 'sonnet', label: 'Sonnet', hint: 'Work questions and actions' },
-    { id: 'opus', label: 'Opus', hint: 'Analysis and planning' },
+    { id: 'opus', label: MODEL_NAMES.opus, hint: 'Default: every question and action' },
+    { id: 'auto', label: 'Auto', hint: 'Haiku for quick chat, Opus for the rest' },
+    { id: 'sonnet', label: MODEL_NAMES.sonnet, hint: 'Work questions and actions' },
+    { id: 'haiku', label: MODEL_NAMES.haiku, hint: 'Quick general questions' },
   ];
 </script>
 

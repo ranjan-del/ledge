@@ -4,9 +4,10 @@
  *
  * - haiku: a short general-knowledge or chit-chat question that names nothing on the desk.
  * - opus: asks to analyse, plan, design, review, compare or audit, or is long (over 400 chars).
- * - sonnet: everything else, including every action and every question about the desk.
+ * - opus: also everything else, including every action and every question about the desk.
  *
- * Sonnet is the safe default, so every doubt resolves to it.
+ * Opus is the safe default, so every doubt resolves to it. Auto never picks Sonnet; it stays
+ * in the picker for anyone who wants it by hand.
  */
 import type { ModelChoice, ResolvedModel } from './types.ts';
 
@@ -96,15 +97,13 @@ export function route(text: string, history: readonly RouteTurn[] = [], options:
   const trimmed = text.trim();
   if (trimmed.length > LONG_TEXT) return 'opus';
   const bare = withoutQuotes(trimmed);
-  const action = ACTION_START_RE.test(bare);
-  if (!action && ANALYSIS_RE.test(bare)) return 'opus';
-  if (action) return 'sonnet';
-  if (WORK_RE.test(bare) || DESK_RE.test(bare)) return 'sonnet';
-  if (namesSomething(trimmed) || mentionsDeskTerm(trimmed, options.deskTerms)) return 'sonnet';
-  if (trimmed.length > SHORT_TEXT) return 'sonnet';
+  if (ACTION_START_RE.test(bare) || ANALYSIS_RE.test(bare)) return 'opus';
+  if (WORK_RE.test(bare) || DESK_RE.test(bare)) return 'opus';
+  if (namesSomething(trimmed) || mentionsDeskTerm(trimmed, options.deskTerms)) return 'opus';
+  if (trimmed.length > SHORT_TEXT) return 'opus';
   // A short follow-up to a desk answer stays with the model that knows the thread.
   const last = [...history].reverse().find((t) => t.role === 'assistant');
-  if (last?.model && last.model !== 'haiku' && FOLLOW_UP_RE.test(bare)) return 'sonnet';
+  if (last?.model && last.model !== 'haiku' && FOLLOW_UP_RE.test(bare)) return 'opus';
   return 'haiku';
 }
 
@@ -118,7 +117,21 @@ export function resolveModel(
   return choice && choice !== 'auto' ? choice : route(text, history, options);
 }
 
-/** The display name the UI shows under an answer. */
-export function modelLabel(model: ResolvedModel): string {
-  return model === 'haiku' ? 'Haiku' : model === 'opus' ? 'Opus' : 'Sonnet';
+/** What each alias resolves to today, for when Claude Code has not said which model answered. */
+export const MODEL_NAMES: Record<ResolvedModel, string> = { haiku: 'Haiku 4.5', sonnet: 'Sonnet 5', opus: 'Opus 5.5' };
+
+/**
+ * The name with its version, from a model id such as `claude-opus-5-5`, `claude-sonnet-5` or
+ * `claude-haiku-4-5-20251001`. Undefined when the id is not one of those.
+ */
+export function nameFromModelId(id: string | undefined): string | undefined {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(?:\[[^\]]*\])?$/.exec(id?.trim() ?? '');
+  if (!m) return undefined;
+  const family = m[1]!.charAt(0).toUpperCase() + m[1]!.slice(1);
+  return m[3] ? `${family} ${m[2]}.${m[3]}` : `${family} ${m[2]}`;
+}
+
+/** The display name the UI shows under an answer: the model that really answered, with its version. */
+export function modelLabel(model: ResolvedModel, modelId?: string): string {
+  return nameFromModelId(modelId) ?? MODEL_NAMES[model];
 }
