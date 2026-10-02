@@ -17,6 +17,7 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ### Added
 
+- Flagship documentation standard: a "Project documentation" table in the README covering README, Architecture, Design decisions, Benchmarks, Failure cases, Evaluation, Trade-offs, Deployment, Cost and Future work, with stub documents for the sections not yet written
 - Week items can carry a description: indented `  > ` lines under the item in the week file,
   read before the wrapped-line rule so they never join the title. `@ledge/core` adds
   `moveWeekItem`, `setWeekItemDescription` and `moveWeekItemToWeek`, and `WeekStore.moveItem`
