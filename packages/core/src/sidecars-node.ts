@@ -12,7 +12,7 @@
  * treated as absent. Nothing in this file throws on the way in except `put` with an id that would
  * escape the folder, which is a caller bug and should be loud.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expandTilde, ledgeHome } from './config.ts';
 import {
@@ -146,6 +146,21 @@ export class SessionStore {
     this.folder.put(record.id, record);
     return record;
   }
+
+  /**
+   * Attributes every session of the tasks in `fromIds` to `intoId` instead, which is what a
+   * merge needs so the next capture of those sessions lands in the parent. Returns how many
+   * records changed.
+   */
+  reassign(fromIds: readonly string[], intoId: string): number {
+    let changed = 0;
+    for (const record of this.folder.all()) {
+      if (record.taskId === undefined || !fromIds.includes(record.taskId)) continue;
+      this.put({ ...record, taskId: intoId });
+      changed++;
+    }
+    return changed;
+  }
 }
 
 /**
@@ -181,5 +196,10 @@ export class InsightStore {
   put(insights: TaskInsights): TaskInsights {
     this.folder.put(insights.taskId, insights);
     return insights;
+  }
+
+  /** Deletes a task's insights, for a task that no longer exists. Absent is fine. */
+  remove(taskId: string): void {
+    rmSync(this.folder.file(taskId), { force: true });
   }
 }

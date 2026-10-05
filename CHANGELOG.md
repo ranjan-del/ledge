@@ -15,7 +15,22 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
 
 ## [Unreleased]
 
+### Fixed
+
+- Background capture no longer splits one piece of work into many tasks. A session already
+  linked to a task never creates another one: what the model would have made a new task lands
+  in the linked task's checklist as `[sub-goal] item` lines, and its plan is not replaced. An
+  unlinked session whose new goal reads like an open task (`similarTitle`) adds to that task.
+  Sessions in a linked git worktree are matched against the main checkout's tasks, and a
+  session at a repo root is offered the tasks of folders inside it.
+- The session standing rules and `/ledge` now say a step, batch or sub-goal of the current
+  task is a `ledge todo`, never a `ledge add`.
+
 ### Added
+
+- `ledge merge <keep> <dup>... --yes` folds duplicate or sub-tasks into one task: checklists
+  move in marked with the child's title, notes keep their days, requirement, plan and
+  references go under References, session records are reassigned and the child files go.
 
 - Flagship documentation standard: a "Project documentation" table in the README covering README, Architecture, Design decisions, Benchmarks, Failure cases, Evaluation, Trade-offs, Deployment, Cost and Future work, with stub documents for the sections not yet written
 - Week items can carry a description: indented `  > ` lines under the item in the week file,

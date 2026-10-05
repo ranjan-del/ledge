@@ -19,6 +19,7 @@ import { run as init } from './commands/init.ts';
 import { run as link } from './commands/link.ts';
 import { run as list } from './commands/list.ts';
 import { run as memory } from './commands/memory.ts';
+import { run as merge } from './commands/merge.ts';
 import { run as note } from './commands/note.ts';
 import { run as open } from './commands/open.ts';
 import { run as park } from './commands/park.ts';
@@ -61,6 +62,7 @@ const COMMANDS: Record<string, CommandRunner> = {
   start,
   park,
   delete: deleteTask,
+  merge,
   done,
   current,
   link,
