@@ -66,6 +66,9 @@ const LOG_MAX_BYTES = 1024 * 1024;
 /** Most candidate tasks shown to the model. More than this in one folder is a desk to tidy. */
 const MAX_CANDIDATES = 12;
 
+/** Most other open tasks listed in one line each. A desk has a few dozen; this is generous. */
+const MAX_OTHER_TASKS = 80;
+
 /** Reads commits made in a folder between two instants. Injected in tests. */
 export type GitLogReader = (cwd: string, since: string, until: string) => Promise<SessionCommit[]>;
 
@@ -465,9 +468,14 @@ async function captureLocked(
   const candidates = candidatesFor(store, cwd, options.sessionId, previous?.taskId, paths);
   const linked = [previous?.taskId, candidates.find((t) => t.sessions.includes(options.sessionId))?.id]
     .find((id) => id !== undefined && candidates.some((t) => t.id === id));
+  const otherTasks = store
+    .list()
+    .filter((task) => task.status !== 'done' && !candidates.some((c) => c.id === task.id))
+    .slice(0, MAX_OTHER_TASKS);
   const prompt = buildCapturePrompt({
     digest: renderDigest(digest, { sinceLine: previous?.capturedLines ?? 0 }),
     candidates,
+    otherTasks,
     linkedTaskId: linked,
     cwd,
     day,
@@ -486,7 +494,7 @@ async function captureLocked(
       digest.lineCount,
     );
   }
-  const parsed = parseCaptureResult(answer, candidates.map((task) => task.id));
+  const parsed = parseCaptureResult(answer, [...candidates, ...otherTasks].map((task) => task.id));
   if (!parsed.result) {
     return outcome(
       { status: 'failed', reason: `answer refused: ${parsed.error}`, taskId: previous?.taskId },

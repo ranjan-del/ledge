@@ -489,6 +489,26 @@ describe('one piece of work, one task', () => {
     assert.deepEqual(store.get(other.id).checklist.map((item) => item.text), ['[Release banner watch] Write version.json']);
   });
 
+  test('a session in another folder can be attributed to an open task listed from anywhere', async () => {
+    const home = freshHome();
+    const { cwd, transcript } = sessionFolder(home);
+    const store = new TaskStore(home);
+    const far = store.add({ title: 'RagFabric', repo: join(home, 'AI', 'ragfabric'), requirement: 'Self hosted retrieval platform.' });
+    const before = store.list().length;
+    const provider = answering({
+      taskId: far.id,
+      checklistAdd: ['[Phase 7] Route sub-questions to graph search'],
+      session: { title: 'Phase 7 routing', summary: '' },
+    });
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.status, 'captured', outcome.reason);
+    assert.equal(outcome.taskId, far.id);
+    assert.equal(store.list().length, before, 'no task was made');
+    assert.match(provider.prompts[0]!, /\n- ragfabric \| RagFabric \| \S+ragfabric \| Self hosted retrieval platform\.\n/);
+    assert.match(provider.prompts[0]!, /then every line of OTHER OPEN TASKS/);
+    assert.deepEqual(store.get(far.id).checklist.map((i) => i.text), ['[Phase 7] Route sub-questions to graph search']);
+  });
+
   test('a session in a linked worktree sees the tasks of the main checkout', async () => {
     const home = realpathSync(freshHome());
     const main = join(home, 'platform');
