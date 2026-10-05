@@ -131,6 +131,55 @@ export function foldIntoTask(result: CaptureResult, taskId: string): CaptureResu
   return folded;
 }
 
+/**
+ * The second look before a task is made. The capture prompt is long and mostly about the
+ * session, and a model reading it often misses that the "new" goal is a part of a task listed
+ * forty lines up: the same phone, the same project in another folder, the next phase. So when
+ * an answer asks for a new task, this one narrow question is asked on its own, with only the
+ * proposed task and the open tasks in view. Related work belongs in the task it relates to.
+ */
+export function buildRelatedPrompt(proposed: { title: string; requirement: string }, open: readonly Task[]): string {
+  const lines = open.map((task) => {
+    const first = task.requirement.split('\n').find((l) => l.trim() !== '');
+    return `- ${task.id} | ${clip(task.title, 90)} | ${task.repo ?? '-'} | ${first ? clip(first, 200) : '-'}`;
+  });
+  return [
+    'Someone is about to create a new task in their task list. Decide whether it should instead',
+    'go inside a task that is already open. Answer with one JSON object and nothing else.',
+    '',
+    'It belongs in an open task when it is the same goal, a part, step, phase, batch or',
+    'follow-up of it, or about the same project, product, repository, device or topic, even when',
+    'the wording is completely different. Answer null only when no open task covers that subject.',
+    '',
+    `PROPOSED TASK: ${clip(proposed.title, 120)}`,
+    `requirement: ${proposed.requirement === '' ? '(none)' : clip(proposed.requirement, 600)}`,
+    '',
+    '=== OPEN TASKS (id | title | repo | requirement) ===',
+    ...(lines.length === 0 ? ['(none)'] : lines),
+    '=== END OPEN TASKS ===',
+    '',
+    'The JSON shape: {"taskId": "<open task id>" | null, "why": "one short sentence"}',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Reads the second look's answer: an open task's id, null for "really new", or an error when
+ * the answer cannot be trusted either way, in which case no task is made this time.
+ */
+export function parseRelatedAnswer(
+  text: string,
+  openIds: readonly string[],
+): { taskId: string | null; error?: undefined } | { taskId?: undefined; error: string } {
+  const data = extractJsonObject(text);
+  if (!data) return { error: 'the second look held no JSON object' };
+  if (data.taskId === null || data.taskId === undefined || data.taskId === '') return { taskId: null };
+  if (typeof data.taskId !== 'string') return { error: 'the second look gave a taskId that is not a string' };
+  const id = data.taskId.trim();
+  if (!openIds.includes(id)) return { error: `the second look named ${JSON.stringify(id)}, which is not open` };
+  return { taskId: id };
+}
+
 const TITLE_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'to', 'of', 'for', 'in', 'on', 'with', 'by']);
 
 /**

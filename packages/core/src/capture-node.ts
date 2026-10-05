@@ -34,11 +34,13 @@ import type { Provider } from './ai.ts';
 import { sanitizeForNote } from './ai.ts';
 import {
   buildCapturePrompt,
+  buildRelatedPrompt,
   captureDue,
   foldIntoTask,
   matchChecklistItem,
   matchItem,
   parseCaptureResult,
+  parseRelatedAnswer,
   samePlan,
   similarTitle,
 } from './capture.ts';
@@ -507,11 +509,30 @@ async function captureLocked(
     // One piece of work, one task. A linked session adds to its task; a new goal that reads like
     // a task already open adds to that one. Only a session with neither makes a task.
     const open = store.list().filter((task) => task.status !== 'done');
-    const into = linked ?? open[similarTitle(open.map((task) => task.title), result.newTask.title)]?.id;
-    if (into) {
-      folded = into === linked ? ', folded into the linked task' : ', folded into a similar task';
-      result = foldIntoTask(result, into);
+    let into = linked ?? open[similarTitle(open.map((task) => task.title), result.newTask.title)]?.id;
+    if (into) folded = into === linked ? ', folded into the linked task' : ', folded into a similar task';
+    else if (open.length > 0) {
+      // The second look. A failed or untrustworthy answer makes no task this time: the record is
+      // left as it was, and the next capture reads the same lines and asks again.
+      let second;
+      try {
+        const text = (await options.provider.ask(buildRelatedPrompt(result.newTask, open), { timeoutMs: CAPTURE_TIMEOUT_MS })).text;
+        second = parseRelatedAnswer(text, open.map((task) => task.id));
+      } catch (error) {
+        second = { error: `second look failed: ${(error as Error).message}` };
+      }
+      if (second.error !== undefined) {
+        return outcome(
+          { status: 'failed', reason: `no task made, ${second.error}`, taskId: previous?.taskId },
+          digest.lineCount,
+        );
+      }
+      if (second.taskId) {
+        into = second.taskId;
+        folded = ', folded into a related task on a second look';
+      }
     }
+    if (into) result = foldIntoTask(result, into);
   }
 
   const applied = applyToTask(store, result, options.sessionId, paths.main ?? cwd, day);
