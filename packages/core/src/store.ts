@@ -13,6 +13,7 @@ import {
   appendNote as appendNotePure,
   appendReference as appendReferencePure,
   isIsoDay,
+  mergeTask,
   setPlan as setPlanPure,
 } from './planning.ts';
 import { parseTask, serializeTask } from './task-file-node.ts';
@@ -204,6 +205,27 @@ export class TaskStore {
     if (task.file) rmSync(task.file, { force: true });
     this.compact(task.status, id);
     return task;
+  }
+
+  /**
+   * Folds each of `fromIds` into `intoId` (see mergeTask) and deletes their files, then notes
+   * under today what was merged, so the parent says where its new lines came from. Every id is
+   * read before anything is written, so a typo fails before any file changes. Returns the
+   * parent as saved and the tasks that were folded in.
+   */
+  merge(intoId: string, fromIds: string[], day?: string): { task: Task; merged: Task[] } {
+    const into = this.get(intoId);
+    const merged = [...new Set(fromIds)].map((id) => {
+      if (id === intoId) throw new Error(`Cannot merge ${id} into itself`);
+      return this.get(id);
+    });
+    let next = into;
+    for (const from of merged) next = mergeTask(next, from);
+    const titles = merged.map((t) => `"${t.title}" (${t.id})`).join(', ');
+    next = appendNotePure(next, `Merged in ${titles}: their checklists are marked with their titles, their notes kept under their days, the rest under References.`, day);
+    const saved = this.save(next);
+    for (const from of merged) this.remove(from.id);
+    return { task: this.get(saved.id), merged };
   }
 
   /**

@@ -5,6 +5,7 @@
  * function returns a new Task and never mutates its argument, because the store's pattern is
  * read, pure transform, save.
  */
+import { matchChecklistItem, matchItem } from './capture.ts';
 import type { NoteEntry, Task } from './types.ts';
 
 const ISO_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -108,4 +109,52 @@ export function appendReference(task: Task, text: string): Task {
  */
 export function setPlan(task: Task, steps: string[]): Task {
   return { ...task, plan: steps.map((step) => step.trim()).filter((step) => step !== '') };
+}
+
+/**
+ * Folds one task into another and returns the copy of `into` that results; `from` itself is
+ * left alone, removing it is the store's job. This is how two records of one piece of work
+ * become one again: the child's checklist moves into the parent marked with the child's title,
+ * `[child title] item`, so the parent can still tell which subtask each line came from. A plan
+ * step the child never turned into a checklist item moves over as an unchecked item too, since
+ * a child's plan is its to-do list. An item the parent already has is not repeated, though a
+ * tick on the child's copy still ticks it. A child with nothing to carry still leaves one line,
+ * its own title, so the subtask is not lost from view.
+ *
+ * Everything that is not a to-do keeps its meaning: each dated note goes under the same day in
+ * the parent, introduced by where it came from, and the requirement, plan and references go
+ * into References as raw material. Sessions are joined so the history of both stays reachable.
+ * The parent's title, status, order, repo, plan and requirement are never changed.
+ */
+export function mergeTask(into: Task, from: Task): Task {
+  const label = from.title.trim();
+  const checklist = into.checklist.map((item) => ({ ...item }));
+  const carry = (text: string, done: boolean) => {
+    const at = matchChecklistItem(checklist.map((item) => item.text), text);
+    if (at < 0) checklist.push({ text, done });
+    else if (done) checklist[at] = { ...checklist[at]!, done: true };
+  };
+  const mark = (text: string) => (/^\[[^\]]+\]/.test(text) ? text : `[${label}] ${text}`);
+  for (const item of from.checklist) carry(mark(item.text), item.done);
+  const own = from.checklist.map((item) => item.text);
+  for (const step of from.plan) {
+    if (matchItem(own, step) < 0) carry(mark(step), from.status === 'done');
+  }
+  if (from.checklist.length === 0 && from.plan.length === 0) carry(label, from.status === 'done');
+
+  let next: Task = { ...into, checklist };
+  for (const note of from.notes) {
+    next = appendNote(next, `From "${label}":\n\n${note.body}`, note.date);
+  }
+  next.notes = [...next.notes].sort((a, b) => a.date.localeCompare(b.date));
+
+  const material = [`Merged from "${label}" (${from.id}):`];
+  if (from.requirement !== '') material.push('', from.requirement);
+  if (from.plan.length > 0) material.push('', ...from.plan.map((step, i) => `${i + 1}. ${step}`));
+  if (from.references !== '') material.push('', from.references);
+  if (material.length > 1) next = appendReference(next, material.join('\n'));
+
+  next.sessions = [...new Set([...into.sessions, ...from.sessions])];
+  if (next.planned === undefined && from.planned !== undefined) next.planned = from.planned;
+  return next;
 }

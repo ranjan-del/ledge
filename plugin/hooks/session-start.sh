@@ -74,8 +74,10 @@ standing_rules() {
   echo "- When you make or change a plan, run \`ledge plan <id> \"step\" \"step\" ...\` with every step."
   echo "- When a checklist item is done, run \`ledge tick <id> <n>\`; new work: \`ledge todo <id> \"item\"\`."
   echo "- For a decision or a dead end, run \`ledge note <id> \"...\"\` when it happens, with why."
-  echo "- If this is a new goal with no task, run \`ledge add \"title\" --repo \"\$PWD\"\`, then"
-  echo "  \`ledge start <id>\`."
+  echo "- A step, batch, sub-goal or follow-up of the task above is NOT a new task: add it with"
+  echo "  \`ledge todo <id> \"[sub-goal] item\"\`. Never \`ledge add\` while a task is shown above."
+  echo "- Only for a new goal with no task at all, run \`ledge add \"title\" --repo \"\$PWD\"\`, then"
+  echo "  \`ledge start <id>\`. Duplicates already made: \`ledge merge <keep> <dup>... --yes\`."
   echo "- Asked to remember something this week: \`ledge week add \"text\" [--day mon]\`. Never add week items unasked."
   echo "- Ledge also reads this session in the background, so a missed step is caught later."
 }
