@@ -93,6 +93,12 @@ export interface CapturePromptInput {
   candidates: Task[];
   /** The task this session is already linked to, if any. */
   linkedTaskId?: string;
+  /**
+   * Every other open task, from any folder, shown in one line each. Work in `~/code` on a
+   * project whose task lives in `~/AI/project` is still that project's work, and a model that
+   * is never shown the task cannot know it exists.
+   */
+  otherTasks?: Task[];
   /** The folder the session runs in. */
   cwd: string;
   /** The person's calendar day, `YYYY-MM-DD`, which a new note will be filed under. */
@@ -123,6 +129,55 @@ export function foldIntoTask(result: CaptureResult, taskId: string): CaptureResu
   delete folded.plan;
   delete folded.phase;
   return folded;
+}
+
+/**
+ * The second look before a task is made. The capture prompt is long and mostly about the
+ * session, and a model reading it often misses that the "new" goal is a part of a task listed
+ * forty lines up: the same phone, the same project in another folder, the next phase. So when
+ * an answer asks for a new task, this one narrow question is asked on its own, with only the
+ * proposed task and the open tasks in view. Related work belongs in the task it relates to.
+ */
+export function buildRelatedPrompt(proposed: { title: string; requirement: string }, open: readonly Task[]): string {
+  const lines = open.map((task) => {
+    const first = task.requirement.split('\n').find((l) => l.trim() !== '');
+    return `- ${task.id} | ${clip(task.title, 90)} | ${task.repo ?? '-'} | ${first ? clip(first, 200) : '-'}`;
+  });
+  return [
+    'Someone is about to create a new task in their task list. Decide whether it should instead',
+    'go inside a task that is already open. Answer with one JSON object and nothing else.',
+    '',
+    'It belongs in an open task when it is the same goal, a part, step, phase, batch or',
+    'follow-up of it, or about the same project, product, repository, device or topic, even when',
+    'the wording is completely different. Answer null only when no open task covers that subject.',
+    '',
+    `PROPOSED TASK: ${clip(proposed.title, 120)}`,
+    `requirement: ${proposed.requirement === '' ? '(none)' : clip(proposed.requirement, 600)}`,
+    '',
+    '=== OPEN TASKS (id | title | repo | requirement) ===',
+    ...(lines.length === 0 ? ['(none)'] : lines),
+    '=== END OPEN TASKS ===',
+    '',
+    'The JSON shape: {"taskId": "<open task id>" | null, "why": "one short sentence"}',
+    '',
+  ].join('\n');
+}
+
+/**
+ * Reads the second look's answer: an open task's id, null for "really new", or an error when
+ * the answer cannot be trusted either way, in which case no task is made this time.
+ */
+export function parseRelatedAnswer(
+  text: string,
+  openIds: readonly string[],
+): { taskId: string | null; error?: undefined } | { taskId?: undefined; error: string } {
+  const data = extractJsonObject(text);
+  if (!data) return { error: 'the second look held no JSON object' };
+  if (data.taskId === null || data.taskId === undefined || data.taskId === '') return { taskId: null };
+  if (typeof data.taskId !== 'string') return { error: 'the second look gave a taskId that is not a string' };
+  const id = data.taskId.trim();
+  if (!openIds.includes(id)) return { error: `the second look named ${JSON.stringify(id)}, which is not open` };
+  return { taskId: id };
 }
 
 const TITLE_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'to', 'of', 'for', 'in', 'on', 'with', 'by']);
@@ -180,6 +235,10 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     ...(i === 0 ? [] : ['']),
     ...renderCandidate(task, input),
   ]);
+  const others = (input.otherTasks ?? []).map((task) => {
+    const first = task.requirement.split('\n').find((l) => l.trim() !== '');
+    return `- ${task.id} | ${clip(task.title, 90)} | ${task.repo ?? '-'} | ${first ? clip(first, 140) : '-'}`;
+  });
   const linked = input.linkedTaskId
     ? [
         `   This session is already linked to ${input.linkedTaskId}, so never fill newTask: a`,
@@ -193,10 +252,11 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     '',
     'Rules, most important first:',
     '1. Never invent work. Only report what the digest shows was asked, said, run or edited.',
-    '2. Attribute the session to an existing candidate task when the work is the same goal,',
-    '   even if the wording differs. Set taskId to its id.',
+    '2. Attribute the session to an existing task when the work is the same goal, continues it,',
+    '   or is part of it, even if the wording differs or the session runs in another folder.',
+    '   Check the CANDIDATE TASKS first, then every line of OTHER OPEN TASKS. Set taskId to its id.',
     '3. Set taskId to null and fill newTask only when the work is a clearly different goal from',
-    '   every candidate. If the session was only chat or setup with no real goal, set taskId to',
+    '   every task in both lists. If the session was only chat or setup with no real goal, set taskId to',
     '   null and leave newTask out. A step, sub-goal, batch or follow-up of a candidate\'s goal',
     '   is never a different goal: it goes in that candidate\'s checklistAdd.',
     ...linked,
@@ -223,6 +283,10 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     '=== CANDIDATE TASKS ===',
     ...(tasks.length === 0 ? ['(none: no task is recorded for this folder)'] : tasks),
     '=== END CANDIDATE TASKS ===',
+    '',
+    '=== OTHER OPEN TASKS (id | title | repo | requirement) ===',
+    ...(others.length === 0 ? ['(none)'] : others),
+    '=== END OTHER OPEN TASKS ===',
     '',
     '=== SESSION DIGEST ===',
     input.digest,
