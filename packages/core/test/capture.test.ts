@@ -12,6 +12,7 @@ import {
   SessionStore,
   TaskStore,
   buildCapturePrompt,
+  buildRelatedPrompt,
   captureDue,
   checkoutPaths,
   foldIntoTask,
@@ -19,6 +20,7 @@ import {
   matchItem,
   noteKey,
   parseCaptureResult,
+  parseRelatedAnswer,
   runCapture,
   similarTitle,
   trackSession,
@@ -53,6 +55,23 @@ function answering(answer: unknown): FakeProvider {
     available: async () => true,
     ask: async (prompt: string) => {
       provider.prompts.push(prompt);
+      return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), provider: 'test-fake' };
+    },
+  };
+  return provider;
+}
+
+/** Answers each call with the next item; the last one repeats. */
+function answeringInTurn(...answers: unknown[]): FakeProvider {
+  const provider: FakeProvider = {
+    name: 'test-fake',
+    model: 'haiku',
+    prompts: [],
+    available: async () => true,
+    ask: async (prompt: string) => {
+      provider.prompts.push(prompt);
+      const answer = answers[Math.min(provider.prompts.length - 1, answers.length - 1)];
+      if (answer instanceof Error) throw answer;
       return { text: typeof answer === 'string' ? answer : JSON.stringify(answer), provider: 'test-fake' };
     },
   };
@@ -487,6 +506,77 @@ describe('one piece of work, one task', () => {
     assert.match(outcome.reason, /folded into a similar task/);
     assert.equal(store.list().length, before);
     assert.deepEqual(store.get(other.id).checklist.map((item) => item.text), ['[Release banner watch] Write version.json']);
+  });
+
+  test('a session in another folder can be attributed to an open task listed from anywhere', async () => {
+    const home = freshHome();
+    const { cwd, transcript } = sessionFolder(home);
+    const store = new TaskStore(home);
+    const far = store.add({ title: 'RagFabric', repo: join(home, 'AI', 'ragfabric'), requirement: 'Self hosted retrieval platform.' });
+    const before = store.list().length;
+    const provider = answering({
+      taskId: far.id,
+      checklistAdd: ['[Phase 7] Route sub-questions to graph search'],
+      session: { title: 'Phase 7 routing', summary: '' },
+    });
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.status, 'captured', outcome.reason);
+    assert.equal(outcome.taskId, far.id);
+    assert.equal(store.list().length, before, 'no task was made');
+    assert.match(provider.prompts[0]!, /\n- ragfabric \| RagFabric \| \S+ragfabric \| Self hosted retrieval platform\.\n/);
+    assert.match(provider.prompts[0]!, /then every line of OTHER OPEN TASKS/);
+    assert.deepEqual(store.get(far.id).checklist.map((i) => i.text), ['[Phase 7] Route sub-questions to graph search']);
+  });
+
+  test('parseRelatedAnswer takes an open id or null and refuses anything else', () => {
+    assert.deepEqual(parseRelatedAnswer('{"taskId": "phone", "why": "same phone"}', ['phone']), { taskId: 'phone' });
+    assert.deepEqual(parseRelatedAnswer('{"taskId": null}', ['phone']), { taskId: null });
+    assert.match(parseRelatedAnswer('{"taskId": "made-up"}', ['phone']).error!, /not open/);
+    assert.match(parseRelatedAnswer('no json', ['phone']).error!, /no JSON/);
+    const prompt = buildRelatedPrompt({ title: 'Realme voice control', requirement: 'Voice Access.' }, []);
+    assert.match(prompt, /same project, product, repository, device or topic/);
+    assert.doesNotMatch(prompt, /\u2014|\u2013/);
+  });
+
+  test('a new goal about the subject of an open task goes into it on a second look', async () => {
+    const home = freshHome();
+    const { cwd, transcript } = sessionFolder(home);
+    const store = new TaskStore(home);
+    const phone = store.add({ title: 'Diagnose Android phone hardware', repo: join(home, 'x'), requirement: 'Realme RMX3741 overheating.' });
+    const before = store.list().length;
+    const provider = answeringInTurn(
+      {
+        taskId: null,
+        newTask: { title: 'Realme RMX3741: voice control', requirement: 'Voice Access on the realme.' },
+        checklistAdd: ['Turn on Voice Access'],
+        session: { title: 'Voice control', summary: '' },
+      },
+      { taskId: phone.id, why: 'same phone' },
+    );
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.status, 'captured', outcome.reason);
+    assert.equal(outcome.taskId, phone.id);
+    assert.match(outcome.reason, /folded into a related task on a second look/);
+    assert.equal(store.list().length, before);
+    assert.deepEqual(store.get(phone.id).checklist.map((i) => i.text), ['[Realme RMX3741: voice control] Turn on Voice Access']);
+    assert.match(provider.prompts[1]!, /PROPOSED TASK: Realme RMX3741: voice control/);
+    assert.match(provider.prompts[1]!, /- diagnose-android-phone-hardware \| Diagnose Android phone hardware/);
+  });
+
+  test('a second look that fails makes no task and writes nothing', async () => {
+    const home = freshHome();
+    const { cwd, transcript } = sessionFolder(home);
+    const store = new TaskStore(home);
+    const before = store.list().map((t) => t.id);
+    const provider = answeringInTurn(
+      { taskId: null, newTask: { title: 'Brand new goal', requirement: '' }, session: { title: 'New', summary: '' } },
+      new Error('the model is down'),
+    );
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.status, 'failed');
+    assert.match(outcome.reason, /no task made, second look failed: the model is down/);
+    assert.deepEqual(store.list().map((t) => t.id), before);
+    assert.equal(new SessionStore(home).get(SESSION), undefined, 'the next capture asks again');
   });
 
   test('a session in a linked worktree sees the tasks of the main checkout', async () => {

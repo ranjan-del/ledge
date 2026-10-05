@@ -10,7 +10,7 @@ export interface HelpEntry {
 export const COMMANDS: Record<string, HelpEntry> = {
   list: { usage: 'ledge [list] [--json]', summary: 'Print Current, Backlog and Pending' },
   add: {
-    usage: 'ledge add "title" [--repo path] [--backlog] [--json]',
+    usage: 'ledge add "title" [--repo path] [--backlog] [--force] [--json]',
     summary: 'Create a task file',
   },
   start: { usage: 'ledge start <id> [--json]', summary: 'Set status current, order 1' },
@@ -135,7 +135,8 @@ export function renderHelp(): string {
     '  --transcript With capture and track: the session transcript, a .jsonl file',
     '  --cwd dir    With capture and track: the folder the session runs in (default: here)',
     '  --final      With capture: skip the debounce, as compaction and session end do',
-    '  --force      With capture: run even when there is nothing new to read',
+    '  --force      With capture: run even when there is nothing new to read; with add: create',
+    '               it even though an open task reads like it',
     '  --ended      With track: mark the session ended',
     '  --task id    With sessions: only that task\'s sessions; with week add: link the item',
     '  --day d      With week add and move: YYYY-MM-DD, today, tomorrow, mon to sun, anytime',
