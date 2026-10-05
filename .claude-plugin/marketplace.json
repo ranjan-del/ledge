@@ -13,7 +13,7 @@
       "name": "ledge",
       "source": "./plugin",
       "description": "The /ledge command plus SessionStart, Stop and PreCompact hooks",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "Ranjan G",
         "url": "https://github.com/ranjan-del"
