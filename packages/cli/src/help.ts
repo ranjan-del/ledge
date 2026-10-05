@@ -20,6 +20,10 @@ export const COMMANDS: Record<string, HelpEntry> = {
     usage: 'ledge delete <id> --yes [--json]',
     summary: 'Destroy a task and its file, no undo',
   },
+  merge: {
+    usage: 'ledge merge <into> <from> [<from>...] --yes [--json]',
+    summary: 'Fold duplicate or sub-tasks into one task, checklist marked by title',
+  },
   current: {
     usage: 'ledge current [--repo path] [--json|--context]',
     summary: 'Print the current task whose repo matches',

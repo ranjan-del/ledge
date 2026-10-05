@@ -46,6 +46,7 @@ export {
   plannedFor,
   appendNote,
   appendReference,
+  mergeTask,
   setPlan,
 } from './planning.ts';
 export { buildResumePrompt } from './prompt.ts';
@@ -126,13 +127,16 @@ export {
   buildCapturePrompt,
   captureDue,
   extractJsonObject,
+  foldIntoTask,
+  matchChecklistItem,
   matchItem,
   parseCaptureResult,
   samePlan,
+  similarTitle,
 } from './capture.ts';
 export { BRIEF_MAX_LINES, buildBrief, firstSentences } from './brief.ts';
-export type { CaptureOptions, CaptureOutcome, GitLogReader } from './capture-node.ts';
-export { gitLogBetween, logCapture, mergeInsights, runCapture, trackSession } from './capture-node.ts';
+export type { CaptureOptions, CaptureOutcome, CheckoutPaths, GitLogReader } from './capture-node.ts';
+export { checkoutPaths, gitLogBetween, logCapture, mergeInsights, runCapture, trackSession } from './capture-node.ts';
 export type { SummaryItem, SummariseParse } from './summarise.ts';
 export {
   SUMMARISE_MAX_CHARS,

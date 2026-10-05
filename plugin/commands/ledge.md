@@ -112,6 +112,7 @@ Rules that keep the file valid:
 | `ledge start <id>` | Set status current, order 1, shift others down |
 | `ledge park <id> "reason"` | Set status backlog and record the reason |
 | `ledge done <id>` | Set status done and move the file to archive |
+| `ledge merge <keep> <dup>... --yes` | Fold duplicates or sub-tasks into one task |
 | `ledge current --repo "$PWD" --json` | The task for this folder as JSON |
 | `ledge open <id>` | Print the task file path |
 | `ledge todo <id> "text"` | Append an unchecked checklist item |
@@ -227,10 +228,14 @@ item's 1-based position. Add new unchecked items with `ledge todo <id> "item"` w
 reveals extra steps. Find the task with `ledge current --repo "$PWD" --json` if you do not
 already know its id from the session start context.
 
-**A new goal gets its own task.** If the work the person asks for is a different goal from
-the current task, run `ledge add "title" --repo "$PWD"`, then `ledge start <id>`, then plan
-it, before you edit code for it. Do not fold unrelated work into the task that happens to
-be current.
+**A new goal gets its own task; a part of one does not.** A step, batch, sub-goal or
+follow-up of the current task (the next round of UI fixes, a redesign of one page, the
+release of the thing the task builds) is not a new task: add it to the current task with
+`ledge todo <id> "[sub-goal] item"`, one item per step, so it stays inside its parent. Only
+when the work is a genuinely different goal, run `ledge add "title" --repo "$PWD"`, then
+`ledge start <id>`, then plan it, before you edit code for it. Do not fold unrelated work
+into the task that happens to be current. If duplicates already exist, fold them into the
+task that owns the work with `ledge merge <keep> <dup>... --yes`.
 
 **Write a plan before you edit code.** Before your first file edit in a session, check
 the current task's `plan` field. If it is empty, decide the ordered steps and run

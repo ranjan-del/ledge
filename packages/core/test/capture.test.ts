@@ -3,7 +3,8 @@
 // is a stand-in so no test depends on a repository.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -12,11 +13,14 @@ import {
   TaskStore,
   buildCapturePrompt,
   captureDue,
+  checkoutPaths,
+  foldIntoTask,
   isoDay,
   matchItem,
   noteKey,
   parseCaptureResult,
   runCapture,
+  similarTitle,
   trackSession,
 } from '../src/index.ts';
 import type { Provider, Task } from '../src/index.ts';
@@ -391,6 +395,129 @@ describe('runCapture', () => {
     });
     assert.equal(outcome.status, 'skipped');
     assert.match(outcome.reason, /still running/);
+  });
+});
+
+describe('one piece of work, one task', () => {
+  const asked = (over: Record<string, unknown> = {}) =>
+    parseCaptureResult(
+      JSON.stringify({
+        taskId: null,
+        newTask: { title: 'Student portal redesign', requirement: 'Redo the portal.' },
+        plan: ['Hero band', 'Gallery'],
+        checklistAdd: ['Mobile layout'],
+        session: { title: 'Portal', summary: '' },
+        phase: 'Hero band',
+        ...over,
+      }),
+      [],
+    ).result!;
+
+  test('foldIntoTask turns a new task into marked checklist items and drops the plan', () => {
+    const folded = foldIntoTask(asked(), 'unlab-web');
+    assert.equal(folded.taskId, 'unlab-web');
+    assert.equal(folded.newTask, undefined);
+    assert.equal(folded.plan, undefined);
+    assert.equal(folded.phase, undefined);
+    assert.deepEqual(folded.checklistAdd, [
+      '[Student portal redesign] Hero band',
+      '[Student portal redesign] Gallery',
+      '[Student portal redesign] Mobile layout',
+    ]);
+  });
+
+  test('foldIntoTask with nothing to add still records the sub-goal itself', () => {
+    const folded = foldIntoTask(asked({ plan: undefined, checklistAdd: [] }), 'unlab-web');
+    assert.deepEqual(folded.checklistAdd, ['Student portal redesign']);
+  });
+
+  test('similarTitle sees reworded titles of one goal, not different goals', () => {
+    const titles = [
+      'Learn LangChain: fundamentals',
+      'unLab Web: student portal UI redesign and missing features',
+    ];
+    assert.equal(similarTitle(titles, 'unLab student portal: redesign, features, dynamic dashboard'), 1);
+    assert.equal(similarTitle(titles, 'Learn LangGraph: fundamentals and agent building'), -1);
+    assert.equal(similarTitle(titles, 'Upload visit-tracker iOS build'), -1);
+  });
+
+  test('a linked session that asks for a new task adds to its own task instead', async () => {
+    const home = freshHome();
+    const { cwd, transcript } = sessionFolder(home);
+    const task = bannerTask(home, cwd);
+    const store = new TaskStore(home);
+    store.link(task.id, SESSION);
+    const before = store.list().length;
+    const provider = answering({
+      taskId: null,
+      newTask: { title: 'Idle reload', requirement: 'Reload when idle.' },
+      plan: ['Detect idle', 'Reload'],
+      checklistAdd: [],
+      session: { title: 'Idle reload', summary: '' },
+    });
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.status, 'captured', outcome.reason);
+    assert.equal(outcome.created, undefined);
+    assert.equal(outcome.taskId, task.id);
+    assert.match(outcome.reason, /folded into the linked task/);
+    assert.equal(store.list().length, before, 'no task was made');
+    const after = store.get(task.id);
+    assert.deepEqual(after.plan, task.plan, 'the task keeps its own plan');
+    assert.deepEqual(
+      after.checklist.slice(-2).map((item) => item.text),
+      ['[Idle reload] Detect idle', '[Idle reload] Reload'],
+    );
+    assert.match(provider.prompts[0]!, /already linked to release-watch-banner, so never fill newTask/);
+  });
+
+  test('an unlinked session whose new goal reads like an open task adds to that task', async () => {
+    const home = freshHome();
+    const { cwd, transcript } = sessionFolder(home);
+    const store = new TaskStore(home);
+    const other = store.add({ title: 'Release watch banner', repo: join(home, 'elsewhere') });
+    const before = store.list().length;
+    const provider = answering({
+      taskId: null,
+      newTask: { title: 'Release banner watch', requirement: '' },
+      checklistAdd: ['Write version.json'],
+      session: { title: 'Banner', summary: '' },
+    });
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.taskId, other.id);
+    assert.match(outcome.reason, /folded into a similar task/);
+    assert.equal(store.list().length, before);
+    assert.deepEqual(store.get(other.id).checklist.map((item) => item.text), ['[Release banner watch] Write version.json']);
+  });
+
+  test('a session in a linked worktree sees the tasks of the main checkout', async () => {
+    const home = realpathSync(freshHome());
+    const main = join(home, 'platform');
+    mkdirSync(join(main, 'apps', 'web'), { recursive: true });
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: main, stdio: 'ignore' });
+    git('init', '-q');
+    writeFileSync(join(main, 'apps', 'web', 'a.txt'), 'a');
+    git('add', '.');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'init');
+    const tree = join(home, 'wt', 'feature');
+    git('worktree', 'add', '-q', '-b', 'feature', tree);
+    const cwd = join(tree, 'apps', 'web');
+    assert.deepEqual(checkoutPaths(cwd), { top: tree, main: join(main, 'apps', 'web') });
+    assert.deepEqual(checkoutPaths(join(main, 'apps')), { top: main });
+
+    const store = new TaskStore(home);
+    const web = store.add({ title: 'Web consolidation', repo: join(main, 'apps', 'web') });
+    const transcript = join(home, 'transcript.jsonl');
+    writeFileSync(transcript, readFileSync(fixture, 'utf8').replaceAll('/home/user/code/demo-app', cwd));
+    const provider = answering({ taskId: web.id, checklistAdd: ['Portfolio page'], session: { title: 'Portfolio', summary: '' } });
+    const outcome = await runCapture({ sessionId: SESSION, transcriptPath: transcript, cwd, provider, home, gitLog: noGit });
+    assert.equal(outcome.status, 'captured', outcome.reason);
+    assert.equal(outcome.taskId, web.id);
+    assert.match(provider.prompts[0]!, /TASK id: web-consolidation/);
+
+    // From the root of the main checkout, a task for an app inside it is offered too.
+    const fromRoot = answering({ taskId: web.id, session: { title: 'Root', summary: '' } });
+    const second = await runCapture({ sessionId: 'root-session', transcriptPath: transcript, cwd: main, provider: fromRoot, home, gitLog: noGit });
+    assert.equal(second.taskId, web.id, second.reason);
   });
 });
 

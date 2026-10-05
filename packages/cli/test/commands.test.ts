@@ -881,3 +881,40 @@ describe('app', () => {
     assert.match(r.stdout, /Start the desktop panel/);
   });
 });
+
+describe('merge', () => {
+  test('without --yes it says what it would fold and changes nothing', async () => {
+    await run(['add', 'Portal consolidation']);
+    await run(['add', 'Portal redesign']);
+    const refused = await run(['merge', 'portal-consolidation', 'portal-redesign']);
+    assert.equal(refused.code, 1);
+    assert.match(refused.stdout, /would fold 1 task into "Portal consolidation"/);
+    assert.match(refused.stdout, /--yes/);
+    assert.deepEqual((await desk()).current.map((t) => t.id).filter((id) => id.startsWith('portal')), ['portal-consolidation', 'portal-redesign']);
+  });
+
+  test('--yes folds the children in, reassigns their sessions and removes them', { skip: !onDisk }, async () => {
+    await run(['add', 'Portal consolidation']);
+    await run(['add', 'Portal redesign']);
+    await run(['todo', 'portal-redesign', 'Hero band']);
+    const home = process.env.LEDGE_HOME ?? '';
+    mkdirSync(join(home, 'sessions'), { recursive: true });
+    const record = { version: 1, id: 's1', taskId: 'portal-redesign', started: '2026-10-05T10:00:00+05:30', lastActivity: '2026-10-05T10:00:00+05:30', filesChanged: [], commits: [], todosTicked: [], todosAdded: [] };
+    writeFileSync(join(home, 'sessions', 's1.json'), JSON.stringify(record));
+
+    const done = await run(['merge', 'portal-consolidation', 'portal-redesign', '--yes', '--json']);
+    assert.equal(done.code, 0, done.stderr);
+    const out = JSON.parse(done.stdout);
+    assert.deepEqual(out.merged, ['portal-redesign']);
+    assert.equal(out.sessionsReassigned, 1);
+    assert.deepEqual(out.task.checklist, [{ text: '[Portal redesign] Hero band', done: false }]);
+    assert.equal(JSON.parse(readFileSync(join(home, 'sessions', 's1.json'), 'utf8')).taskId, 'portal-consolidation');
+    assert.ok(!(await desk()).current.some((t) => t.id === 'portal-redesign'));
+  });
+
+  test('refuses an unknown id and a task merged into itself', async () => {
+    await run(['add', 'Portal consolidation']);
+    assert.equal((await run(['merge', 'portal-consolidation', 'nope', '--yes'])).code, 2);
+    assert.equal((await run(['merge', 'portal-consolidation', 'portal-consolidation', '--yes'])).code, 1);
+  });
+});

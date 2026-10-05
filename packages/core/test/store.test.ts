@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync,
@@ -322,4 +322,50 @@ test('remove closes the order gap it leaves behind', () => {
 test('remove refuses an id that does not exist', () => {
   const store = freshStore();
   assert.throws(() => store.remove('never-existed'));
+});
+
+describe('merge', () => {
+  test('folds children into the parent, marks their items, keeps notes by day, deletes them', async () => {
+    const { mkdtempSync, existsSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = mkdtempSync(join(tmpdir(), 'ledge-merge-'));
+    try {
+      const store = new TaskStore(home);
+      const parent = store.add({ title: 'unLab Web consolidation', requirement: 'One app.' });
+      store.setPlan(parent.id, ['Parity', 'Ship']);
+      store.addTodo(parent.id, '[Student portal] Hero band');
+      const child = store.add({ title: 'Student portal', requirement: 'Redesign the portal.' });
+      store.addTodo(child.id, 'Hero band');
+      store.addTodo(child.id, 'Gallery');
+      store.setTodo(child.id, 0, true);
+      store.setPlan(child.id, ['Gallery', 'Mobile layout']);
+      store.addNote(child.id, 'Chose a two-column layout.', '2026-10-05');
+      store.link(child.id, 's-child');
+      const empty = store.add({ title: 'Login surface parity' });
+
+      const { task, merged } = store.merge(parent.id, [child.id, empty.id], '2026-10-06');
+
+      assert.deepEqual(merged.map((t) => t.id), [child.id, empty.id]);
+      assert.deepEqual(task.checklist, [
+        { text: '[Student portal] Hero band', done: true },
+        { text: '[Student portal] Gallery', done: false },
+        { text: '[Student portal] Mobile layout', done: false },
+        { text: 'Login surface parity', done: false },
+      ]);
+      assert.deepEqual(task.plan, ['Parity', 'Ship'], 'the parent keeps its own plan');
+      assert.equal(task.requirement, 'One app.');
+      assert.equal(task.notes[0]!.date, '2026-10-05');
+      assert.match(task.notes[0]!.body, /From "Student portal":\n\nChose a two-column layout\./);
+      assert.match(task.notes.at(-1)!.body, /Merged in "Student portal"/);
+      assert.match(task.references, /Merged from "Student portal" \(student-portal\):\n\nRedesign the portal\./);
+      assert.deepEqual(task.sessions, ['s-child']);
+      assert.equal(existsSync(child.file), false);
+      assert.deepEqual(store.list().map((t) => t.id), [parent.id]);
+      assert.throws(() => store.merge(parent.id, [parent.id]), /into itself/);
+      assert.throws(() => store.merge(parent.id, ['no-such-task']), /not found/i);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
