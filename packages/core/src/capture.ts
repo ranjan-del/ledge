@@ -104,6 +104,54 @@ function clip(text: string, max: number): string {
   return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
 }
 
+/**
+ * Turns an answer that asks for a new task into one that adds to an existing task instead. This
+ * is the rule that keeps one piece of work in one task: a session already linked to a task, or
+ * a new goal whose title is close to a task that is already open, never makes a second task.
+ * What the model would have put in the new task lands in the existing one's checklist, each
+ * line marked with the new goal's title, the same `[title] item` shape `ledge merge` writes. The
+ * plan is dropped, because it described the sub-goal and must not replace the task's own plan.
+ */
+export function foldIntoTask(result: CaptureResult, taskId: string): CaptureResult {
+  if (result.taskId !== null || !result.newTask) return result;
+  const label = result.newTask.title;
+  const steps = result.plan ?? [];
+  const items = [...steps, ...result.checklistAdd];
+  const checklistAdd = items.length === 0 ? [label] : items.map((text) => `[${label}] ${text}`);
+  const folded: CaptureResult = { ...result, taskId, checklistAdd };
+  delete folded.newTask;
+  delete folded.plan;
+  delete folded.phase;
+  return folded;
+}
+
+const TITLE_STOPWORDS = new Set(['a', 'an', 'and', 'the', 'to', 'of', 'for', 'in', 'on', 'with', 'by']);
+
+/**
+ * The index of the title that names the same work as `title`, or -1. Looser than matchItem,
+ * because task titles are short and the model rewords them every time ("student portal UI
+ * redesign and missing features" against "student portal: redesign, features, dynamic
+ * dashboard"): small words are ignored and half the remaining words in common is enough.
+ */
+export function similarTitle(titles: readonly string[], title: string): number {
+  const key = (text: string) => new Set(words(text).filter((word) => !TITLE_STOPWORDS.has(word)));
+  const target = key(title);
+  if (target.size === 0) return -1;
+  let best = -1;
+  let bestScore = 0;
+  titles.forEach((candidate, index) => {
+    const other = key(candidate);
+    if (other.size === 0) return;
+    const shared = [...other].filter((word) => target.has(word)).length;
+    const score = shared / new Set([...other, ...target]).size;
+    if (score > bestScore) {
+      best = index;
+      bestScore = score;
+    }
+  });
+  return bestScore >= 0.5 ? best : -1;
+}
+
 function renderCandidate(task: Task, input: CapturePromptInput): string[] {
   const lines = [`TASK id: ${task.id}${task.id === input.linkedTaskId ? ' (this session is already linked to it)' : ''}`];
   lines.push(`title: ${task.title}`);
@@ -132,6 +180,12 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     ...(i === 0 ? [] : ['']),
     ...renderCandidate(task, input),
   ]);
+  const linked = input.linkedTaskId
+    ? [
+        `   This session is already linked to ${input.linkedTaskId}, so never fill newTask: a`,
+        '   new sub-goal, step or follow-up in this session is that task\'s checklistAdd.',
+      ]
+    : [];
   return [
     'You keep a person\'s task records current from what happened in one Claude Code session.',
     'You have no tools. Everything you know is the candidate tasks and the session digest below.',
@@ -143,7 +197,9 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     '   even if the wording differs. Set taskId to its id.',
     '3. Set taskId to null and fill newTask only when the work is a clearly different goal from',
     '   every candidate. If the session was only chat or setup with no real goal, set taskId to',
-    '   null and leave newTask out.',
+    '   null and leave newTask out. A step, sub-goal, batch or follow-up of a candidate\'s goal',
+    '   is never a different goal: it goes in that candidate\'s checklistAdd.',
+    ...linked,
     '4. plan: include it only when the session made or changed a plan, and then give the whole',
     `   plan in order. Each step at most ${PLAN_STEP_MAX} characters; detail goes in the note.`,
     '5. checklistTick: exact texts of unticked checklist items of that task that the digest shows',
@@ -361,6 +417,25 @@ export function matchItem(items: readonly string[], text: string): number {
     }
   });
   return bestScore >= 0.6 ? best : -1;
+}
+
+const LABELLED = /^\[([^\]]+)\]\s*(.*)$/;
+
+/**
+ * Finds the checklist item `text` repeats, or -1, minding the `[sub-goal] item` marks that
+ * folding and merging write. Two items under one mark share those words, so they are compared
+ * on what follows the mark, and only with items under the same mark; unmarked text is compared
+ * with matchItem as before.
+ */
+export function matchChecklistItem(items: readonly string[], text: string): number {
+  const marked = LABELLED.exec(text);
+  if (!marked) return matchItem(items, text);
+  const label = marked[1]!.trim().toLowerCase();
+  const same = items
+    .map((item, index) => ({ hit: LABELLED.exec(item), index }))
+    .filter((entry) => entry.hit && entry.hit[1]!.trim().toLowerCase() === label);
+  const hit = matchItem(same.map((entry) => entry.hit![2]!), marked[2]!);
+  return hit < 0 ? -1 : same[hit]!.index;
 }
 
 /** True when two plans say the same steps in the same order, ignoring spacing and case. */
