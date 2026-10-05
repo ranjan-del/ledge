@@ -918,3 +918,22 @@ describe('merge', () => {
     assert.equal((await run(['merge', 'portal-consolidation', 'portal-consolidation', '--yes'])).code, 1);
   });
 });
+
+describe('add refuses a near-duplicate', () => {
+  test('names the open task that reads alike, and --force creates it anyway', async () => {
+    await run(['add', 'unLab student portal redesign']);
+    const refused = await run(['add', 'unLab Web: student portal UI redesign']);
+    assert.equal(refused.code, 1);
+    assert.match(refused.stdout, /already reads like this one: unlab-student-portal-redesign/);
+    assert.match(refused.stdout, /ledge todo unlab-student-portal-redesign "\[unLab Web: student portal UI redesign\] item"/);
+    assert.ok(!(await desk()).current.some((t) => t.id === 'unlab-web-student-portal-ui-redesign'));
+    const forced = await run(['add', 'unLab Web: student portal UI redesign', '--force']);
+    assert.equal(forced.code, 0, forced.stderr);
+    assert.ok((await desk()).current.some((t) => t.id === 'unlab-web-student-portal-ui-redesign'));
+  });
+
+  test('a different goal is added as before', async () => {
+    await run(['add', 'Learn LangChain fundamentals']);
+    assert.equal((await run(['add', 'Learn LangGraph agent building'])).code, 0);
+  });
+});

@@ -93,6 +93,12 @@ export interface CapturePromptInput {
   candidates: Task[];
   /** The task this session is already linked to, if any. */
   linkedTaskId?: string;
+  /**
+   * Every other open task, from any folder, shown in one line each. Work in `~/code` on a
+   * project whose task lives in `~/AI/project` is still that project's work, and a model that
+   * is never shown the task cannot know it exists.
+   */
+  otherTasks?: Task[];
   /** The folder the session runs in. */
   cwd: string;
   /** The person's calendar day, `YYYY-MM-DD`, which a new note will be filed under. */
@@ -180,6 +186,10 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     ...(i === 0 ? [] : ['']),
     ...renderCandidate(task, input),
   ]);
+  const others = (input.otherTasks ?? []).map((task) => {
+    const first = task.requirement.split('\n').find((l) => l.trim() !== '');
+    return `- ${task.id} | ${clip(task.title, 90)} | ${task.repo ?? '-'} | ${first ? clip(first, 140) : '-'}`;
+  });
   const linked = input.linkedTaskId
     ? [
         `   This session is already linked to ${input.linkedTaskId}, so never fill newTask: a`,
@@ -193,10 +203,11 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     '',
     'Rules, most important first:',
     '1. Never invent work. Only report what the digest shows was asked, said, run or edited.',
-    '2. Attribute the session to an existing candidate task when the work is the same goal,',
-    '   even if the wording differs. Set taskId to its id.',
+    '2. Attribute the session to an existing task when the work is the same goal, continues it,',
+    '   or is part of it, even if the wording differs or the session runs in another folder.',
+    '   Check the CANDIDATE TASKS first, then every line of OTHER OPEN TASKS. Set taskId to its id.',
     '3. Set taskId to null and fill newTask only when the work is a clearly different goal from',
-    '   every candidate. If the session was only chat or setup with no real goal, set taskId to',
+    '   every task in both lists. If the session was only chat or setup with no real goal, set taskId to',
     '   null and leave newTask out. A step, sub-goal, batch or follow-up of a candidate\'s goal',
     '   is never a different goal: it goes in that candidate\'s checklistAdd.',
     ...linked,
@@ -223,6 +234,10 @@ export function buildCapturePrompt(input: CapturePromptInput): string {
     '=== CANDIDATE TASKS ===',
     ...(tasks.length === 0 ? ['(none: no task is recorded for this folder)'] : tasks),
     '=== END CANDIDATE TASKS ===',
+    '',
+    '=== OTHER OPEN TASKS (id | title | repo | requirement) ===',
+    ...(others.length === 0 ? ['(none)'] : others),
+    '=== END OTHER OPEN TASKS ===',
     '',
     '=== SESSION DIGEST ===',
     input.digest,

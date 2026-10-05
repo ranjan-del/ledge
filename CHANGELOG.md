@@ -23,6 +23,11 @@ Release plan (see [ROADMAP.md](ROADMAP.md) for the work inside each phase):
   unlinked session whose new goal reads like an open task (`similarTitle`) adds to that task.
   Sessions in a linked git worktree are matched against the main checkout's tasks, and a
   session at a repo root is offered the tasks of folders inside it.
+- Capture shows the model every open task, one line each, not only the tasks for the
+  session's folder, and accepts any of them. A session in `~/code` on RagFabric work now
+  finds the RagFabric task in `~/AI/ragfabric` instead of making a new one.
+- `ledge add` refuses a title that reads like an open task, names that task and says how to
+  add the work to it; `--force` creates it anyway.
 - The session standing rules and `/ledge` now say a step, batch or sub-goal of the current
   task is a `ledge todo`, never a `ledge add`.
 
